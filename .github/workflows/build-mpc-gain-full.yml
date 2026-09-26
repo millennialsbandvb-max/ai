@@ -1,0 +1,26 @@
+name: Build MPC Full Gain Diagnostic
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+      - name: Build ARMv7 hard-float VST2
+        run: |
+          docker run --rm --platform linux/arm/v7 -v "$PWD":/w -w /w arm32v7/gcc:12 bash -euc '
+            gcc -std=gnu11 -Os -fPIC -shared -fvisibility=hidden src/mpc_gain_full.c -lm -Wl,--no-undefined -o MPC-Gain-Full.so
+            strip MPC-Gain-Full.so
+            file MPC-Gain-Full.so
+            readelf -h MPC-Gain-Full.so
+            readelf --dyn-syms -W MPC-Gain-Full.so | grep VSTPluginMain
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MPC-Gain-Full-armhf
+          path: MPC-Gain-Full.so
