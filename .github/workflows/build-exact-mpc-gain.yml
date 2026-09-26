@@ -1,0 +1,28 @@
+name: Build Exact MPC Gain PoC
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+      - name: Fetch upstream MPC VST2 framework
+        run: |
+          git clone --depth 1 https://github.com/sd88me/mpc-vst-plugins.git upstream
+      - name: Build exact upstream gain PoC for ARMv7
+        run: |
+          docker run --rm --platform linux/arm/v7 -v "$PWD":/w -w /w arm32v7/gcc:12 bash -euc '
+            gcc -std=gnu11 -O2 -fPIC -shared -fvisibility=hidden upstream/poc/gain.c -lm -Wl,--no-undefined -o MPC-Gain-PoC.so
+            strip MPC-Gain-PoC.so
+            file MPC-Gain-PoC.so
+            readelf --dyn-syms -W MPC-Gain-PoC.so | grep VSTPluginMain
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MPC-Gain-PoC-armhf
+          path: MPC-Gain-PoC.so
