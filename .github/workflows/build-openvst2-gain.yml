@@ -1,0 +1,25 @@
+name: Build MPC Open VST2 Test Gain
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+      - name: Build ARMv7 VST2 effect
+        run: |
+          docker run --rm --platform linux/arm/v7 -v "$PWD":/w -w /w arm32v7/gcc:12 bash -euc '
+            gcc -std=gnu11 -O2 -fPIC -shared -fvisibility=hidden src/openvst2_test_gain.c -lm -Wl,--no-undefined -o OpenVST2-Test-Gain.so
+            strip OpenVST2-Test-Gain.so
+            file OpenVST2-Test-Gain.so
+            readelf --dyn-syms -W OpenVST2-Test-Gain.so | grep VSTPluginMain
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OpenVST2-Test-Gain-armhf
+          path: OpenVST2-Test-Gain.so
