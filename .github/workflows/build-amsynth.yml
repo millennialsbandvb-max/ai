@@ -16,7 +16,7 @@ jobs:
           git clone --depth 1 --branch release-1.13.4 https://github.com/amsynth/amsynth.git amsynth
           docker run --rm --platform linux/arm/v7 -v "$PWD":/w -w /w/amsynth arm32v7/debian:bookworm bash -euc '
             apt-get update
-            DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential autoconf automake libtool gettext intltool pkg-config curl ca-certificates git
+            DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential autoconf autoconf-archive automake libtool gettext intltool pkg-config curl ca-certificates git
             ./autogen.sh
             ./configure --without-gui --without-alsa --without-jack --without-dssi
             make -j2
