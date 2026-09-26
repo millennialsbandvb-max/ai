@@ -1,0 +1,23 @@
+name: Build MPC VST dlopen Probe
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with: { platforms: arm }
+      - name: Build ARMv7 probe
+        run: |
+          docker run --rm --platform linux/arm/v7 -v "$PWD":/w -w /w arm32v7/gcc:12 bash -euc '
+            gcc -std=gnu11 -Os src/mpc_vst_dlopen_probe.c -ldl -o mpc-vst-dlopen-probe
+            strip mpc-vst-dlopen-probe
+            file mpc-vst-dlopen-probe
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mpc-vst-dlopen-probe-armhf
+          path: mpc-vst-dlopen-probe
