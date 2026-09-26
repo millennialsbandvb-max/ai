@@ -1,0 +1,19 @@
+name: Fetch Known Working MPC DX7 Release
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download released hardware-tested package
+        run: |
+          curl -L --fail -o DX7-Dexed-0.4.0-mpc-armv7.zip \
+            https://github.com/sd88me/mpc-vst-dx7/releases/download/dx7-v0.4.0/DX7-Dexed-0.4.0-mpc-armv7.zip
+          sha256sum DX7-Dexed-0.4.0-mpc-armv7.zip
+          unzip -l DX7-Dexed-0.4.0-mpc-armv7.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Known-Working-DX7-MPC-Release
+          path: DX7-Dexed-0.4.0-mpc-armv7.zip
