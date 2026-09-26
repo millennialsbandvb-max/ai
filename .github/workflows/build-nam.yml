@@ -1,0 +1,48 @@
+name: Build MPC NAM
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'src/**'
+      - '.github/workflows/build-nam.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm
+      - name: Fetch NAM Core
+        run: |
+          git clone https://github.com/sdatkinson/NeuralAmpModelerCore.git namcore
+          git -C namcore checkout 0b3d3c97b0859a3a8c92a8628c4dd89a25eb5842 || true
+          git -C namcore submodule update --init --recursive
+      - name: Build ARMv7 VST2 binary
+        run: |
+          mkdir -p build
+          docker run --rm --platform linux/arm/v7 -v "$PWD":/w -w /w arm32v7/gcc:12 bash -euc '
+            mapfile -t SRC < <(find namcore/NAM -type f \( -name "*.cpp" -o -name "*.c" \))
+            g++ -O2 -fPIC -shared -fvisibility=hidden -std=gnu++20 \
+              -I namcore \
+              -I namcore/Dependencies/eigen \
+              -I namcore/Dependencies/nlohmann \
+              -I namcore/Dependencies/AudioDSPTools/dsp \
+              src/nam_mpc_vst2.cpp "${SRC[@]}" \
+              -pthread -Wl,--no-undefined -o build/NAM.so
+            strip build/NAM.so
+            readelf -h build/NAM.so | grep -E "Class:|Machine:"
+            readelf --dyn-syms -W build/NAM.so | grep VSTPluginMain
+          '
+      - name: Package
+        run: |
+          mkdir -p package/NAM/Models
+          cp build/NAM.so package/NAM/NAM.so
+          printf '%s\n' 'MPC Live II Gen1 NAM VST2 test build' 'NAM model path: /sdcard/NAM/Models/test.nam' > package/NAM/INSTALL.txt
+          cd package && zip -r ../MPC-Live-II-NAM.zip NAM
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MPC-Live-II-NAM
+          path: MPC-Live-II-NAM.zip
+          if-no-files-found: error
