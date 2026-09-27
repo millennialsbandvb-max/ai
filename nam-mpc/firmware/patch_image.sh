@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# Make a USB-update firmware image that installs NAM MPC, from an official Akai MPC OS Gen1 update image.
-#   patch_image.sh <official MPC update .img> <output .img>
+# Make a USB-update firmware image that installs NAM MPC, from an MPC OS Gen1 update image (Akai's own, or a mod
+# such as Hakai built on it) in the device-tree format, e.g. MPC-3.9.1-Gen1-update.img.
+#   patch_image.sh <MPC update .img> <output .img>
 #   patch_image.sh --rootfs <rootfs.ext4>          only add NAM MPC to an extracted root filesystem (for tests)
-# Env: MPCIMG2 (TheKikGen's mpcimg2 image tool), BUILD (nam-mpc/build: NAM-MPC.so and skin/ from build.sh).
+# Env: BUILD (nam-mpc/build: NAM-MPC.so and skin/ from build.sh).
 # Nothing in the official image is changed except what NAM MPC adds:
 #   /usr/lib/nam-mpc/{NAM-MPC.so, nam-mpc-boot.sh, plugin_list.awk, plugin.xml}
 #   /usr/share/Akai/Content/Synths/NAM-MPC - VST - NAM MPC/   (its touchscreen page)
 #   /etc/systemd/system/nam-mpc.service (+ its multi-user.target.wants link)
-# Needs: e2fsprogs (debugfs, e2fsck), binutils (readelf, strings).
+# Needs: python3, xz, e2fsprogs (debugfs, e2fsck), binutils (readelf, strings), and upx when MPC is UPX-packed.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BUILD="${BUILD:-$(dirname "$HERE")/build}"
@@ -16,7 +17,7 @@ SKIN_NAME="NAM-MPC - VST - NAM MPC"
 SKIN="$BUILD/skin/$SKIN_NAME"
 die() { echo "error: $*" >&2; exit 1; }
 dbg() { debugfs -R "$1" "$ROOTFS" 2>/dev/null; }
-exists() { debugfs -R "stat \"$1\"" "$ROOTFS" 2>&1 | grep -q '^Inode:'; }
+exists() { grep -q '^Inode:' <<<"$(debugfs -R "stat \"$1\"" "$ROOTFS" 2>&1)"; }
 # resolve <path>: follow symlinks (absolute or relative) inside the image; prints the real path
 resolve() {
   local p="$1" i t
@@ -31,15 +32,21 @@ resolve() {
 
 check_rootfs() {
   echo "== checking the root filesystem"
-  file -b "$ROOTFS" | grep -q 'ext[234] filesystem' || die "rootfs isn't ext2/3/4 ($(file -b "$ROOTFS"))"
+  grep -q 'ext[234] filesystem' <<<"$(file -b "$ROOTFS")" || die "rootfs isn't ext2/3/4 ($(file -b "$ROOTFS"))"
   local tmp; tmp="$(mktemp -d)"
   exists /usr/bin/MPC || die "no /usr/bin/MPC: not an MPC OS image"
   dbg "dump /usr/bin/MPC $tmp/MPC" >/dev/null
+  grep -q 'ARM$' <<<"$(readelf -h "$tmp/MPC")" || die "MPC isn't a 32-bit ARM program: this is not a Gen1 image (use the Gen1 update)"
+  strings -n 4 "$tmp/MPC" > "$tmp/strings"
+  if grep -q 'UPX!' "$tmp/strings"; then   # Hakai ships MPC UPX-packed: look inside a copy
+    command -v upx >/dev/null || die "MPC is UPX-packed; install upx to check it"
+    upx -d -q "$tmp/MPC" >/dev/null || die "couldn't unpack MPC to check it"
+  fi
   strings -n 4 "$tmp/MPC" > "$tmp/strings"
   for s in KNOWNPLUGINS VSTPluginMain pluginList; do
     grep -qx "$s" "$tmp/strings" || grep -q "$s" "$tmp/strings" || die "MPC has no '$s': this firmware has no VST2 plugin host"
   done
-  readelf -h "$tmp/MPC" | grep -q 'ARM$' || die "MPC isn't a 32-bit ARM program: this is not a Gen1 image (use the Gen1 update)"
+  grep -q N4juce15VSTPluginFormatE "$tmp/strings" || die "MPC has no JUCE VST2 host"
   { exists /lib/systemd/system/acvs.service || exists /usr/lib/systemd/system/acvs.service || exists /etc/systemd/system/acvs.service; } ||
     die "no acvs.service (the unit that runs MPC)"
   exists /usr/share/Akai/Content/Synths || die "no /usr/share/Akai/Content/Synths"
@@ -96,9 +103,9 @@ inject() {
   cmp -s "$tmp/so" "$SO" || die "plugin read back differs"
   dbg "dump \"/usr/share/Akai/Content/Synths/$SKIN_NAME/Plugin Skins/TUI.json\" $tmp/tui" >/dev/null
   cmp -s "$tmp/tui" "$SKIN/Plugin Skins/TUI.json" || die "skin read back differs"
-  dbg "stat /etc/systemd/system/multi-user.target.wants/nam-mpc.service" | grep -q 'Fast link dest: "/etc/systemd/system/nam-mpc.service"' ||
+  grep -q 'Fast link dest: "/etc/systemd/system/nam-mpc.service"' <<<"$(dbg "stat /etc/systemd/system/multi-user.target.wants/nam-mpc.service")" ||
     die "service link missing"
-  dbg "stat /usr/lib/nam-mpc/nam-mpc-boot.sh" | grep -q 'Mode:  0755' || die "boot script isn't executable"
+  grep -q 'Mode:  0755' <<<"$(dbg "stat /usr/lib/nam-mpc/nam-mpc-boot.sh")" || die "boot script isn't executable"
   rm -rf "$tmp"
   echo "root filesystem OK"
 }
@@ -109,27 +116,30 @@ if [ "${1:-}" = --rootfs ]; then
   exit
 fi
 
-[ $# = 2 ] || die "usage: $0 <official MPC update .img> <output .img>"
+[ $# = 2 ] || die "usage: $0 <MPC update .img> <output .img>"
 IN="$1"; OUT="$2"
-MPCIMG2="${MPCIMG2:-mpcimg2}"
+FIT="python3 $HERE/mpcfit.py"
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/nam-fw.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
-echo "== official image"
-"$MPCIMG2" -i "$IN" | tee "$WORK/info.txt"
-grep -qi 'xz' "$WORK/info.txt" || die "unexpected image layout (no xz partition); this mpcimg2 may not support it"
+echo "== input image"
+$FIT info "$IN" | grep -v '^properties'
+echo "== unpacking the root filesystem"
+$FIT extract "$IN" "$WORK/rootfs.xz"
+grep -q 'CRC64' <<<"$(xz -lvv "$WORK/rootfs.xz")" || die "unexpected xz check type"
+xz -dc "$WORK/rootfs.xz" > "$WORK/rootfs.ext4"
+rm "$WORK/rootfs.xz"
 ROOTFS="$WORK/rootfs.ext4"
-"$MPCIMG2" -r "$IN" "$ROOTFS" >/dev/null
-[ -s "$ROOTFS" ] || die "rootfs extraction failed"
-cp "$ROOTFS" "$WORK/rootfs.orig"
 inject
 
-echo "== building the new image"
-"$MPCIMG2" -m "$IN" "$ROOTFS" "$OUT"
+echo "== building the new image (xz -6, one block, CRC64: the same settings as the original)"
+xz -6 -T1 -C crc64 -c "$ROOTFS" > "$WORK/new.xz"
+$FIT build "$IN" "$WORK/new.xz" "$OUT"
 echo "== checking the new image"
-"$MPCIMG2" -i "$OUT" > "$WORK/out-info.txt"
-"$MPCIMG2" -r "$OUT" "$WORK/roundtrip.ext4" >/dev/null
-cmp -s "$WORK/roundtrip.ext4" "$ROOTFS" || die "the new image doesn't unpack to the patched filesystem"
-diff <(grep -vi 'size\|hash\|offset' "$WORK/info.txt") <(grep -vi 'size\|hash\|offset' "$WORK/out-info.txt") ||
-  die "the new image's header differs from the official one beyond size and hash"
+$FIT info "$OUT" | grep -v '^properties' > "$WORK/out-info.txt"
+diff <($FIT info "$IN" | grep -vE 'rootfs (data|sha1)') <($FIT info "$OUT" | grep -vE 'rootfs (data|sha1)') ||
+  die "the new image's header differs from the input's beyond the rootfs"
+$FIT extract "$OUT" "$WORK/check.xz"
+xz -t "$WORK/check.xz" || die "the new rootfs doesn't decompress"
+xz -dc "$WORK/check.xz" | cmp -s - "$ROOTFS" || die "the new image doesn't unpack to the patched filesystem"
 echo "new image: $OUT"
 sha256sum "$OUT"
