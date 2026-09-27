@@ -1,8 +1,8 @@
-name: Build MPC Live II NAM
+name: Build NAM MPC
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    paths: [ 'nam-mpc/**', '*.zip', '.github/workflows/build-nam.yml' ]
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -11,41 +11,24 @@ jobs:
       - uses: docker/setup-qemu-action@v3
         with:
           platforms: arm
-      - name: Fetch NAM Core and dependencies
+      - name: Unpack sources
+        run: nam-mpc/build.sh deps
+      - name: Offline test (x86, AddressSanitizer)
+        run: nam-mpc/build.sh host
+      - name: Build for MPC (armv7, glibc 2.36) and test it under emulation
         run: |
-          git clone --depth 1 --recurse-submodules https://github.com/sdatkinson/NeuralAmpModelerCore.git namcore
-          if [ ! -f namcore/Dependencies/eigen/Eigen/Core ]; then
-            rm -rf namcore/Dependencies/eigen
-            git clone --depth 1 https://gitlab.com/libeigen/eigen.git namcore/Dependencies/eigen
-          fi
-          if [ ! -f namcore/Dependencies/AudioDSPTools/CMakeLists.txt ]; then
-            rm -rf namcore/Dependencies/AudioDSPTools
-            git clone --depth 1 https://github.com/sdatkinson/AudioDSPTools.git namcore/Dependencies/AudioDSPTools
-          fi
-      - name: Build ARMv7 NAM VST2
-        run: |
-          docker run --rm --platform linux/arm/v7 -v "$PWD":/w -w /w arm32v7/gcc:12 bash -euc '
-            SRC="$(find namcore/NAM -name "*.cpp" -print)"
-            g++ -std=gnu++20 -O3 -ffast-math -fPIC -shared -fvisibility=hidden               -DNAM_SAMPLE_FLOAT -DNAM_ENABLE_A2_FAST -DNAM_DEFAULT_MAX_BUFFER_SIZE=128               -I namcore -I namcore/Dependencies/eigen -I namcore/Dependencies/nlohmann               -I namcore/Dependencies/AudioDSPTools               src/nam_vst.cpp $SRC -lstdc++fs -Wl,--no-undefined -o NAM.so
-            strip NAM.so
-            file NAM.so
-            readelf --dyn-syms -W NAM.so | grep VSTPluginMain
+          docker run --rm --platform linux/arm/v7 -u "$(id -u):$(id -g)" -v "$PWD":/w -w /w arm32v7/gcc:12 bash -euc '
+            CXX=g++ STRIP=strip READELF=readelf nam-mpc/build.sh arm
+            NAM_MPC_DIR=nam-mpc/build/fixture nam-mpc/build/nam-test nam-mpc/build/NAM-MPC.so
           '
-      - name: Make MPC add-on package
+      - name: Skin and release zip
         run: |
-          mkdir -p package/vst package/NAM
-          cp NAM.so package/vst/NAM.so
-          cp namcore/example_models/wavenet.nam package/NAM/default.nam
-          cat > package/INSTALL.txt <<'TXT'
-          MPC Live II / Gen1 NAM proof-of-concept
-          Copy vst/NAM.so to /sdcard/vst/NAM.so
-          Copy NAM/default.nam to /sdcard/NAM/default.nam
-          Register NAM.so as a VST effect: 2 inputs, 2 outputs, isInstrument=0, UID 4e414d50.
-          Restart MPC software.
-          Experimental add-on: do not flash as firmware.
-          TXT
-          zip -r MPC-Live-II-NAM-PoC.zip package
+          pip install -q pillow
+          nam-mpc/build.sh skin
+          nam-mpc/build.sh package
       - uses: actions/upload-artifact@v4
         with:
-          name: MPC-Live-II-NAM-PoC
-          path: MPC-Live-II-NAM-PoC.zip
+          name: NAM-MPC-mpc-armv7
+          path: |
+            nam-mpc/build/NAM-MPC-*-mpc-armv7.zip
+            nam-mpc/build/preview_*.png

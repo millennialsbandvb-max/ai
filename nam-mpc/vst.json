@@ -1,0 +1,9 @@
+{
+  "name": "NAM MPC",
+  "vendor": "NAM-MPC",
+  "uid": "NAMP",
+  "version": 1000,
+  "so": "NAM-MPC.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}

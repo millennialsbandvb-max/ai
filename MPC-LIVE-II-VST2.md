@@ -11,6 +11,12 @@ This isn't new firmware. MPC OS already contains a hidden JUCE plugin host that 
 It was verified on an Akai Force (Gen1, armv7). The Live II is also Gen1 and runs the same `MPC` program, so it
 should behave the same. Gen2 units (Live III) are reported to be locked down.
 
+## NAM amp modeler (ready to install)
+
+`dist/NAM-MPC-1.0.0-mpc-armv7.zip` is a Neural Amp Modeler effect for the Live II, with its own touchscreen page and
+an installer. Copy the zip's folder to the MPC and run `sh install.sh`. The steps are in its `INSTALL.md`, and the
+source and build are in `nam-mpc/`. It has passed its offline tests but hasn't run on real hardware yet.
+
 ## What you need
 
 - **A root shell on the Live II (SSH).** Stock MPC OS doesn't give you one. The upstream project got it with a
