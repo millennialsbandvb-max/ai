@@ -37,7 +37,7 @@ scp "My Amp.nam" root@<mpc-ip>:/sdcard/vst/NAM/Models/
 scp "My Cab.wav" root@<mpc-ip>:/sdcard/vst/NAM/IRs/
 ```
 Sub-folders are fine. New files show up the next time you tap a Model or IR arrow, with no restart.
-`/sdcard/NAM/Models` and `/sdcard/NAM/IRs` are read too.
+`/sdcard/NAM/…` and a `NAM` folder at the top of a USB stick or SD card are read too.
 
 **Pick small models.** The MPC's CPU is far weaker than a laptop's. Standard-size NAM captures most likely won't
 run in real time. Look for **Nano**, **Feather** or **Lite** captures (on tone3000.com, filter by size). For a

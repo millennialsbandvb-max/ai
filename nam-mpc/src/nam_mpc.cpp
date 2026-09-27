@@ -5,7 +5,8 @@
  *   -> bass/middle/treble -> DC block -> cab IR -> output gain
  *
  * Models (.nam) are read from <base>/Models and cab IRs (.wav) from <base>/IRs, where <base> is the NAM folder next
- * to the plugin (/sdcard/vst/NAM) or /sdcard/NAM. Sub-folders are scanned one level deep.
+ * to the plugin (/sdcard/vst/NAM), /sdcard/NAM, or a NAM folder at the top of any mounted drive (/media/<drive>/NAM:
+ * a USB stick or SD card). Sub-folders are scanned one level deep.
  *
  * Threads: MPC calls processReplacing on its audio thread and everything else from its UI thread (automation may
  * also arrive on the audio thread). Neither ever loads a file or allocates: they post requests to a per-instance
@@ -236,9 +237,20 @@ struct Plugin {
 /* ---- worker thread ---------------------------------------------------------------------------------- */
 static std::string lower(std::string s) { for (auto &c : s) c = (char)std::tolower((unsigned char)c); return s; }
 
-static std::vector<fs::path> scan(const std::vector<fs::path> &bases, const char *sub, const char *ext) {
+/* The fixed folders plus <drive>/NAM on every mounted drive (a USB stick or SD card), looked up at each scan. */
+static std::vector<fs::path> all_bases(const std::vector<fs::path> &fixed) {
+    std::vector<fs::path> bases = fixed;
+    std::error_code ec;
+    for (fs::directory_iterator it("/media", ec), end; !ec && it != end; it.increment(ec)) {
+        std::error_code e2;
+        if (fs::is_directory(it->path() / "NAM", e2)) bases.push_back(it->path() / "NAM");
+    }
+    return bases;
+}
+
+static std::vector<fs::path> scan(const std::vector<fs::path> &fixed, const char *sub, const char *ext) {
     std::vector<fs::path> out;
-    for (const auto &b : bases) {
+    for (const auto &b : all_bases(fixed)) {
         std::error_code ec;
         fs::path dir = b / sub;
         if (!fs::is_directory(dir, ec)) continue;

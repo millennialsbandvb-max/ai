@@ -1,0 +1,13 @@
+# NAM MPC: makes sure MPC's plugin list includes NAM MPC (added by the NAM MPC firmware image).
+# Runs after MPC has started so it can never hold up booting; when it has to add the entry (normally only on the
+# first boot after the update) it stops MPC, edits MPC.settings and starts MPC again.
+[Unit]
+Description=Add NAM MPC to the MPC plugin list
+After=acvs.service
+
+[Service]
+Type=simple
+ExecStart=/bin/sh /usr/lib/nam-mpc/nam-mpc-boot.sh
+
+[Install]
+WantedBy=multi-user.target
