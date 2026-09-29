@@ -1,0 +1,9 @@
+{
+ "name": "Dragonfly Plate Reverb",
+ "vendor": "Michael Willis",
+ "uid": "dfp3",
+ "version": 1000,
+ "so": "DragonflyPlateReverb.so",
+ "params": "params.json",
+ "layout": "layout.conf"
+}

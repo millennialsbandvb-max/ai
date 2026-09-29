@@ -1,0 +1,19 @@
+[
+  {"index": 0, "name": "Dry Level", "unit": "%", "default": 0.8000},
+  {"index": 1, "name": "Early Level", "unit": "%", "default": 0.1000},
+  {"index": 2, "name": "Early Send", "unit": "%", "default": 0.2000},
+  {"index": 3, "name": "Late Level", "unit": "%", "default": 0.2000},
+  {"index": 4, "name": "Size", "unit": "m", "default": 0.1667},
+  {"index": 5, "name": "Width", "unit": "%", "default": 0.5000},
+  {"index": 6, "name": "Predelay", "unit": "ms", "default": 0.0800},
+  {"index": 7, "name": "Decay", "unit": "s", "default": 0.0303},
+  {"index": 8, "name": "Diffuse", "unit": "%", "default": 0.7000},
+  {"index": 9, "name": "Spin", "unit": "Hz", "default": 0.1600},
+  {"index": 10, "name": "Wander", "unit": "%", "default": 0.4000},
+  {"index": 11, "name": "High Cut", "unit": "Hz", "default": 1.0000},
+  {"index": 12, "name": "Early Damp", "unit": "Hz", "default": 0.6000},
+  {"index": 13, "name": "Late Damp", "unit": "Hz", "default": 0.5600},
+  {"index": 14, "name": "Low Boost", "unit": "%", "default": 0.5000},
+  {"index": 15, "name": "Boost Freq", "unit": "Hz", "default": 0.5500},
+  {"index": 16, "name": "Low Cut", "unit": "Hz", "default": 0.0200}
+]

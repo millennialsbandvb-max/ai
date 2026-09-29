@@ -1,0 +1,131 @@
+{
+ "name": "Dragonfly Hall Reverb",
+ "params": [
+  {
+   "key": "dry_level",
+   "name": "Dry Level",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "early_level",
+   "name": "Early Level",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "late_level",
+   "name": "Late Level",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "size",
+   "name": "Size",
+   "min": 0,
+   "max": 1,
+   "unit": "m"
+  },
+  {
+   "key": "width",
+   "name": "Width",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "predelay",
+   "name": "Predelay",
+   "min": 0,
+   "max": 1,
+   "unit": "ms"
+  },
+  {
+   "key": "diffuse",
+   "name": "Diffuse",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "low_cut",
+   "name": "Low Cut",
+   "min": 0,
+   "max": 1,
+   "unit": "Hz"
+  },
+  {
+   "key": "low_cross",
+   "name": "Low Cross",
+   "min": 0,
+   "max": 1,
+   "unit": "Hz"
+  },
+  {
+   "key": "low_mult",
+   "name": "Low Mult",
+   "min": 0,
+   "max": 1,
+   "unit": "X"
+  },
+  {
+   "key": "high_cut",
+   "name": "High Cut",
+   "min": 0,
+   "max": 1,
+   "unit": "Hz"
+  },
+  {
+   "key": "high_cross",
+   "name": "High Cross",
+   "min": 0,
+   "max": 1,
+   "unit": "Hz"
+  },
+  {
+   "key": "high_mult",
+   "name": "High Mult",
+   "min": 0,
+   "max": 1,
+   "unit": "X"
+  },
+  {
+   "key": "spin",
+   "name": "Spin",
+   "min": 0,
+   "max": 1,
+   "unit": "Hz"
+  },
+  {
+   "key": "wander",
+   "name": "Wander",
+   "min": 0,
+   "max": 1,
+   "unit": "ms"
+  },
+  {
+   "key": "decay",
+   "name": "Decay",
+   "min": 0,
+   "max": 1,
+   "unit": "s"
+  },
+  {
+   "key": "early_send",
+   "name": "Early Send",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "modulation",
+   "name": "Modulation",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  }
+ ]
+}

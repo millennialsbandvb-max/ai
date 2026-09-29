@@ -86,7 +86,10 @@ int main(int argc, char **argv) {
     attr(name);
     printf("\" format=\"VST\" category=\"%s\" manufacturer=\"", synth ? "Synth" : "Effect");
     attr(vendor);
-    printf("\" version=\"%d.%d.%d\" file=\"", version / 1000, (version / 100) % 10, version % 100);
+    if (version > 0xffff)   /* packed as bytes (DPF, JUCE): 0x030211 = 3.2.17 */
+        printf("\" version=\"%d.%d.%d\" file=\"", (version >> 16) & 0xff, (version >> 8) & 0xff, version & 0xff);
+    else                    /* decimal digits: 1000 = 1.0.0 */
+        printf("\" version=\"%d.%d.%d\" file=\"", version / 1000, (version / 100) % 10, version % 100);
     attr(argv[2]);
     printf("\" uid=\"%x\" isInstrument=\"%d\" fileTime=\"0\" infoUpdateTime=\"0\" numInputs=\"%d\" numOutputs=\"%d\" "
            "isShell=\"0\"/>\n", uid, synth, ins, outs);

@@ -1,0 +1,9 @@
+{
+ "name": "Dragonfly Room Reverb",
+ "vendor": "Michael Willis",
+ "uid": "dfr2",
+ "version": 1000,
+ "so": "DragonflyRoomReverb.so",
+ "params": "params.json",
+ "layout": "layout.conf"
+}

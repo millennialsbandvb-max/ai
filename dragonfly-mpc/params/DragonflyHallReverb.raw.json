@@ -1,0 +1,20 @@
+[
+  {"index": 0, "name": "Dry Level", "unit": "%", "default": 0.8000},
+  {"index": 1, "name": "Early Level", "unit": "%", "default": 0.1000},
+  {"index": 2, "name": "Late Level", "unit": "%", "default": 0.2000},
+  {"index": 3, "name": "Size", "unit": "m", "default": 0.2800},
+  {"index": 4, "name": "Width", "unit": "%", "default": 0.5000},
+  {"index": 5, "name": "Predelay", "unit": "ms", "default": 0.0400},
+  {"index": 6, "name": "Diffuse", "unit": "%", "default": 0.9000},
+  {"index": 7, "name": "Low Cut", "unit": "Hz", "default": 0.0200},
+  {"index": 8, "name": "Low Cross", "unit": "Hz", "default": 0.3000},
+  {"index": 9, "name": "Low Mult", "unit": "X", "default": 0.4000},
+  {"index": 10, "name": "High Cut", "unit": "Hz", "default": 0.4400},
+  {"index": 11, "name": "High Cross", "unit": "Hz", "default": 0.3000},
+  {"index": 12, "name": "High Mult", "unit": "X", "default": 0.3000},
+  {"index": 13, "name": "Spin", "unit": "Hz", "default": 0.3300},
+  {"index": 14, "name": "Wander", "unit": "ms", "default": 0.3750},
+  {"index": 15, "name": "Decay", "unit": "s", "default": 0.1212},
+  {"index": 16, "name": "Early Send", "unit": "%", "default": 0.2000},
+  {"index": 17, "name": "Modulation", "unit": "%", "default": 0.1500}
+]

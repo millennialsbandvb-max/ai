@@ -1,0 +1,70 @@
+{
+ "name": "Dragonfly Plate Reverb",
+ "params": [
+  {
+   "key": "dry_level",
+   "name": "Dry Level",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "wet_level",
+   "name": "Wet Level",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "algorithm",
+   "name": "Algorithm",
+   "options": [
+    "Simple",
+    "Nested",
+    "Tank"
+   ]
+  },
+  {
+   "key": "width",
+   "name": "Width",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "predelay",
+   "name": "Predelay",
+   "min": 0,
+   "max": 1,
+   "unit": "ms"
+  },
+  {
+   "key": "decay",
+   "name": "Decay",
+   "min": 0,
+   "max": 1,
+   "unit": "s"
+  },
+  {
+   "key": "low_cut",
+   "name": "Low Cut",
+   "min": 0,
+   "max": 1,
+   "unit": "Hz"
+  },
+  {
+   "key": "high_cut",
+   "name": "High Cut",
+   "min": 0,
+   "max": 1,
+   "unit": "Hz"
+  },
+  {
+   "key": "dampen",
+   "name": "Dampen",
+   "min": 0,
+   "max": 1,
+   "unit": "Hz"
+  }
+ ]
+}

@@ -1,0 +1,9 @@
+{
+ "name": "Dragonfly Early Reflections",
+ "vendor": "Michael Willis",
+ "uid": "dfer",
+ "version": 1000,
+ "so": "DragonflyEarlyReflections.so",
+ "params": "params.json",
+ "layout": "layout.conf"
+}

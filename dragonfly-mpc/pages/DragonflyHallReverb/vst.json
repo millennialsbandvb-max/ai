@@ -1,0 +1,9 @@
+{
+ "name": "Dragonfly Hall Reverb",
+ "vendor": "Michael Willis and Rob vd Berg",
+ "uid": "dfr1",
+ "version": 1000,
+ "so": "DragonflyHallReverb.so",
+ "params": "params.json",
+ "layout": "layout.conf"
+}

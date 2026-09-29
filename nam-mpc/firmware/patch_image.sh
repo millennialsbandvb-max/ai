@@ -3,10 +3,12 @@
 # such as Hakai built on it) in the device-tree format, e.g. MPC-3.9.1-Gen1-update.img.
 #   patch_image.sh <MPC update .img> <output .img>
 #   patch_image.sh --rootfs <rootfs.ext4>          only add NAM MPC to an extracted root filesystem (for tests)
-# Env: BUILD (nam-mpc/build: NAM-MPC.so and skin/ from build.sh).
+# Env: BUILD (nam-mpc/build: NAM-MPC.so and skin/ from build.sh); EXTRA: optional folder of more plugins to build in,
+#      laid out as plugins/*.so, skins/<page folders>, entries/*.xml (their MPC.settings entries, file= pointing at
+#      /usr/lib/nam-mpc/plugins/<name>.so), e.g. dragonfly-mpc/build/bundle from dragonfly-mpc/build.sh bundle.
 # Nothing in the official image is changed except what NAM MPC adds:
-#   /usr/lib/nam-mpc/{NAM-MPC.so, nam-mpc-boot.sh, plugin_list.awk, plugin.xml}
-#   /usr/share/Akai/Content/Synths/NAM-MPC - VST - NAM MPC/   (its touchscreen page)
+#   /usr/lib/nam-mpc/{NAM-MPC.so, nam-mpc-boot.sh, plugin_list.awk, entries/*.xml, plugins/*.so (EXTRA)}
+#   /usr/share/Akai/Content/Synths/NAM-MPC - VST - NAM MPC/   (its touchscreen page, and EXTRA's pages)
 #   /etc/systemd/system/nam-mpc.service (+ its multi-user.target.wants link)
 # Needs: python3, xz, e2fsprogs (debugfs, e2fsck), binutils (readelf, strings), and upx when MPC is UPX-packed.
 set -euo pipefail
@@ -68,7 +70,17 @@ inject() {
   check_rootfs
   local free need
   free=$(dbg stats | awk -F: '/^Free blocks:/ {f=$2} /^Block size:/ {b=$2} END {print f*b}')
-  need=$(( $(du -sb "$SO" | cut -f1) + $(du -sb "$SKIN" | cut -f1) + 1048576 ))
+  need=$(( $(du -sb "$SO" | cut -f1) + $(du -sb "$SKIN" | cut -f1) + $( [ -n "${EXTRA:-}" ] && du -sb "$EXTRA" | cut -f1 || echo 0) + 1048576 ))
+  if [ -n "${EXTRA:-}" ]; then
+    [ -d "$EXTRA/plugins" ] && [ -d "$EXTRA/skins" ] && [ -d "$EXTRA/entries" ] || die "EXTRA=$EXTRA needs plugins/, skins/ and entries/"
+    local e f
+    for e in "$EXTRA"/entries/*.xml; do   # every entry must point at a plugin we're adding
+      f=$(sed -n 's/.* file="\([^"]*\)".*/\1/p' "$e")
+      case "$f" in /usr/lib/nam-mpc/plugins/*) [ -f "$EXTRA/plugins/$(basename "$f")" ] || die "$e: no $(basename "$f") in $EXTRA/plugins" ;;
+                   *) die "$e: file= must be under /usr/lib/nam-mpc/plugins/ (is $f)" ;; esac
+    done
+    echo "extra plugins: $(cd "$EXTRA/plugins" && ls | tr '\n' ' ')"
+  fi
   echo "free space: $free bytes, NAM MPC needs about $need"
   [ "$free" -gt $((need * 2)) ] || die "not enough free space in the root filesystem"
   exists /usr/lib/nam-mpc && die "this image already has NAM MPC"
@@ -84,7 +96,15 @@ inject() {
     put "$SO" /usr/lib/nam-mpc/NAM-MPC.so 0100755
     put "$HERE/nam-mpc-boot.sh" /usr/lib/nam-mpc/nam-mpc-boot.sh 0100755
     put "$HERE/../release/plugin_list.awk" /usr/lib/nam-mpc/plugin_list.awk 0100644
-    put "$HERE/plugin.xml" /usr/lib/nam-mpc/plugin.xml 0100644
+    mkd /usr/lib/nam-mpc/entries
+    put "$HERE/entries-nam-mpc.xml" /usr/lib/nam-mpc/entries/nam-mpc.xml 0100644
+    if [ -n "${EXTRA:-}" ]; then
+      mkd /usr/lib/nam-mpc/plugins
+      for f in "$EXTRA"/plugins/*.so; do put "$f" "/usr/lib/nam-mpc/plugins/$(basename "$f")" 0100755; done
+      for f in "$EXTRA"/entries/*.xml; do put "$f" "/usr/lib/nam-mpc/entries/$(basename "$f")" 0100644; done
+      (cd "$EXTRA/skins" && find . -mindepth 1 -type d | sort) | while read -r d; do mkd "/usr/share/Akai/Content/Synths/${d#./}"; done
+      (cd "$EXTRA/skins" && find . -type f | sort) | while read -r rel; do put "$EXTRA/skins/${rel#./}" "/usr/share/Akai/Content/Synths/${rel#./}" 0100644; done
+    fi
     exists /etc/systemd/system/multi-user.target.wants || mkd /etc/systemd/system/multi-user.target.wants
     put "$HERE/nam-mpc.service" /etc/systemd/system/nam-mpc.service 0100644
     echo "symlink /etc/systemd/system/multi-user.target.wants/nam-mpc.service /etc/systemd/system/nam-mpc.service"
@@ -106,6 +126,17 @@ inject() {
   grep -q 'Fast link dest: "/etc/systemd/system/nam-mpc.service"' <<<"$(dbg "stat /etc/systemd/system/multi-user.target.wants/nam-mpc.service")" ||
     die "service link missing"
   grep -q 'Mode:  0755' <<<"$(dbg "stat /usr/lib/nam-mpc/nam-mpc-boot.sh")" || die "boot script isn't executable"
+  if [ -n "${EXTRA:-}" ]; then   # every extra plugin, entry and page file reads back identical
+    local f rel
+    for f in "$EXTRA"/plugins/*.so "$EXTRA"/entries/*.xml; do
+      case "$f" in *.so) d=plugins ;; *) d=entries ;; esac
+      dbg "dump \"/usr/lib/nam-mpc/$d/$(basename "$f")\" $tmp/x" >/dev/null; cmp -s "$tmp/x" "$f" || die "$f read back differs"
+    done
+    while read -r rel; do
+      dbg "dump \"/usr/share/Akai/Content/Synths/${rel#./}\" $tmp/x" >/dev/null
+      cmp -s "$tmp/x" "$EXTRA/skins/${rel#./}" || die "page file ${rel#./} read back differs"
+    done < <(cd "$EXTRA/skins" && find . -type f)
+  fi
   rm -rf "$tmp"
   echo "root filesystem OK"
 }

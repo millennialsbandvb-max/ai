@@ -1,0 +1,9 @@
+[
+  {"index": 0, "name": "Dry Level", "unit": "%", "default": 0.8000},
+  {"index": 1, "name": "Wet Level", "unit": "%", "default": 0.2000},
+  {"index": 2, "name": "Program", "unit": "", "default": 0.2857, "options": ["Abrupt Echo", "Backstage Pass", "Concert Venue", "Damaged Goods", "Elevator Pitch", "Floor Thirteen", "Garage Band", "Home Studio"]},
+  {"index": 3, "name": "Size", "unit": "m", "default": 0.2000},
+  {"index": 4, "name": "Width", "unit": "%", "default": 0.5000},
+  {"index": 5, "name": "Low Cut", "unit": "Hz", "default": 0.2500},
+  {"index": 6, "name": "High Cut", "unit": "Hz", "default": 0.6000}
+]

@@ -1,0 +1,124 @@
+{
+ "name": "Dragonfly Room Reverb",
+ "params": [
+  {
+   "key": "dry_level",
+   "name": "Dry Level",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "early_level",
+   "name": "Early Level",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "early_send",
+   "name": "Early Send",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "late_level",
+   "name": "Late Level",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "size",
+   "name": "Size",
+   "min": 0,
+   "max": 1,
+   "unit": "m"
+  },
+  {
+   "key": "width",
+   "name": "Width",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "predelay",
+   "name": "Predelay",
+   "min": 0,
+   "max": 1,
+   "unit": "ms"
+  },
+  {
+   "key": "decay",
+   "name": "Decay",
+   "min": 0,
+   "max": 1,
+   "unit": "s"
+  },
+  {
+   "key": "diffuse",
+   "name": "Diffuse",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "spin",
+   "name": "Spin",
+   "min": 0,
+   "max": 1,
+   "unit": "Hz"
+  },
+  {
+   "key": "wander",
+   "name": "Wander",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "high_cut",
+   "name": "High Cut",
+   "min": 0,
+   "max": 1,
+   "unit": "Hz"
+  },
+  {
+   "key": "early_damp",
+   "name": "Early Damp",
+   "min": 0,
+   "max": 1,
+   "unit": "Hz"
+  },
+  {
+   "key": "late_damp",
+   "name": "Late Damp",
+   "min": 0,
+   "max": 1,
+   "unit": "Hz"
+  },
+  {
+   "key": "low_boost",
+   "name": "Low Boost",
+   "min": 0,
+   "max": 1,
+   "unit": "%"
+  },
+  {
+   "key": "boost_freq",
+   "name": "Boost Freq",
+   "min": 0,
+   "max": 1,
+   "unit": "Hz"
+  },
+  {
+   "key": "low_cut",
+   "name": "Low Cut",
+   "min": 0,
+   "max": 1,
+   "unit": "Hz"
+  }
+ ]
+}
