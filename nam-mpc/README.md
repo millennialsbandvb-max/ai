@@ -81,3 +81,16 @@ setting `NAM_MPC_DIR=build/fixture`.
 - **Cab IRs are cut to 1024 taps** (23 ms) with a short fade, to keep direct convolution cheap.
 - **Resampling latency.** Models trained at 48 kHz run through a resampler, which adds a little latency. MPC
   isn't told about it.
+
+## Feather copies of bigger models (distillation)
+
+`tools/distill.py` trains a Feather model to imitate a bigger one (Standard, Lite, or an A2/slimmable model at
+full size): it runs the original over NAM's standard training signal (`input.wav`, v3) with NAM's C++ engine,
+trains a Feather on that, and writes `F<original name>.nam` with the original's metadata and the measured ESR
+against the original. It needs `torch` and `neural-amp-modeler` (the trainer imports `tkinter` only for GUI
+pop-ups), and a `nam-render` binary built from NeuralAmpModelerCore's `tools/render.cpp`:
+
+```sh
+distill.py "My Amp.nam" input.wav out/ --epochs 100 --render ./nam-render
+```
+On a CPU, 100 epochs take about 2-3 hours per model.
