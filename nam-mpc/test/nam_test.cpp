@@ -105,6 +105,7 @@ int main(int argc, char **argv) {
     std::printf("        model: %s, IR: %s\n", model.c_str(), ir.c_str());
     const bool have_model = model != "No models" && model.rfind("Error", 0) != 0 && model != "-";
     CHECK(have_model, "a model loaded (%s)", model.c_str());
+    CHECK(model.rfind("._", 0) != 0 && model != "hidden", "hidden files (macOS ._ twins, dot-folders) are skipped");
     const double rms = a.run(e, 200);
     CHECK(rms > 1e-4 && rms < 10, "audio through the model: rms %.4f", rms);
 

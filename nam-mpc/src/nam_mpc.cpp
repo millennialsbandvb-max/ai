@@ -257,6 +257,12 @@ static std::vector<fs::path> scan(const std::vector<fs::path> &fixed, const char
         for (fs::recursive_directory_iterator it(dir, fs::directory_options::skip_permission_denied, ec), end;
              !ec && it != end; it.increment(ec)) {
             if (it.depth() > 1) { it.disable_recursion_pending(); continue; }
+            // hidden files and folders: macOS writes a "._<name>" twin of every file it copies to a FAT/exFAT
+            // card or stick; those twins aren't models (they fail to parse) and would fill the list
+            if (it->path().filename().string().rfind('.', 0) == 0) {
+                if (it->is_directory(ec)) it.disable_recursion_pending();
+                continue;
+            }
             if (it->is_regular_file(ec) && lower(it->path().extension().string()) == ext) out.push_back(it->path());
         }
     }
