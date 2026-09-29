@@ -42,7 +42,7 @@ VST indices are what the skin and saved projects bind to. Append new ones; never
 | 10 | ir | the file list (display: name) |
 | 11, 12 | ir_prev, ir_next | momentary |
 | 13 | normalize | Off/On |
-| 14 | size | 0–100 % (slimmable models) |
+| 14 | size | 0–49 % (slimmable models; capped below the 50% switch to their full size) |
 
 `params.json` and `layout.conf` describe the same list for the skin build. Keep all three in step.
 

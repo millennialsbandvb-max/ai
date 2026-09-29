@@ -77,7 +77,7 @@ static const ParamInfo PARAMS[kNumParams] = {
     {"ir_prev", "IR <", "", 0, 1, 0},
     {"ir_next", "IR >", "", 0, 1, 0},
     {"normalize", "Normalize", "", 0, 1, 1},
-    {"size", "Size", "%", 0, 100, 100},
+    {"size", "Size", "%", 0, 49, 49},   // capped below 50%: slimmable models switch to their full size at 50%
 };
 
 static float clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }

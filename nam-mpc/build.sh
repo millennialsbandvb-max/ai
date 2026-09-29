@@ -75,14 +75,18 @@ arm() {
 
 # ---- skin: the MPC touchscreen page, drawn by mpc-vst-plugins' tools from params.json + layout.conf ---------------
 skin() {
-  local mv="$DEPS/mpc-vst-plugins-main"
+  local mv="$DEPS/mpc-vst-plugins-main" tools="$B/skin-tools"
   [ -x "$B/shadow_art" ] || gcc -O2 -I"$mv/tools/vendor/force-shadow/tools" -o "$B/shadow_art" "$mv/tools/shadow_art.c" -lm
+  # a copy of the generator with every text size scaled up (skin/text_scale.py); frame titles in Titillium Bold
+  rm -rf "$tools" && cp -a "$mv/tools" "$tools"
+  python3 "$HERE/skin/text_scale.py" "$tools/shadow_skin.py" "${TEXT_SCALE:-1.35}"
   mkdir -p "$B/port/build"
   cp "$HERE/vst.json" "$HERE/params.json" "$HERE/layout.conf" "$B/port/"
   cp "$B/shadow_art" "$B/port/build/"
-  (cd "$B/port" && python3 "$mv/tools/gen_vst.py" vst.json)
+  (cd "$B/port" && SHADOW_TITLE_FONT="$mv/tools/html_art/fonts/TitilliumWeb-Bold.ttf" python3 "$tools/gen_vst.py" vst.json)
   rm -rf "$B/skin" && cp -a "$B/port/build/skin" "$B/skin"
-  python3 "$mv/tools/studio.py" preview "$(ls -d "$B"/skin/*/)Plugin Skins" -o "$B/preview_%d.png" >/dev/null
+  rm -f "$B"/preview_*.png
+  python3 "$tools/studio.py" preview "$(ls -d "$B"/skin/*/)Plugin Skins" -o "$B/preview_%d.png" >/dev/null
   echo "skin: $(ls "$B/skin")"
 }
 

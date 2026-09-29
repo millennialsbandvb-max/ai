@@ -1,20 +1,128 @@
 {
   "name": "NAM MPC",
   "params": [
-    {"key": "input", "name": "Input", "min": -24, "max": 24, "default": 0, "unit": "dB"},
-    {"key": "gate", "name": "Gate", "min": -100, "max": -20, "default": -100, "unit": "dB"},
-    {"key": "bass", "name": "Bass", "min": 0, "max": 10, "default": 5},
-    {"key": "middle", "name": "Middle", "min": 0, "max": 10, "default": 5},
-    {"key": "treble", "name": "Treble", "min": 0, "max": 10, "default": 5},
-    {"key": "output", "name": "Output", "min": -24, "max": 24, "default": 0, "unit": "dB"},
-    {"key": "model", "name": "Model", "min": 0, "max": 1, "display": "string", "type": "stepper"},
-    {"key": "model_prev", "name": "Model <", "options": ["Off", "On"], "momentary": true},
-    {"key": "model_next", "name": "Model >", "options": ["Off", "On"], "momentary": true},
-    {"key": "cab", "name": "Cab", "options": ["Off", "On"], "default": 1},
-    {"key": "ir", "name": "IR", "min": 0, "max": 1, "display": "string", "type": "stepper"},
-    {"key": "ir_prev", "name": "IR <", "options": ["Off", "On"], "momentary": true},
-    {"key": "ir_next", "name": "IR >", "options": ["Off", "On"], "momentary": true},
-    {"key": "normalize", "name": "Normalize", "options": ["Off", "On"], "default": 1},
-    {"key": "size", "name": "Size", "min": 0, "max": 100, "default": 100, "unit": "%"}
+    {
+      "key": "input",
+      "name": "Input",
+      "min": -24,
+      "max": 24,
+      "default": 0,
+      "unit": "dB"
+    },
+    {
+      "key": "gate",
+      "name": "Gate",
+      "min": -100,
+      "max": -20,
+      "default": -100,
+      "unit": "dB"
+    },
+    {
+      "key": "bass",
+      "name": "Bass",
+      "min": 0,
+      "max": 10,
+      "default": 5
+    },
+    {
+      "key": "middle",
+      "name": "Middle",
+      "min": 0,
+      "max": 10,
+      "default": 5
+    },
+    {
+      "key": "treble",
+      "name": "Treble",
+      "min": 0,
+      "max": 10,
+      "default": 5
+    },
+    {
+      "key": "output",
+      "name": "Output",
+      "min": -24,
+      "max": 24,
+      "default": 0,
+      "unit": "dB"
+    },
+    {
+      "key": "model",
+      "name": "Model",
+      "min": 0,
+      "max": 1,
+      "display": "string",
+      "type": "stepper"
+    },
+    {
+      "key": "model_prev",
+      "name": "Model <",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
+    },
+    {
+      "key": "model_next",
+      "name": "Model >",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
+    },
+    {
+      "key": "cab",
+      "name": "Cab",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "default": 1
+    },
+    {
+      "key": "ir",
+      "name": "IR",
+      "min": 0,
+      "max": 1,
+      "display": "string",
+      "type": "stepper"
+    },
+    {
+      "key": "ir_prev",
+      "name": "IR <",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
+    },
+    {
+      "key": "ir_next",
+      "name": "IR >",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
+    },
+    {
+      "key": "normalize",
+      "name": "Normalize",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "default": 1
+    },
+    {
+      "key": "size",
+      "name": "Size",
+      "min": 0,
+      "max": 49,
+      "default": 49,
+      "unit": "%"
+    }
   ]
 }
