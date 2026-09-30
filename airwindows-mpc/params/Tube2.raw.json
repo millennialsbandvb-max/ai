@@ -1,0 +1,4 @@
+[
+  {"index": 0, "name": "Input", "unit": "", "default": 0.5000},
+  {"index": 1, "name": "Tube", "unit": "", "default": 0.5000}
+]

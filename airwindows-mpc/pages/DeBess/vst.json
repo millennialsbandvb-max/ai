@@ -1,0 +1,9 @@
+{
+ "name": "DeBess",
+ "vendor": "airwindows",
+ "uid": "debs",
+ "version": 1000,
+ "so": "AirwindowsDeBess.so",
+ "params": "params.json",
+ "layout": "layout.conf"
+}

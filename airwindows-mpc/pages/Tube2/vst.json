@@ -1,0 +1,9 @@
+{
+ "name": "Tube2",
+ "vendor": "airwindows",
+ "uid": "tubf",
+ "version": 1000,
+ "so": "AirwindowsTube2.so",
+ "params": "params.json",
+ "layout": "layout.conf"
+}

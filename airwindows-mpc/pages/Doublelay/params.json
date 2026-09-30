@@ -1,0 +1,45 @@
+{
+ "name": "Doublelay",
+ "params": [
+  {
+   "key": "detune",
+   "name": "Detune",
+   "min": 0,
+   "max": 1,
+   "default": 0.2,
+   "unit": ""
+  },
+  {
+   "key": "delay_l",
+   "name": "Delay L",
+   "min": 0,
+   "max": 1,
+   "default": 0.1,
+   "unit": "sec"
+  },
+  {
+   "key": "delay_r",
+   "name": "Delay R",
+   "min": 0,
+   "max": 1,
+   "default": 0.2,
+   "unit": "sec"
+  },
+  {
+   "key": "feedbk",
+   "name": "Feedback",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "unit": ""
+  },
+  {
+   "key": "dry_wet",
+   "name": "Dry/Wet",
+   "min": 0,
+   "max": 1,
+   "default": 0.6,
+   "unit": ""
+  }
+ ]
+}

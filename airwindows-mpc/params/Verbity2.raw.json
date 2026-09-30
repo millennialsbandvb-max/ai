@@ -1,0 +1,6 @@
+[
+  {"index": 0, "name": "RmSize", "unit": "", "default": 0.5000},
+  {"index": 1, "name": "Sustain", "unit": "", "default": 0.5000},
+  {"index": 2, "name": "Mulch", "unit": "", "default": 0.5000},
+  {"index": 3, "name": "Wetness", "unit": "", "default": 1.0000}
+]

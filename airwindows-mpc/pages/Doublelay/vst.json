@@ -1,0 +1,9 @@
+{
+ "name": "Doublelay",
+ "vendor": "airwindows",
+ "uid": "dbla",
+ "version": 1000,
+ "so": "AirwindowsDoublelay.so",
+ "params": "params.json",
+ "layout": "layout.conf"
+}

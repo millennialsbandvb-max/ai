@@ -1,0 +1,9 @@
+{
+ "name": "ButterComp2",
+ "vendor": "airwindows",
+ "uid": "btcq",
+ "version": 1000,
+ "so": "AirwindowsButterComp2.so",
+ "params": "params.json",
+ "layout": "layout.conf"
+}

@@ -1,0 +1,9 @@
+{
+ "name": "Baxandall3",
+ "vendor": "airwindows",
+ "uid": "baxc",
+ "version": 1000,
+ "so": "AirwindowsBaxandall3.so",
+ "params": "params.json",
+ "layout": "layout.conf"
+}

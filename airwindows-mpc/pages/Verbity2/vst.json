@@ -1,0 +1,9 @@
+{
+ "name": "Verbity2",
+ "vendor": "airwindows",
+ "uid": "vbt2",
+ "version": 1000,
+ "so": "AirwindowsVerbity2.so",
+ "params": "params.json",
+ "layout": "layout.conf"
+}

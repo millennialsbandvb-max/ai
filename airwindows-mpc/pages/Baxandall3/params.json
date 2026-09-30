@@ -1,0 +1,29 @@
+{
+ "name": "Baxandall3",
+ "params": [
+  {
+   "key": "input",
+   "name": "Input",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "unit": ""
+  },
+  {
+   "key": "treble",
+   "name": "Treble",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "unit": ""
+  },
+  {
+   "key": "bass",
+   "name": "Bass",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "unit": ""
+  }
+ ]
+}

@@ -1,0 +1,9 @@
+{
+ "name": "Air4",
+ "vendor": "airwindows",
+ "uid": "aiyu",
+ "version": 1000,
+ "so": "AirwindowsAir4.so",
+ "params": "params.json",
+ "layout": "layout.conf"
+}

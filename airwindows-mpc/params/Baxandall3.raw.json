@@ -1,0 +1,5 @@
+[
+  {"index": 0, "name": "Input", "unit": "", "default": 0.5000},
+  {"index": 1, "name": "Treble", "unit": "", "default": 0.5000},
+  {"index": 2, "name": "Bass", "unit": "", "default": 0.5000}
+]

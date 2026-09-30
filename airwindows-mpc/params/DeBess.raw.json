@@ -1,0 +1,7 @@
+[
+  {"index": 0, "name": "Intense", "unit": "", "default": 0.0000},
+  {"index": 1, "name": "Sharp", "unit": "", "default": 0.5000},
+  {"index": 2, "name": "Depth", "unit": "", "default": 0.5000},
+  {"index": 3, "name": "Filter", "unit": "", "default": 0.5000},
+  {"index": 4, "name": "Sense", "unit": "Ess", "default": 0.0000}
+]

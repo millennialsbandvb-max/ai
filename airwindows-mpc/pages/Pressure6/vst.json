@@ -1,0 +1,9 @@
+{
+ "name": "Pressure6",
+ "vendor": "airwindows",
+ "uid": "prs6",
+ "version": 1000,
+ "so": "AirwindowsPressure6.so",
+ "params": "params.json",
+ "layout": "layout.conf"
+}

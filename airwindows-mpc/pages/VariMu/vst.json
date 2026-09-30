@@ -1,0 +1,9 @@
+{
+ "name": "VariMu",
+ "vendor": "airwindows",
+ "uid": "vari",
+ "version": 1000,
+ "so": "AirwindowsVariMu.so",
+ "params": "params.json",
+ "layout": "layout.conf"
+}

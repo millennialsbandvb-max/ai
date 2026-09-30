@@ -1,0 +1,7 @@
+[
+  {"index": 0, "name": "Detune", "unit": "", "default": 0.2000},
+  {"index": 1, "name": "Delay L", "unit": "sec", "default": 0.1000},
+  {"index": 2, "name": "Delay R", "unit": "sec", "default": 0.2000},
+  {"index": 3, "name": "Feedbk", "unit": "", "default": 0.0000},
+  {"index": 4, "name": "Dry/Wet", "unit": "", "default": 0.6000}
+]

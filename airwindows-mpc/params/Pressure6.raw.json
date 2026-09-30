@@ -1,0 +1,4 @@
+[
+  {"index": 0, "name": "Compres", "unit": "", "default": 0.0000},
+  {"index": 1, "name": "Ratio", "unit": "", "default": 1.0000}
+]

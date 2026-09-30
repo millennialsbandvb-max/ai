@@ -1,0 +1,37 @@
+{
+ "name": "Air4",
+ "params": [
+  {
+   "key": "air",
+   "name": "Air",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "unit": ""
+  },
+  {
+   "key": "gnd",
+   "name": "Ground",
+   "min": 0,
+   "max": 1,
+   "default": 0.5,
+   "unit": ""
+  },
+  {
+   "key": "darkf",
+   "name": "Dark Freq",
+   "min": 0,
+   "max": 1,
+   "default": 0.52,
+   "unit": ""
+  },
+  {
+   "key": "ratio",
+   "name": "Ratio",
+   "min": 0,
+   "max": 1,
+   "default": 0.0,
+   "unit": ""
+  }
+ ]
+}

@@ -1,0 +1,6 @@
+[
+  {"index": 0, "name": "Air", "unit": "", "default": 0.5000},
+  {"index": 1, "name": "Gnd", "unit": "", "default": 0.5000},
+  {"index": 2, "name": "DarkF", "unit": "", "default": 0.5200},
+  {"index": 3, "name": "Ratio", "unit": "", "default": 0.0000}
+]
