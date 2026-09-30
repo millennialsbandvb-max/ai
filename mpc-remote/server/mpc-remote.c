@@ -17,6 +17,7 @@
 #define _GNU_SOURCE
 #include <arpa/inet.h>
 #include <dirent.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -49,7 +50,9 @@
 _Static_assert(sizeof(struct input_event) == 16, "32-bit ARM kernels expect 16-byte input events");
 #endif
 #define MAX_CLIENTS 8
-#define FRAME_MS 80          /* at most ~12 screen updates a second */
+#define FAST_MS 40           /* 25 screen updates a second while you're working it (for 2 s after a touch)... */
+#define SLOW_MS 100          /* ...and 10 a second otherwise, to leave the processor to MPC's audio */
+#define BUSY_MS 2000
 #define MAX_MSG (192 * 1024) /* tiles per WebSocket message, so a slow client gets fresh tiles rather than a backlog */
 #define CONF_DIR "/data/mpc-remote"
 #define CONF_FILE CONF_DIR "/touch.conf"
@@ -583,11 +586,13 @@ static void handle_http(Client *c) {   /* a complete request is in c->in */
     c->inlen = 0;
 }
 
+static uint64_t touched_at;   /* when the page last sent a touch */
+
 static void handle_command(Client *c, char *s) {   /* a text message from the page */
     int x, y;
-    if (sscanf(s, "d %d %d", &x, &y) == 2) { if (cal.fd < 0) touch('d', x, y); }
-    else if (sscanf(s, "m %d %d", &x, &y) == 2) { if (cal.fd < 0) touch('m', x, y); }
-    else if (s[0] == 'u') { if (cal.fd < 0) touch('u', 0, 0); }
+    if (sscanf(s, "d %d %d", &x, &y) == 2) { if (cal.fd < 0) touch('d', x, y); touched_at = now_ms(); }
+    else if (sscanf(s, "m %d %d", &x, &y) == 2) { if (cal.fd < 0) touch('m', x, y); touched_at = now_ms(); }
+    else if (s[0] == 'u') { if (cal.fd < 0) touch('u', 0, 0); touched_at = now_ms(); }
     else if (!strcmp(s, "cal")) {
         if (touching) touch('u', 0, 0);
         if (cal_start()) broadcast_text("{\"type\":\"cal\",\"error\":\"can't read the touchscreen\"}");
@@ -666,9 +671,26 @@ static size_t encode_tile(int tx, int ty, uint8_t *o) {
     return 12 + len;
 }
 
+/* zlib, from the MPC's own libz.so.1 (loaded at run time, so nothing is needed at build time); without it,
+ * messages go uncompressed */
+static int (*z_compress2)(uint8_t *, unsigned long *, const uint8_t *, unsigned long, int);
+static unsigned long (*z_bound)(unsigned long);
+static void zlib_load(void) {
+    void *z = dlopen("libz.so.1", RTLD_NOW);
+    if (z) { z_compress2 = (int (*)(uint8_t *, unsigned long *, const uint8_t *, unsigned long, int))dlsym(z, "compress2");
+             z_bound = (unsigned long (*)(unsigned long))dlsym(z, "compressBound"); }
+    if (!z_compress2 || !z_bound) z_compress2 = NULL;
+    LOG("compression: %s", z_compress2 ? "zlib" : "none (no libz.so.1)");
+}
+
+static struct { unsigned frames, changed; double grab_ms, send_ms; unsigned long raw, sent; uint64_t since; } st;
+
+/* a message: [format u8: 0 plain, 1 zlib][payload], payload = [tile count u32][tile records] */
 static void send_tiles(Client *c) {   /* as many of this client's changed tiles as fit in one message */
-    static uint8_t *buf;
+    static uint8_t *buf, *zbuf;
+    static unsigned long zcap;
     if (!buf) buf = malloc(MAX_MSG + 8 + 4 + TILE * TILE * 4 + 16);
+    const uint64_t t0 = now_ms();
     size_t n = 4;
     uint32_t count = 0;
     for (int t = 0; t < TW * TH && n < MAX_MSG; t++) {
@@ -678,8 +700,21 @@ static void send_tiles(Client *c) {   /* as many of this client's changed tiles 
         c->ndirty--;
         count++;
     }
+    if (!count) return;
     memcpy(buf, &count, 4);
-    if (count) ws_frame(c, 2, buf, n);
+    unsigned long zn = 0;
+    if (z_compress2) {
+        const unsigned long need = z_bound(n) + 1;
+        if (need > zcap) { free(zbuf); zbuf = malloc(need); zcap = need; }
+        zn = zcap - 1;
+        if (z_compress2(zbuf + 1, &zn, buf, n, 1) != 0 || zn >= n) zn = 0;   /* level 1: fast */
+    }
+    uint8_t fmt = zn ? 1 : 0;
+    if (zn) { zbuf[0] = fmt; ws_frame(c, 2, zbuf, zn + 1); }
+    else { static uint8_t *pbuf; static size_t pcap; if (n + 1 > pcap) { free(pbuf); pbuf = malloc(n + 1); pcap = n + 1; }
+           pbuf[0] = 0; memcpy(pbuf + 1, buf, n); ws_frame(c, 2, pbuf, n + 1); }
+    st.raw += n; st.sent += (zn ? zn : n) + 1;
+    st.send_ms += (double)(now_ms() - t0);
 }
 
 /* ---- main loop ------------------------------------------------------------------------------------------------- */
@@ -702,7 +737,8 @@ int main(int argc, char **argv) {
     LOG("mpc-remote: http://<this MPC's address>:%d/", port);
     for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
 
-    uint64_t last_frame = 0, next_try = 0;
+    uint64_t next_frame = 0, next_try = 0, busy_until = 0;
+    zlib_load();
     for (;;) {
         struct pollfd pf[MAX_CLIENTS + 2];
         int np = 0, viewers = 0;
@@ -716,7 +752,7 @@ int main(int argc, char **argv) {
         const int calidx = np;
         if (cal.fd >= 0) pf[np++] = (struct pollfd){.fd = cal.fd, .events = POLLIN};
         const uint64_t t = now_ms();
-        int wait = !viewers ? 1000 : !screen_ready ? 500 : (int)(last_frame + FRAME_MS > t ? last_frame + FRAME_MS - t : 0);
+        int wait = !viewers ? 1000 : !screen_ready ? 500 : (int)(next_frame > t ? next_frame - t : 0);
         poll(pf, (nfds_t)np, wait);
 
         if (pf[0].revents & POLLIN) {
@@ -801,9 +837,27 @@ int main(int argc, char **argv) {
         if (!viewers && screen_ready) { screen_close(); screen_ready = 0; LOG("nobody watching: display closed"); }
 
         /* the screen: grab a frame, mark what changed for every viewer, send to whoever is ready */
-        if (viewers && screen_ready && now_ms() >= last_frame + FRAME_MS) {
-            last_frame = now_ms();
-            if (screen_grab() == 0) {
+        if (touched_at) {   /* a touch from the page: look again very soon, and keep looking often for a while */
+            busy_until = touched_at + BUSY_MS;
+            if (next_frame > touched_at + 20) next_frame = touched_at + 20;   /* ~20 ms for MPC to redraw */
+            touched_at = 0;
+        }
+        if (viewers && screen_ready && now_ms() >= next_frame) {
+            const uint64_t t0 = now_ms();
+            next_frame = t0 + (t0 < busy_until ? FAST_MS : SLOW_MS);
+            const int ok = screen_grab() == 0;
+            st.grab_ms += (double)(now_ms() - t0);
+            st.frames++;
+            if (!st.since) st.since = t0;
+            if (t0 - st.since >= 10000) {   /* every 10 s while watched: how it's doing, for /log */
+                LOG("last 10s: %u frames (%u changed), grab %.1f ms, send %.1f ms per frame; %lu KB/s sent (%lu%% of raw)",
+                    st.frames, st.changed, st.grab_ms / st.frames, st.send_ms / st.frames, st.sent / 1024 / 10,
+                    st.raw ? st.sent * 100 / st.raw : 0);
+                memset(&st, 0, sizeof st);
+                st.since = t0;
+            }
+            if (ok) {
+                int any = 0;
                 for (int ty = 0; ty < TH; ty++)
                     for (int tx = 0; tx < TW; tx++) {
                         int changed = !have_prev;
@@ -811,13 +865,14 @@ int main(int argc, char **argv) {
                         for (int y = ty * TILE; y < H && y < (ty + 1) * TILE && !changed; y++)
                             changed = memcmp(cur + (size_t)y * W + x0, prev + (size_t)y * W + x0, (size_t)w * 2) != 0;
                         if (!changed) continue;
+                        any = 1;
                         for (int i = 0; i < MAX_CLIENTS; i++) {
                             Client *c = &clients[i];
                             if (c->fd >= 0 && c->ws == 1 && c->dirty && !c->dirty[ty * TW + tx]) { c->dirty[ty * TW + tx] = 1; c->ndirty++; }
                         }
                     }
                 have_prev = 1;
-                memcpy(prev, cur, (size_t)W * H * 2);
+                if (any) { st.changed++; memcpy(prev, cur, (size_t)W * H * 2); }
             }
         }
         for (int i = 0; i < MAX_CLIENTS; i++) {

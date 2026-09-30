@@ -46,7 +46,7 @@ const view = document.getElementById("screen"), vctx = view.getContext("2d");
 const statusEl = document.getElementById("status");
 const calEl = document.getElementById("cal"), calText = document.getElementById("caltext");
 let W = 0, H = 0, T = 32, ws = null, frame = null, fctx = null, dirty = false, calibrated = false;
-let tiles = 0, bytes = 0, lastStat = performance.now();
+let tiles = 0, bytes = 0, lastStat = performance.now(), queue = Promise.resolve();
 
 const CAL_STEPS = {
   1: "On the MPC itself, tap the <b>top-left</b> corner of the screen.",
@@ -61,7 +61,16 @@ function connect() {
   ws.binaryType = "arraybuffer";
   ws.onopen = () => setStatus("connected");
   ws.onclose = () => { setStatus("disconnected – retrying…"); setTimeout(connect, 1500); };
-  ws.onmessage = (e) => (typeof e.data === "string" ? onText(JSON.parse(e.data)) : onTiles(e.data));
+  ws.onmessage = (e) => {   // handled strictly in order (decompressing is asynchronous)
+    const d = e.data;
+    queue = queue.then(async () => {
+      if (typeof d === "string") return onText(JSON.parse(d));
+      const fmt = new Uint8Array(d, 0, 1)[0];
+      if (fmt === 0) return onTiles(d.slice(1));
+      const s = new Blob([new Uint8Array(d, 1)]).stream().pipeThrough(new DecompressionStream("deflate"));
+      onTiles(await new Response(s).arrayBuffer());
+    }).catch((err) => setStatus("display error: " + err));
+  };
 }
 
 function onText(m) {
