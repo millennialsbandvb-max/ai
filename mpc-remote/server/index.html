@@ -64,6 +64,7 @@ function connect() {
 }
 
 function onText(m) {
+  if (m.type === "wait") { setStatus("waiting for the MPC to finish starting…"); return; }
   if (m.type === "hello") {
     W = m.w; H = m.h; T = m.tile; calibrated = m.calibrated;
     frame = document.createElement("canvas");   // the picture as the panel scans it (portrait)

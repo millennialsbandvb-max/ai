@@ -5,6 +5,9 @@
  * mounted sideways). We read whichever buffer the display is showing, convert it to 16-bit colour, and send the 32x32
  * tiles that changed, over a WebSocket; the page rotates the picture upright. Nothing is captured while nobody is
  * watching, and the process runs at low priority, so audio isn't disturbed.
+ * The display device is only opened while someone is watching, and only once MPC itself has it open: the first
+ * program to open it becomes its owner ("DRM master"), and if that isn't MPC, MPC can't show anything. Right after
+ * opening, we give up ownership anyway (DROP_MASTER), and we close it again when the last viewer leaves.
  * Touch: the page's clicks and drags are written into the touchscreen's own input device (/dev/input/eventN, the
  * ILI2117), so MPC sees them exactly like a finger. How the touch axes line up with the picture is found once by
  * calibration (three taps on the real screen, while MPC is kept from seeing them) and kept in /data/mpc-remote/.
@@ -13,6 +16,7 @@
  * touches are printed instead of injected. */
 #define _GNU_SOURCE
 #include <arpa/inet.h>
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netinet/in.h>
@@ -95,6 +99,7 @@ static int screen_open(void) {
     fclose(f);
     return 0;
 }
+static void screen_close(void) { free(fake_px); fake_px = NULL; }
 static int screen_grab(void) {
     for (int y = 0; y < H; y++)
         for (int x = 0; x < W; x++) {
@@ -132,29 +137,65 @@ static int fb_map(uint32_t fb_id) {   /* map the framebuffer the display is show
     return 0;
 }
 
-static int screen_open(void) {   /* the display device isn't always card0: find the one with a lit screen */
-    for (int n = 0; n < 8; n++) {
-        char dev[32];
-        snprintf(dev, sizeof dev, "/dev/dri/card%d", n);
-        int fd = open(dev, O_RDWR | O_CLOEXEC);
-        if (fd < 0) continue;
-        struct drm_mode_card_res res = {0};
-        if (ioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res) || !res.count_crtcs) { close(fd); continue; }
-        uint32_t *crtcs = calloc(res.count_crtcs, 4);
-        struct drm_mode_card_res r2 = {.crtc_id_ptr = (uintptr_t)crtcs, .count_crtcs = res.count_crtcs};
-        ioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &r2);
-        for (uint32_t i = 0; i < res.count_crtcs; i++) {
-            struct drm_mode_crtc c = {.crtc_id = crtcs[i]};
-            if (ioctl(fd, DRM_IOCTL_MODE_GETCRTC, &c) || !c.mode_valid || !c.fb_id) continue;
-            drm_fd = fd; crtc_id = c.crtc_id; W = c.mode.hdisplay; H = c.mode.vdisplay;
-            LOG("screen: %s crtc %u, %dx%d", dev, crtc_id, W, H);
-            free(crtcs);
-            return 0;
+/* the display device MPC has open (/dev/dri/cardN), found through its open files; -1 if MPC isn't running yet or
+ * hasn't opened its display */
+static int mpc_display(char *path, size_t n) {
+    DIR *proc = opendir("/proc");
+    if (!proc) return -1;
+    struct dirent *e;
+    int found = -1;
+    while (found && (e = readdir(proc))) {
+        if (e->d_name[0] < '1' || e->d_name[0] > '9') continue;
+        char p[300], comm[64] = {0};
+        snprintf(p, sizeof p, "/proc/%s/comm", e->d_name);
+        FILE *f = fopen(p, "r");
+        if (!f) continue;
+        const int ok = fgets(comm, sizeof comm, f) && !strcmp(comm, "MPC\n");
+        fclose(f);
+        if (!ok) continue;
+        snprintf(p, sizeof p, "/proc/%s/fd", e->d_name);
+        DIR *fds = opendir(p);
+        struct dirent *fe;
+        while (fds && found && (fe = readdir(fds))) {
+            char l[600], t[128] = {0};
+            snprintf(l, sizeof l, "/proc/%s/fd/%s", e->d_name, fe->d_name);
+            const ssize_t r = readlink(l, t, sizeof t - 1);
+            if (r > 0 && !strncmp(t, "/dev/dri/card", 13)) { snprintf(path, n, "%s", t); found = 0; }
         }
-        free(crtcs);
-        close(fd);
+        if (fds) closedir(fds);
     }
+    closedir(proc);
+    return found;
+}
+
+static int screen_open(void) {
+    char dev[128];
+    if (mpc_display(dev, sizeof dev)) return -1;   /* never before MPC owns the display */
+    int fd = open(dev, O_RDWR | O_CLOEXEC);
+    if (fd < 0) return -1;
+    if (ioctl(fd, DRM_IOCTL_DROP_MASTER, 0) == 0) LOG("had become display owner by accident; gave it up");
+    struct drm_mode_card_res res = {0};
+    if (ioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res) || !res.count_crtcs) { close(fd); return -1; }
+    uint32_t *crtcs = calloc(res.count_crtcs, 4);
+    struct drm_mode_card_res r2 = {.crtc_id_ptr = (uintptr_t)crtcs, .count_crtcs = res.count_crtcs};
+    ioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &r2);
+    for (uint32_t i = 0; i < res.count_crtcs; i++) {
+        struct drm_mode_crtc c = {.crtc_id = crtcs[i]};
+        if (ioctl(fd, DRM_IOCTL_MODE_GETCRTC, &c) || !c.mode_valid || !c.fb_id) continue;
+        drm_fd = fd; crtc_id = c.crtc_id; W = c.mode.hdisplay; H = c.mode.vdisplay;
+        LOG("screen: %s crtc %u, %dx%d", dev, crtc_id, W, H);
+        free(crtcs);
+        return 0;
+    }
+    free(crtcs);
+    close(fd);
     return -1;
+}
+
+static void screen_close(void) {
+    fb_unmap();
+    if (drm_fd >= 0) close(drm_fd);
+    drm_fd = -1;
 }
 
 static int screen_grab(void) {
@@ -469,7 +510,13 @@ static void http_reply(Client *c, const char *status, const char *type, const ch
     out_add(c, body, n);
 }
 
-static void send_hello(Client *c) {
+static int screen_ready = 0, have_prev = 0;
+
+static void send_hello(Client *c) {   /* screen size, and the whole screen to come */
+    free(c->dirty);
+    c->dirty = malloc((size_t)TW * TH);
+    memset(c->dirty, 1, (size_t)TW * TH);
+    c->ndirty = TW * TH;
     ws_text(c, "{\"type\":\"hello\",\"w\":%d,\"h\":%d,\"tile\":%d,\"calibrated\":%s,\"touch\":\"%s\"}", W, H, TILE,
             orient >= 0 ? "true" : "false", touch_dev);
 }
@@ -489,10 +536,8 @@ static void handle_http(Client *c) {   /* a complete request is in c->in */
                                 "Connection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", acc);
         out_add(c, h, (size_t)hl);
         c->ws = 1;
-        c->dirty = malloc((size_t)TW * TH);
-        memset(c->dirty, 1, (size_t)TW * TH);   /* a new viewer gets the whole screen */
-        c->ndirty = TW * TH;
-        send_hello(c);
+        if (screen_ready) send_hello(c);
+        else ws_text(c, "{\"type\":\"wait\"}");
         LOG("viewer connected");
     } else if (!strncmp(c->in, "GET / ", 6) || !strncmp(c->in, "GET /index.html ", 16)) {
         http_reply(c, "200 OK", "text/html; charset=utf-8", INDEX_HTML, sizeof INDEX_HTML - 1);
@@ -611,15 +656,6 @@ int main(int argc, char **argv) {
     struct sched_param sp = {0};
     sched_setscheduler(0, SCHED_BATCH, &sp);
 #endif
-    for (int tries = 0; screen_open(); tries++) {   /* the display may not be up yet at boot */
-        if (tries == 0) LOG("waiting for the screen...");
-        sleep(2);
-    }
-    TW = (W + TILE - 1) / TILE;
-    TH = (H + TILE - 1) / TILE;
-    cur = calloc((size_t)W * H, 2);
-    prev = calloc((size_t)W * H, 2);
-    rowbuf = malloc((size_t)W * 4);
     find_touch();
     load_conf();
 
@@ -630,8 +666,7 @@ int main(int argc, char **argv) {
     LOG("mpc-remote: http://<this MPC's address>:%d/", port);
     for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
 
-    uint64_t last_frame = 0;
-    int have_prev = 0;
+    uint64_t last_frame = 0, next_try = 0;
     for (;;) {
         struct pollfd pf[MAX_CLIENTS + 2];
         int np = 0, viewers = 0;
@@ -645,7 +680,7 @@ int main(int argc, char **argv) {
         const int calidx = np;
         if (cal.fd >= 0) pf[np++] = (struct pollfd){.fd = cal.fd, .events = POLLIN};
         const uint64_t t = now_ms();
-        int wait = viewers ? (int)(last_frame + FRAME_MS > t ? last_frame + FRAME_MS - t : 0) : 1000;
+        int wait = !viewers ? 1000 : !screen_ready ? 500 : (int)(last_frame + FRAME_MS > t ? last_frame + FRAME_MS - t : 0);
         poll(pf, (nfds_t)np, wait);
 
         if (pf[0].revents & POLLIN) {
@@ -701,8 +736,27 @@ int main(int argc, char **argv) {
             broadcast_text("{\"type\":\"cal\",\"error\":\"timed out\"}");
         }
 
+        /* the display: open it while someone watches (once MPC has it), close it when nobody does */
+        if (viewers && !screen_ready && now_ms() >= next_try) {
+            next_try = now_ms() + 2000;
+            if (screen_open() == 0) {
+                const int tw = (W + TILE - 1) / TILE, th = (H + TILE - 1) / TILE;
+                if (!cur || tw != TW || th != TH) {
+                    TW = tw; TH = th;
+                    free(cur); free(prev); free(rowbuf);
+                    cur = calloc((size_t)W * H, 2);
+                    prev = calloc((size_t)W * H, 2);
+                    rowbuf = malloc((size_t)W * 4);
+                }
+                screen_ready = 1;
+                have_prev = 0;
+                for (int i = 0; i < MAX_CLIENTS; i++) if (clients[i].fd >= 0 && clients[i].ws == 1) send_hello(&clients[i]);
+            }
+        }
+        if (!viewers && screen_ready) { screen_close(); screen_ready = 0; LOG("nobody watching: display closed"); }
+
         /* the screen: grab a frame, mark what changed for every viewer, send to whoever is ready */
-        if (viewers && now_ms() >= last_frame + FRAME_MS) {
+        if (viewers && screen_ready && now_ms() >= last_frame + FRAME_MS) {
             last_frame = now_ms();
             if (screen_grab() == 0) {
                 for (int ty = 0; ty < TH; ty++)
@@ -714,7 +768,7 @@ int main(int argc, char **argv) {
                         if (!changed) continue;
                         for (int i = 0; i < MAX_CLIENTS; i++) {
                             Client *c = &clients[i];
-                            if (c->fd >= 0 && c->ws == 1 && !c->dirty[ty * TW + tx]) { c->dirty[ty * TW + tx] = 1; c->ndirty++; }
+                            if (c->fd >= 0 && c->ws == 1 && c->dirty && !c->dirty[ty * TW + tx]) { c->dirty[ty * TW + tx] = 1; c->ndirty++; }
                         }
                     }
                 have_prev = 1;
@@ -723,7 +777,7 @@ int main(int argc, char **argv) {
         }
         for (int i = 0; i < MAX_CLIENTS; i++) {
             Client *c = &clients[i];
-            if (c->fd >= 0 && c->ws == 1 && c->ndirty && c->outlen == 0) send_tiles(c);
+            if (c->fd >= 0 && c->ws == 1 && c->dirty && c->ndirty && c->outlen == 0) send_tiles(c);
         }
     }
 }
