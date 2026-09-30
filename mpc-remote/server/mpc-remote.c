@@ -12,6 +12,9 @@
  * ILI2117), so MPC sees them exactly like a finger. How the touch axes line up with the picture is found once by
  * calibration (three taps on the real screen, while MPC is kept from seeing them) and kept in /data/mpc-remote/.
  *
+ * Name: it also answers multicast DNS for <hostname>.local and mpc.local, so the page can be opened by name
+ * (http://mpc-live-ii.local:8080/) instead of by the address the router happened to give.
+ *
  * Built with -DMPC_REMOTE_FAKE for testing on a PC: the screen comes from a BMP file ($MPC_REMOTE_FAKE_BMP) and
  * touches are printed instead of injected. */
 #define _GNU_SOURCE
@@ -22,6 +25,8 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <ifaddrs.h>
+#include <net/if.h>
 #include <poll.h>
 #include <sched.h>
 #include <signal.h>
@@ -717,6 +722,122 @@ static void send_tiles(Client *c) {   /* as many of this client's changed tiles 
     st.send_ms += (double)(now_ms() - t0);
 }
 
+/* ---- multicast DNS: answer "<hostname>.local" and "mpc.local" with this MPC's address ---------------------------- */
+static int mdns_fd = -1;
+static char mdns_names[2][64];   /* "mpc-live-ii", "mpc" (without .local) */
+
+static void mdns_join(void) {   /* join the mDNS group on every IPv4 interface (Wi-Fi may come up after us) */
+    struct ifaddrs *ifs, *i;
+    if (mdns_fd < 0 || getifaddrs(&ifs)) return;
+    for (i = ifs; i; i = i->ifa_next) {
+        if (!i->ifa_addr || i->ifa_addr->sa_family != AF_INET || (i->ifa_flags & IFF_LOOPBACK)) continue;
+        struct ip_mreq m = {.imr_multiaddr.s_addr = inet_addr("224.0.0.251"),
+                            .imr_interface = ((struct sockaddr_in *)i->ifa_addr)->sin_addr};
+        if (setsockopt(mdns_fd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &m, sizeof m) == 0)
+            LOG("name: answering on %s (%s)", i->ifa_name, inet_ntoa(m.imr_interface));
+    }
+    freeifaddrs(ifs);
+}
+
+static void mdns_open(void) {
+    char host[64] = {0};
+    gethostname(host, sizeof host - 1);
+    for (char *c = host; *c; c++) if (*c == '.') { *c = 0; break; }
+    snprintf(mdns_names[0], sizeof mdns_names[0], "%s", host[0] ? host : "mpc");
+    snprintf(mdns_names[1], sizeof mdns_names[1], "mpc");
+    int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0), one = 1;
+    unsigned char ttl = 255, loop = 0;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+#ifdef SO_REUSEPORT
+    setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof one);
+#endif
+    setsockopt(fd, IPPROTO_IP, IP_PKTINFO, &one, sizeof one);   /* to learn which of our addresses was asked */
+    setsockopt(fd, IPPROTO_IP, IP_MULTICAST_TTL, &ttl, sizeof ttl);
+    setsockopt(fd, IPPROTO_IP, IP_MULTICAST_LOOP, &loop, sizeof loop);
+    struct sockaddr_in a = {.sin_family = AF_INET, .sin_port = htons(5353), .sin_addr.s_addr = htonl(INADDR_ANY)};
+    if (fd < 0 || bind(fd, (struct sockaddr *)&a, sizeof a)) {
+        LOG("name: can't use port 5353 (%s); open the page by address", strerror(errno));
+        if (fd >= 0) close(fd);
+        return;
+    }
+    mdns_fd = fd;
+    LOG("name: http://%s.local and http://%s.local", mdns_names[0], mdns_names[1]);
+    mdns_join();
+}
+
+/* a DNS name at p (labels, maybe compressed) -> "a.b.c" lowercase; returns the offset after it in the message, or -1 */
+static int dns_name(const uint8_t *msg, int len, int p, char *out, int outn) {
+    int o = 0, end = -1, hops = 0;
+    while (p < len && hops < 16) {
+        const int l = msg[p];
+        if (l == 0) { if (end < 0) end = p + 1; out[o] = 0; return end; }
+        if ((l & 0xc0) == 0xc0) { if (p + 1 >= len) return -1; if (end < 0) end = p + 2; p = (l & 0x3f) << 8 | msg[p + 1]; hops++; continue; }
+        if (p + 1 + l > len || o + l + 2 > outn) return -1;
+        if (o) out[o++] = '.';
+        for (int k = 0; k < l; k++) { char c = (char)msg[p + 1 + k]; out[o++] = (char)(c >= 'A' && c <= 'Z' ? c + 32 : c); }
+        p += 1 + l;
+    }
+    return -1;
+}
+
+static void mdns_handle(void) {
+    uint8_t msg[1500], cbuf[256];
+    struct sockaddr_in from;
+    struct iovec iov = {msg, sizeof msg};
+    struct msghdr mh = {.msg_name = &from, .msg_namelen = sizeof from, .msg_iov = &iov, .msg_iovlen = 1,
+                        .msg_control = cbuf, .msg_controllen = sizeof cbuf};
+    const ssize_t n = recvmsg(mdns_fd, &mh, 0);
+    if (n < 12) return;
+    struct in_addr me = {0};
+    for (struct cmsghdr *c = CMSG_FIRSTHDR(&mh); c; c = CMSG_NXTHDR(&mh, c))
+        if (c->cmsg_level == IPPROTO_IP && c->cmsg_type == IP_PKTINFO) me = ((struct in_pktinfo *)CMSG_DATA(c))->ipi_spec_dst;
+    if (!me.s_addr) return;
+    if (msg[2] & 0x80) return;   /* a response, not a question */
+    const int qd = msg[4] << 8 | msg[5];
+    int p = 12;
+    for (int q = 0; q < qd && q < 8; q++) {
+        char name[256];
+        const int next = dns_name(msg, (int)n, p, name, sizeof name);
+        if (next < 0 || next + 4 > n) return;
+        const int type = msg[next] << 8 | msg[next + 1];
+        p = next + 4;
+        if (type != 1 && type != 255) continue;   /* A or ANY */
+        int which = -1;
+        for (int k = 0; k < 2; k++) {
+            char want[140];
+            snprintf(want, sizeof want, "%s.local", mdns_names[k]);
+            for (char *c = want; *c; c++) if (*c >= 'A' && *c <= 'Z') *c += 32;
+            if (!strcmp(name, want)) which = k;
+        }
+        if (which < 0) continue;
+        /* answer: [header][question, only for a one-shot (legacy) query][A record] */
+        const int legacy = ntohs(from.sin_port) != 5353;
+        uint8_t r[512];
+        int o = 0;
+        r[o++] = legacy ? msg[0] : 0; r[o++] = legacy ? msg[1] : 0;
+        r[o++] = 0x84; r[o++] = 0;                   /* response, authoritative */
+        r[o++] = 0; r[o++] = legacy ? 1 : 0;        /* questions */
+        r[o++] = 0; r[o++] = 1;                     /* answers */
+        r[o++] = 0; r[o++] = 0; r[o++] = 0; r[o++] = 0;
+        uint8_t enc[128];
+        int e = 0;
+        const char *parts[2] = {mdns_names[which], "local"};
+        for (int k = 0; k < 2; k++) { const int l = (int)strlen(parts[k]); enc[e++] = (uint8_t)l; memcpy(enc + e, parts[k], (size_t)l); e += l; }
+        enc[e++] = 0;
+        if (legacy) { memcpy(r + o, enc, (size_t)e); o += e; r[o++] = 0; r[o++] = 1; r[o++] = 0; r[o++] = 1; }
+        memcpy(r + o, enc, (size_t)e); o += e;
+        r[o++] = 0; r[o++] = 1;                               /* type A */
+        r[o++] = legacy ? 0x00 : 0x80; r[o++] = 1;            /* class IN (+ cache flush for multicast) */
+        r[o++] = 0; r[o++] = 0; r[o++] = 0; r[o++] = 120;     /* TTL 120 s */
+        r[o++] = 0; r[o++] = 4;
+        memcpy(r + o, &me.s_addr, 4); o += 4;
+        struct sockaddr_in to = from;
+        if (!legacy) { to.sin_addr.s_addr = inet_addr("224.0.0.251"); to.sin_port = htons(5353); }
+        sendto(mdns_fd, r, (size_t)o, 0, (struct sockaddr *)&to, sizeof to);
+        return;
+    }
+}
+
 /* ---- main loop ------------------------------------------------------------------------------------------------- */
 int main(int argc, char **argv) {
     const int port = argc > 1 ? atoi(argv[1]) : 8080;
@@ -737,10 +858,11 @@ int main(int argc, char **argv) {
     LOG("mpc-remote: http://<this MPC's address>:%d/", port);
     for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
 
-    uint64_t next_frame = 0, next_try = 0, busy_until = 0;
+    uint64_t next_frame = 0, next_try = 0, busy_until = 0, next_join = 0;
     zlib_load();
+    mdns_open();
     for (;;) {
-        struct pollfd pf[MAX_CLIENTS + 2];
+        struct pollfd pf[MAX_CLIENTS + 3];
         int np = 0, viewers = 0;
         pf[np++] = (struct pollfd){.fd = ls, .events = POLLIN};
         for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -751,6 +873,8 @@ int main(int argc, char **argv) {
         }
         const int calidx = np;
         if (cal.fd >= 0) pf[np++] = (struct pollfd){.fd = cal.fd, .events = POLLIN};
+        const int mdnsidx = np;
+        if (mdns_fd >= 0) pf[np++] = (struct pollfd){.fd = mdns_fd, .events = POLLIN};
         const uint64_t t = now_ms();
         int wait = !viewers ? 1000 : !screen_ready ? 500 : (int)(next_frame > t ? next_frame - t : 0);
         poll(pf, (nfds_t)np, wait);
@@ -789,6 +913,9 @@ int main(int argc, char **argv) {
                 }
             }
         }
+
+        if (mdns_fd >= 0 && np > mdnsidx && (pf[mdnsidx].revents & POLLIN)) mdns_handle();
+        if (mdns_fd >= 0 && now_ms() >= next_join) { next_join = now_ms() + 15000; mdns_join(); }   /* Wi-Fi (re)connects */
 
         /* calibration taps */
         if (cal.fd >= 0 && np > calidx && (pf[calidx].revents & POLLIN)) {

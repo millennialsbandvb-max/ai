@@ -1,6 +1,6 @@
 # MPC Remote
 
-See and touch the MPC Live II's screen from a web browser on the same Wi-Fi: `http://<MPC address>:8080/`.
+See and touch the MPC Live II's screen from a web browser on the same Wi-Fi: `http://mpc.local:8080/`, `http://<hostname>.local:8080/` (e.g. mpc-live-ii.local) or `http://<MPC address>:8080/`. The remote answers multicast DNS for those two names itself.
 
 - `server/`: the remote. One small C program (`mpc-remote.c`, no dependencies) with the page (`index.html`) built in.
   - Screen: MPC OS draws in software into a 32-bit DRM dumb buffer, 800x1280 (the panel is portrait, mounted
