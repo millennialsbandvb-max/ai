@@ -1,25 +1,38 @@
 #!/bin/sh
-# One-time MPC probe (started by mpc-probe.service after MPC). Once MPC's screen is up, it writes a report about how
-# the screen, touchscreen and inMusic's built-in web server are set up, to mpc-probe/ on the SD card (or the internal
-# drive if there's no SD card). Read-only: it only reads settings and takes screenshots. It runs once: delete the
-# mpc-probe folder to run it again on the next boot. Wi-Fi passwords and web-server login data are never copied.
+# MPC probe (started by mpc-probe.service after MPC). Once MPC's screen is up, it writes a report about how the
+# screen, touchscreen and inMusic's built-in web server are set up, as an mpc-probe2 folder on EVERY drive the MPC
+# has mounted (the SD card, the internal drive, ...), so it can be found wherever the card shows up. It also copies
+# in any report the first version (mpc-probe) left somewhere. Read-only apart from writing those folders: it only
+# reads settings and takes screenshots. Wi-Fi passwords and web-server login data are never copied.
+# It runs again on a boot where any drive is missing mpc-probe2/report.txt (e.g. after deleting it from the card).
 BIN=/usr/lib/nam-mpc/bin/mpc-probe
+NAME=mpc-probe2
+TMP=/tmp/$NAME
 
-# where to write: the SD card if one is mounted, else the internal drive
-DEST=""
-if mountpoint -q /sdcard 2>/dev/null; then DEST=/sdcard
-else
-    for m in $(awk '$2 ~ "^/media/" && $2 !~ "az01-internal$" {print $2}' /proc/mounts); do DEST=$m; break; done
-fi
-[ -n "$DEST" ] || DEST=/media/az01-internal
-OUT="$DEST/mpc-probe"
-[ -f "$OUT/report.txt" ] && exit 0    # already done
+# drives: every mount point under /media and /sdcard, except Akai's own content area; one per actual folder
+# (the same drive can be mounted twice, e.g. /sdcard and /media/az01-internal-sd)
+drives() {
+    seen=""
+    for m in $(awk '$2 ~ "^/media/" || $2 == "/sdcard" {print $2}' /proc/mounts); do
+        case "$m" in /media/acvs-content*) continue ;; esac
+        id=$(stat -c '%d:%i' "$m" 2>/dev/null) || continue
+        case " $seen " in *" $id "*) continue ;; esac
+        seen="$seen $id"
+        echo "$m"
+    done
+}
 
-i=0   # wait for MPC to be running (up to 5 minutes), then give it a minute to draw its screen
+i=0   # wait for MPC to be running (up to 5 minutes), then give it a minute to draw its screen and mount the card
 while ! pidof MPC >/dev/null && [ $i -lt 300 ]; do sleep 1; i=$((i + 1)); done
 sleep 60
-mkdir -p "$OUT" || exit 0
-R="$OUT/report.txt.part"
+
+todo=0
+for d in $(drives); do [ -f "$d/$NAME/report.txt" ] || todo=1; done
+[ $todo = 1 ] || exit 0   # every drive already has a report
+
+rm -rf "$TMP"
+mkdir -p "$TMP" || exit 0
+R="$TMP/report.txt"
 : > "$R"
 
 # lim <seconds> <command...>: run a command, stopping it if it takes longer (busybox has no timeout)
@@ -63,7 +76,7 @@ else
 fi
 
 sec "screen + touch probe"
-lim 30 "$BIN" "$OUT" >> "$R" 2>&1
+lim 30 "$BIN" "$TMP" >> "$R" 2>&1
 run cat /proc/bus/input/devices
 
 sec "uinput module"
@@ -90,6 +103,30 @@ sec "services + processes"
 run sh -c 'systemctl list-units --type=service --state=running --no-pager | head -60'
 run ps
 
+sec "drives"
+for d in $(awk '$2 ~ "^/media/" || $2 == "/sdcard" {print $1, $2, $3}' /proc/mounts | tr ' ' '|'); do
+    echo "mount: $d" | tr '|' ' ' >> "$R"
+done
+echo "writing to: $(drives | tr '\n' ' ')" >> "$R"
+run sh -c 'ls -la /media /sdcard /media/* 2>&1 | head -150'
+run df
+
+# the first version's report, wherever it went
+seen=""
+for d in /sdcard /media/*; do
+    [ -d "$d/mpc-probe" ] || continue
+    id=$(stat -c '%d:%i' "$d/mpc-probe" 2>/dev/null)
+    case " $seen " in *" $id "*) continue ;; esac   # the same drive under another name
+    seen="$seen $id"
+    echo "first version's report found in $d/mpc-probe" >> "$R"
+    t="$TMP/first-version$(echo "$d" | tr '/' '-')"
+    mkdir -p "$t" && cp -r "$d/mpc-probe/." "$t/" 2>>"$R"
+done
+
 sec "done $(date)"
-mv "$R" "$OUT/report.txt"
+for d in $(drives); do
+    rm -rf "$d/$NAME.new" && mkdir -p "$d/$NAME.new" && cp -r "$TMP/." "$d/$NAME.new/" &&
+        rm -rf "$d/$NAME" && mv "$d/$NAME.new" "$d/$NAME" || rm -rf "$d/$NAME.new"
+done
+rm -rf "$TMP"
 sync

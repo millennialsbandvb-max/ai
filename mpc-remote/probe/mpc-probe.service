@@ -1,5 +1,5 @@
 [Unit]
-Description=MPC probe: one-time screen/touch/web-server report to the SD card
+Description=MPC probe: screen/touch/web-server report to every drive
 After=acvs.service
 
 [Service]
