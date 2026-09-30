@@ -1,0 +1,10 @@
+[Unit]
+Description=Remove the MPC probe's report folders from the MPC's drives
+After=acvs.service
+
+[Service]
+Type=simple
+ExecStart=/bin/sh /usr/lib/nam-mpc/bin/mpc-cleanup.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,729 @@
+/* mpc-remote: see and touch the MPC's screen from a web browser on the same network.
+ *   mpc-remote [port]            (default 8080; open http://<mpc address>:<port>/)
+ *
+ * Screen: MPC OS draws its UI in software into a plain 32-bit DRM "dumb" buffer (800x1280, the panel is portrait and
+ * mounted sideways). We read whichever buffer the display is showing, convert it to 16-bit colour, and send the 32x32
+ * tiles that changed, over a WebSocket; the page rotates the picture upright. Nothing is captured while nobody is
+ * watching, and the process runs at low priority, so audio isn't disturbed.
+ * Touch: the page's clicks and drags are written into the touchscreen's own input device (/dev/input/eventN, the
+ * ILI2117), so MPC sees them exactly like a finger. How the touch axes line up with the picture is found once by
+ * calibration (three taps on the real screen, while MPC is kept from seeing them) and kept in /data/mpc-remote/.
+ *
+ * Built with -DMPC_REMOTE_FAKE for testing on a PC: the screen comes from a BMP file ($MPC_REMOTE_FAKE_BMP) and
+ * touches are printed instead of injected. */
+#define _GNU_SOURCE
+#include <arpa/inet.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <poll.h>
+#include <sched.h>
+#include <signal.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/ioctl.h>
+#include <sys/mman.h>
+#include <sys/resource.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <unistd.h>
+
+#include <drm/drm.h>
+#include <drm/drm_fourcc.h>
+#include <drm/drm_mode.h>
+#include <linux/input.h>
+
+#include "index_html.h"   /* generated from index.html: static const char INDEX_HTML[] */
+
+#define TILE 32
+#if defined(__arm__)
+_Static_assert(sizeof(struct input_event) == 16, "32-bit ARM kernels expect 16-byte input events");
+#endif
+#define MAX_CLIENTS 8
+#define FRAME_MS 80          /* at most ~12 screen updates a second */
+#define MAX_MSG (192 * 1024) /* tiles per WebSocket message, so a slow client gets fresh tiles rather than a backlog */
+#define CONF_DIR "/data/mpc-remote"
+#define CONF_FILE CONF_DIR "/touch.conf"
+
+static void logf_(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+}
+#define LOG(...) logf_(__VA_ARGS__)
+
+static uint64_t now_ms(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint64_t)t.tv_sec * 1000 + t.tv_nsec / 1000000;
+}
+
+/* ---- the screen ------------------------------------------------------------------------------------------------ */
+static int W, H, TW, TH;              /* screen size (portrait, as the panel scans) and in tiles */
+static uint16_t *cur, *prev;           /* 16-bit (RGB565) frames */
+static uint32_t *rowbuf;               /* one 32-bit row, copied out of the display buffer */
+
+#ifdef MPC_REMOTE_FAKE
+static uint32_t *fake_px;
+static int screen_open(void) {
+    const char *path = getenv("MPC_REMOTE_FAKE_BMP");
+    FILE *f = path ? fopen(path, "rb") : NULL;
+    if (!f) { LOG("set MPC_REMOTE_FAKE_BMP to a 24-bit BMP"); return -1; }
+    uint8_t hdr[54];
+    if (fread(hdr, 1, 54, f) != 54) { fclose(f); return -1; }
+    int32_t w, h;
+    memcpy(&w, hdr + 18, 4);
+    memcpy(&h, hdr + 22, 4);
+    W = w; H = h < 0 ? -h : h;
+    fake_px = malloc((size_t)W * H * 4);
+    const int row = (W * 3 + 3) & ~3;
+    uint8_t *line = malloc(row);
+    for (int y = 0; y < H; y++) {
+        if (fread(line, 1, row, f) != (size_t)row) break;
+        const int yy = h > 0 ? H - 1 - y : y;
+        for (int x = 0; x < W; x++)
+            fake_px[yy * W + x] = (uint32_t)line[x * 3 + 2] << 16 | line[x * 3 + 1] << 8 | line[x * 3];
+    }
+    free(line);
+    fclose(f);
+    return 0;
+}
+static int screen_grab(void) {
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+            uint32_t v = fake_px[y * W + x];
+            if (getenv("MPC_REMOTE_FAKE_ANIM") && y < 64 && x < 64) v ^= (uint32_t)(now_ms() / 500 % 2) * 0xffffff;
+            cur[y * W + x] = (uint16_t)((v >> 8 & 0xf800) | (v >> 5 & 0x07e0) | (v >> 3 & 0x001f));
+        }
+    return 0;
+}
+#else
+static int drm_fd = -1;
+static uint32_t crtc_id;
+static struct { uint32_t fb_id, handle, pitch, format; uint8_t *map; size_t len; } fbm = {0};
+
+static void fb_unmap(void) {
+    if (fbm.map) munmap(fbm.map, fbm.len);
+    if (fbm.handle) { struct drm_gem_close c = {.handle = fbm.handle}; ioctl(drm_fd, DRM_IOCTL_GEM_CLOSE, &c); }
+    memset(&fbm, 0, sizeof fbm);
+}
+
+static int fb_map(uint32_t fb_id) {   /* map the framebuffer the display is showing */
+    fb_unmap();
+    struct drm_mode_fb_cmd2 f = {.fb_id = fb_id};
+    if (ioctl(drm_fd, DRM_IOCTL_MODE_GETFB2, &f) || !f.handles[0]) return -1;
+    for (int i = 1; i < 4; i++)
+        if (f.handles[i] && f.handles[i] != f.handles[0]) { struct drm_gem_close c = {.handle = f.handles[i]}; ioctl(drm_fd, DRM_IOCTL_GEM_CLOSE, &c); }
+    fbm.fb_id = fb_id; fbm.handle = f.handles[0]; fbm.pitch = f.pitches[0]; fbm.format = f.pixel_format;
+    if (f.pixel_format != DRM_FORMAT_XRGB8888 && f.pixel_format != DRM_FORMAT_ARGB8888) { LOG("unexpected pixel format %08x", f.pixel_format); fb_unmap(); return -1; }
+    if ((int)f.width != W || (int)f.height != H) { LOG("screen size changed to %ux%u", f.width, f.height); fb_unmap(); return -1; }
+    struct drm_mode_map_dumb md = {.handle = f.handles[0]};
+    if (ioctl(drm_fd, DRM_IOCTL_MODE_MAP_DUMB, &md)) { fb_unmap(); return -1; }
+    fbm.len = (size_t)f.pitches[0] * f.height + f.offsets[0];
+    fbm.map = mmap(NULL, fbm.len, PROT_READ, MAP_SHARED, drm_fd, (off_t)md.offset);
+    if (fbm.map == MAP_FAILED) { fbm.map = NULL; fb_unmap(); return -1; }
+    return 0;
+}
+
+static int screen_open(void) {   /* the display device isn't always card0: find the one with a lit screen */
+    for (int n = 0; n < 8; n++) {
+        char dev[32];
+        snprintf(dev, sizeof dev, "/dev/dri/card%d", n);
+        int fd = open(dev, O_RDWR | O_CLOEXEC);
+        if (fd < 0) continue;
+        struct drm_mode_card_res res = {0};
+        if (ioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res) || !res.count_crtcs) { close(fd); continue; }
+        uint32_t *crtcs = calloc(res.count_crtcs, 4);
+        struct drm_mode_card_res r2 = {.crtc_id_ptr = (uintptr_t)crtcs, .count_crtcs = res.count_crtcs};
+        ioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &r2);
+        for (uint32_t i = 0; i < res.count_crtcs; i++) {
+            struct drm_mode_crtc c = {.crtc_id = crtcs[i]};
+            if (ioctl(fd, DRM_IOCTL_MODE_GETCRTC, &c) || !c.mode_valid || !c.fb_id) continue;
+            drm_fd = fd; crtc_id = c.crtc_id; W = c.mode.hdisplay; H = c.mode.vdisplay;
+            LOG("screen: %s crtc %u, %dx%d", dev, crtc_id, W, H);
+            free(crtcs);
+            return 0;
+        }
+        free(crtcs);
+        close(fd);
+    }
+    return -1;
+}
+
+static int screen_grab(void) {
+    struct drm_mode_crtc c = {.crtc_id = crtc_id};
+    if (ioctl(drm_fd, DRM_IOCTL_MODE_GETCRTC, &c) || !c.fb_id) return -1;
+    if (c.fb_id != fbm.fb_id && fb_map(c.fb_id)) return -1;   /* MPC switched buffers */
+    for (int y = 0; y < H; y++) {
+        memcpy(rowbuf, fbm.map + (size_t)y * fbm.pitch, (size_t)W * 4);   /* one sequential read of uncached memory */
+        uint16_t *d = cur + (size_t)y * W;
+        for (int x = 0; x < W; x++) {
+            const uint32_t v = rowbuf[x];
+            d[x] = (uint16_t)((v >> 8 & 0xf800) | (v >> 5 & 0x07e0) | (v >> 3 & 0x001f));
+        }
+    }
+    return 0;
+}
+#endif
+
+/* ---- touch ----------------------------------------------------------------------------------------------------- */
+/* orientation: how screen position (u across, v down the portrait picture, 0..1) becomes raw touch x/y:
+ * bit 0 swap (raw x follows v), bit 1 flip raw x, bit 2 flip raw y */
+static int orient = -1;   /* -1: not calibrated yet, use the guess */
+static const int GUESS = 0;
+static int tmin_x, tmax_x = 2048, tmin_y, tmax_y = 2048;
+#ifndef MPC_REMOTE_FAKE
+static int touch_fd = -1;     /* writing into the touchscreen's device */
+#endif
+static char touch_dev[64];
+static int tracking = 100, touching = 0;
+
+static int find_touch(void) {
+#ifdef MPC_REMOTE_FAKE
+    snprintf(touch_dev, sizeof touch_dev, "(fake)");
+    return 0;
+#else
+    for (int n = 0; n < 16; n++) {
+        char dev[64];
+        snprintf(dev, sizeof dev, "/dev/input/event%d", n);
+        int fd = open(dev, O_RDONLY | O_CLOEXEC);
+        if (fd < 0) continue;
+        unsigned long abs[(ABS_CNT + 8 * sizeof(long) - 1) / (8 * sizeof(long))] = {0};
+        ioctl(fd, EVIOCGBIT(EV_ABS, sizeof abs), abs);
+        const int mt = (abs[ABS_MT_POSITION_X / (8 * sizeof(long))] >> (ABS_MT_POSITION_X % (8 * sizeof(long)))) & 1;
+        if (mt) {
+            struct input_absinfo ax = {0}, ay = {0};
+            ioctl(fd, EVIOCGABS(ABS_MT_POSITION_X), &ax);
+            ioctl(fd, EVIOCGABS(ABS_MT_POSITION_Y), &ay);
+            tmin_x = ax.minimum; tmax_x = ax.maximum; tmin_y = ay.minimum; tmax_y = ay.maximum;
+            char name[128] = {0};
+            ioctl(fd, EVIOCGNAME(sizeof name - 1), name);
+            close(fd);
+            snprintf(touch_dev, sizeof touch_dev, "%s", dev);
+            touch_fd = open(dev, O_WRONLY | O_CLOEXEC);
+            LOG("touch: %s \"%s\" x %d..%d y %d..%d%s", dev, name, tmin_x, tmax_x, tmin_y, tmax_y,
+                touch_fd < 0 ? " (can't open for writing)" : "");
+            return touch_fd < 0 ? -1 : 0;
+        }
+        close(fd);
+    }
+    LOG("touch: no touchscreen found");
+    return -1;
+#endif
+}
+
+static void to_raw(int px, int py, int *rx, int *ry) {
+    double u = W > 1 ? (double)px / (W - 1) : 0, v = H > 1 ? (double)py / (H - 1) : 0;
+    const int o = orient < 0 ? GUESS : orient;
+    double a = (o & 1) ? v : u, b = (o & 1) ? u : v;
+    if (o & 2) a = 1 - a;
+    if (o & 4) b = 1 - b;
+    a = a < 0 ? 0 : a > 1 ? 1 : a;
+    b = b < 0 ? 0 : b > 1 ? 1 : b;
+    *rx = tmin_x + (int)(a * (tmax_x - tmin_x) + 0.5);
+    *ry = tmin_y + (int)(b * (tmax_y - tmin_y) + 0.5);
+}
+
+static void emit(struct input_event *ev, int n) {
+#ifdef MPC_REMOTE_FAKE
+    for (int i = 0; i < n; i++) printf("inject type %d code %d value %d\n", ev[i].type, ev[i].code, ev[i].value);
+    fflush(stdout);
+#else
+    if (touch_fd >= 0 && write(touch_fd, ev, sizeof *ev * n) < 0) LOG("touch write failed: %s", strerror(errno));
+#endif
+}
+
+static void touch(char kind, int px, int py) {   /* 'd'own, 'm'ove, 'u'p, in portrait screen pixels */
+    struct input_event ev[8];
+    int n = 0, rx = 0, ry = 0;
+#define EV(t, c, v) (memset(&ev[n], 0, sizeof ev[n]), ev[n].type = (t), ev[n].code = (c), ev[n].value = (v), n++)
+    if (kind == 'u') {
+        if (!touching) return;
+        touching = 0;
+        EV(EV_ABS, ABS_MT_SLOT, 0);
+        EV(EV_ABS, ABS_MT_TRACKING_ID, -1);
+        EV(EV_KEY, BTN_TOUCH, 0);
+        EV(EV_SYN, SYN_REPORT, 0);
+    } else {
+        if (kind == 'm' && !touching) return;
+        to_raw(px, py, &rx, &ry);
+        EV(EV_ABS, ABS_MT_SLOT, 0);
+        if (kind == 'd') {
+            if (touching) touch('u', 0, 0), n = 0, EV(EV_ABS, ABS_MT_SLOT, 0);
+            touching = 1;
+            EV(EV_ABS, ABS_MT_TRACKING_ID, tracking = tracking % 60000 + 1);
+        }
+        EV(EV_ABS, ABS_MT_POSITION_X, rx);
+        EV(EV_ABS, ABS_MT_POSITION_Y, ry);
+        if (kind == 'd') EV(EV_KEY, BTN_TOUCH, 1);
+        EV(EV_ABS, ABS_X, rx);
+        EV(EV_ABS, ABS_Y, ry);
+        EV(EV_SYN, SYN_REPORT, 0);
+    }
+#undef EV
+    emit(ev, n);
+}
+
+static void load_conf(void) {
+    FILE *f = fopen(CONF_FILE, "r");
+    if (!f) return;
+    int o;
+    if (fscanf(f, "orient=%d", &o) == 1 && o >= 0 && o < 8) orient = o;
+    fclose(f);
+    LOG("touch orientation %d (from %s)", orient, CONF_FILE);
+}
+
+static void save_conf(void) {
+    mkdir(CONF_DIR, 0755);
+    FILE *f = fopen(CONF_FILE ".new", "w");
+    if (!f) { LOG("can't save %s: %s", CONF_FILE, strerror(errno)); return; }
+    fprintf(f, "orient=%d\n", orient);
+    fclose(f);
+    rename(CONF_FILE ".new", CONF_FILE);
+    sync();
+}
+
+/* calibration: while MPC is kept from seeing the touchscreen, read three taps on the real screen:
+ * top-left, top-right, bottom-left of the screen as it's seen (landscape) */
+static struct { int fd, step, x, y, down; uint64_t started; int rx[3], ry[3]; } cal = {.fd = -1};
+
+static void cal_stop(void) {
+    if (cal.fd >= 0) { ioctl(cal.fd, EVIOCGRAB, 0); close(cal.fd); }
+    cal.fd = -1;
+    cal.step = 0;
+}
+
+static int cal_start(void) {
+#ifdef MPC_REMOTE_FAKE
+    cal.fd = open("/dev/null", O_RDONLY);
+#else
+    cal_stop();
+    cal.fd = open(touch_dev, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    if (cal.fd < 0) return -1;
+    if (ioctl(cal.fd, EVIOCGRAB, 1)) { close(cal.fd); cal.fd = -1; return -1; }   /* MPC won't see these taps */
+#endif
+    cal.step = 1; cal.down = 0; cal.started = now_ms();
+    return 0;
+}
+
+static int cal_finish(void) {   /* -> orientation, or -1 if the taps don't make sense */
+    /* landscape TL is portrait (u=0, v=1); TR is (u=0, v=0); BL is (u=1, v=1) */
+    const int dvx = cal.rx[1] - cal.rx[0], dvy = cal.ry[1] - cal.ry[0];   /* moving along v (TL -> TR: v 1 -> 0) */
+    const int dux = cal.rx[2] - cal.rx[0], duy = cal.ry[2] - cal.ry[0];   /* moving along u (TL -> BL: u 0 -> 1) */
+    const int span = (tmax_x - tmin_x + tmax_y - tmin_y) / 2;
+    int o;
+    if (abs(dux) > abs(duy) && abs(dvy) > abs(dvx)) {          /* raw x follows u, raw y follows v */
+        o = 0;
+        if (dux < 0) o |= 2;
+        if (dvy > 0) o |= 4;   /* v went down while raw y went up: flipped */
+    } else if (abs(duy) > abs(dux) && abs(dvx) > abs(dvy)) {   /* raw x follows v, raw y follows u */
+        o = 1;
+        if (dvx > 0) o |= 2;
+        if (duy < 0) o |= 4;
+    } else return -1;
+    if (abs(dux) + abs(duy) < span / 4 || abs(dvx) + abs(dvy) < span / 4) return -1;   /* taps too close together */
+    return o;
+}
+
+/* ---- clients: HTTP + WebSocket --------------------------------------------------------------------------------- */
+typedef struct {
+    int fd, ws;
+    char in[8192];
+    size_t inlen;
+    uint8_t *out;
+    size_t outlen, outcap, outpos;
+    uint8_t *dirty;   /* tiles this client hasn't been sent since they changed */
+    int ndirty;
+} Client;
+static Client clients[MAX_CLIENTS];
+
+static void out_add(Client *c, const void *p, size_t n) {
+    if (c->outlen + n > c->outcap) {
+        size_t cap = c->outcap ? c->outcap : 65536;
+        while (cap < c->outlen + n) cap *= 2;
+        c->out = realloc(c->out, cap);
+        c->outcap = cap;
+    }
+    memcpy(c->out + c->outlen, p, n);
+    c->outlen += n;
+}
+
+static void ws_frame(Client *c, int opcode, const void *p, size_t n) {
+    uint8_t h[10];
+    size_t hl;
+    h[0] = (uint8_t)(0x80 | opcode);
+    if (n < 126) { h[1] = (uint8_t)n; hl = 2; }
+    else if (n < 65536) { h[1] = 126; h[2] = (uint8_t)(n >> 8); h[3] = (uint8_t)n; hl = 4; }
+    else { h[1] = 127; for (int i = 0; i < 8; i++) h[2 + i] = (uint8_t)((uint64_t)n >> (56 - 8 * i)); hl = 10; }
+    out_add(c, h, hl);
+    out_add(c, p, n);
+}
+
+static void ws_text(Client *c, const char *fmt, ...) {
+    char b[512];
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(b, sizeof b, fmt, ap);
+    va_end(ap);
+    ws_frame(c, 1, b, (size_t)n);
+}
+
+static void broadcast_text(const char *msg) {
+    for (int i = 0; i < MAX_CLIENTS; i++) if (clients[i].fd >= 0 && clients[i].ws) ws_frame(&clients[i], 1, msg, strlen(msg));
+}
+
+static void cal_tap(int x, int y) {   /* a finished tap on the real screen during calibration */
+    if (cal.fd < 0 || cal.step < 1 || cal.step > 3) return;
+    cal.rx[cal.step - 1] = x;
+    cal.ry[cal.step - 1] = y;
+    LOG("calibration tap %d: raw %d,%d", cal.step, x, y);
+    char m[96];
+    if (++cal.step <= 3) { snprintf(m, sizeof m, "{\"type\":\"cal\",\"step\":%d}", cal.step); broadcast_text(m); return; }
+    const int o = cal_finish();
+    cal_stop();
+    if (o < 0) { broadcast_text("{\"type\":\"cal\",\"error\":\"those taps didn't line up; try again\"}"); return; }
+    orient = o;
+    save_conf();
+    snprintf(m, sizeof m, "{\"type\":\"cal\",\"done\":true,\"orient\":%d}", o);
+    broadcast_text(m);
+    LOG("touch orientation %d saved", o);
+}
+
+static void client_close(Client *c) {
+    if (c->fd >= 0) close(c->fd);
+    free(c->out);
+    free(c->dirty);
+    memset(c, 0, sizeof *c);
+    c->fd = -1;
+}
+
+/* SHA-1 and base64, for the WebSocket handshake */
+static void sha1(const uint8_t *msg, size_t len, uint8_t out[20]) {
+    uint32_t h[5] = {0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0};
+    const size_t total = ((len + 8) / 64 + 1) * 64;
+    uint8_t *m = calloc(1, total);
+    memcpy(m, msg, len);
+    m[len] = 0x80;
+    const uint64_t bits = (uint64_t)len * 8;
+    for (int i = 0; i < 8; i++) m[total - 1 - i] = (uint8_t)(bits >> (8 * i));
+#define ROL(x, n) (((x) << (n)) | ((x) >> (32 - (n))))
+    for (size_t off = 0; off < total; off += 64) {
+        uint32_t w[80];
+        for (int i = 0; i < 16; i++)
+            w[i] = (uint32_t)m[off + 4 * i] << 24 | m[off + 4 * i + 1] << 16 | m[off + 4 * i + 2] << 8 | m[off + 4 * i + 3];
+        for (int i = 16; i < 80; i++) w[i] = ROL(w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1);
+        uint32_t a = h[0], b = h[1], cc = h[2], d = h[3], e = h[4];
+        for (int i = 0; i < 80; i++) {
+            uint32_t f, k;
+            if (i < 20) { f = (b & cc) | (~b & d); k = 0x5A827999; }
+            else if (i < 40) { f = b ^ cc ^ d; k = 0x6ED9EBA1; }
+            else if (i < 60) { f = (b & cc) | (b & d) | (cc & d); k = 0x8F1BBCDC; }
+            else { f = b ^ cc ^ d; k = 0xCA62C1D6; }
+            const uint32_t t = ROL(a, 5) + f + e + k + w[i];
+            e = d; d = cc; cc = ROL(b, 30); b = a; a = t;
+        }
+        h[0] += a; h[1] += b; h[2] += cc; h[3] += d; h[4] += e;
+    }
+#undef ROL
+    free(m);
+    for (int i = 0; i < 5; i++) for (int j = 0; j < 4; j++) out[4 * i + j] = (uint8_t)(h[i] >> (24 - 8 * j));
+}
+
+static void base64(const uint8_t *in, size_t n, char *out) {
+    static const char T[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    size_t o = 0;
+    for (size_t i = 0; i < n; i += 3) {
+        const uint32_t v = (uint32_t)in[i] << 16 | (i + 1 < n ? in[i + 1] << 8 : 0) | (i + 2 < n ? in[i + 2] : 0);
+        out[o++] = T[v >> 18 & 63];
+        out[o++] = T[v >> 12 & 63];
+        out[o++] = i + 1 < n ? T[v >> 6 & 63] : '=';
+        out[o++] = i + 2 < n ? T[v & 63] : '=';
+    }
+    out[o] = 0;
+}
+
+static const char *header(const char *req, const char *name) {   /* value of a request header, or NULL */
+    const size_t n = strlen(name);
+    for (const char *p = strstr(req, "\r\n"); p && p[2]; p = strstr(p + 2, "\r\n")) {
+        if (!strncasecmp(p + 2, name, n) && p[2 + n] == ':') {
+            const char *v = p + 3 + n;
+            while (*v == ' ') v++;
+            return v;
+        }
+    }
+    return NULL;
+}
+
+static void http_reply(Client *c, const char *status, const char *type, const char *body, size_t n) {
+    char h[256];
+    const int hl = snprintf(h, sizeof h, "HTTP/1.1 %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
+                            "Cache-Control: no-store\r\nConnection: close\r\n\r\n", status, type, n);
+    out_add(c, h, (size_t)hl);
+    out_add(c, body, n);
+}
+
+static void send_hello(Client *c) {
+    ws_text(c, "{\"type\":\"hello\",\"w\":%d,\"h\":%d,\"tile\":%d,\"calibrated\":%s,\"touch\":\"%s\"}", W, H, TILE,
+            orient >= 0 ? "true" : "false", touch_dev);
+}
+
+static void handle_http(Client *c) {   /* a complete request is in c->in */
+    if (!strncmp(c->in, "GET /ws ", 8) && header(c->in, "Sec-WebSocket-Key")) {
+        const char *k = header(c->in, "Sec-WebSocket-Key");
+        char key[128];
+        size_t kl = strcspn(k, "\r\n");
+        if (kl > 60) kl = 60;
+        snprintf(key, sizeof key, "%.*s258EAFA5-E914-47DA-95CA-C5AB0DC85B11", (int)kl, k);
+        uint8_t dg[20];
+        char acc[40], h[256];
+        sha1((const uint8_t *)key, strlen(key), dg);
+        base64(dg, 20, acc);
+        const int hl = snprintf(h, sizeof h, "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
+                                "Connection: Upgrade\r\nSec-WebSocket-Accept: %s\r\n\r\n", acc);
+        out_add(c, h, (size_t)hl);
+        c->ws = 1;
+        c->dirty = malloc((size_t)TW * TH);
+        memset(c->dirty, 1, (size_t)TW * TH);   /* a new viewer gets the whole screen */
+        c->ndirty = TW * TH;
+        send_hello(c);
+        LOG("viewer connected");
+    } else if (!strncmp(c->in, "GET / ", 6) || !strncmp(c->in, "GET /index.html ", 16)) {
+        http_reply(c, "200 OK", "text/html; charset=utf-8", INDEX_HTML, sizeof INDEX_HTML - 1);
+    } else {
+        http_reply(c, "404 Not Found", "text/plain", "not found\n", 10);
+    }
+    c->inlen = 0;
+}
+
+static void handle_command(Client *c, char *s) {   /* a text message from the page */
+    int x, y;
+    if (sscanf(s, "d %d %d", &x, &y) == 2) { if (cal.fd < 0) touch('d', x, y); }
+    else if (sscanf(s, "m %d %d", &x, &y) == 2) { if (cal.fd < 0) touch('m', x, y); }
+    else if (s[0] == 'u') { if (cal.fd < 0) touch('u', 0, 0); }
+    else if (!strcmp(s, "cal")) {
+        if (touching) touch('u', 0, 0);
+        if (cal_start()) broadcast_text("{\"type\":\"cal\",\"error\":\"can't read the touchscreen\"}");
+        else broadcast_text("{\"type\":\"cal\",\"step\":1}");
+    } else if (!strcmp(s, "calcancel")) {
+        cal_stop();
+        broadcast_text("{\"type\":\"cal\",\"cancelled\":true}");
+    }
+#ifdef MPC_REMOTE_FAKE
+    else if (sscanf(s, "fakecal %d %d", &x, &y) == 2) cal_tap(x, y);   /* test hook: a raw tap on the "real" screen */
+#endif
+    (void)c;
+}
+
+static void handle_ws(Client *c) {   /* parse complete frames from c->in */
+    size_t pos = 0;
+    while (c->inlen - pos >= 2) {
+        const uint8_t *p = (uint8_t *)c->in + pos;
+        const int op = p[0] & 15, masked = p[1] & 0x80;
+        uint64_t n = p[1] & 127;
+        size_t hl = 2;
+        if (n == 126) { if (c->inlen - pos < 4) break; n = (uint64_t)p[2] << 8 | p[3]; hl = 4; }
+        else if (n == 127) { client_close(c); return; }   /* the page never sends big messages */
+        if (masked) hl += 4;
+        if (c->inlen - pos < hl + n) break;
+        char msg[1024];
+        if (n >= sizeof msg) { client_close(c); return; }
+        for (uint64_t i = 0; i < n; i++) msg[i] = (char)(p[hl + i] ^ (masked ? p[hl - 4 + (i & 3)] : 0));
+        msg[n] = 0;
+        if (op == 8) { ws_frame(c, 8, "", 0); c->ws = 2; }   /* close: reply, then close once sent */
+        else if (op == 9) ws_frame(c, 10, msg, n);
+        else if (op == 1) handle_command(c, msg);
+        pos += hl + n;
+    }
+    memmove(c->in, c->in + pos, c->inlen - pos);
+    c->inlen -= pos;
+}
+
+/* tiles: raw RGB565, or runs of one colour, whichever is smaller.
+ * record: [tile x u16][tile y u16][mode u8: 0 raw, 1 runs][0 u8][0 u16][data length u32][data]
+ * runs are [count u16][colour u16] pairs, in reading order; all little-endian */
+static size_t encode_tile(int tx, int ty, uint8_t *o) {
+    const int x0 = tx * TILE, y0 = ty * TILE, w = W - x0 < TILE ? W - x0 : TILE, h = H - y0 < TILE ? H - y0 : TILE;
+    uint8_t *d = o + 12;
+    size_t runs = 0;
+    uint16_t col = cur[(size_t)y0 * W + x0];
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            const uint16_t v = cur[(size_t)(y0 + y) * W + x0 + x];
+            if (v != col) { runs++; col = v; }
+        }
+    runs++;
+    const size_t raw = (size_t)w * h * 2;
+    uint32_t len = 0;
+    if (runs * 4 < raw) {
+        uint16_t run = 0;
+        col = cur[(size_t)y0 * W + x0];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++) {
+                const uint16_t v = cur[(size_t)(y0 + y) * W + x0 + x];
+                if (v == col) { run++; continue; }
+                memcpy(d + len, &run, 2); memcpy(d + len + 2, &col, 2); len += 4;
+                col = v; run = 1;
+            }
+        memcpy(d + len, &run, 2); memcpy(d + len + 2, &col, 2); len += 4;
+        o[4] = 1;
+    } else {
+        for (int y = 0; y < h; y++) { memcpy(d + len, cur + (size_t)(y0 + y) * W + x0, (size_t)w * 2); len += (uint32_t)w * 2; }
+        o[4] = 0;
+    }
+    const uint16_t txx = (uint16_t)tx, tyy = (uint16_t)ty;
+    memcpy(o, &txx, 2);
+    memcpy(o + 2, &tyy, 2);
+    o[5] = o[6] = o[7] = 0;
+    memcpy(o + 8, &len, 4);
+    return 12 + len;
+}
+
+static void send_tiles(Client *c) {   /* as many of this client's changed tiles as fit in one message */
+    static uint8_t *buf;
+    if (!buf) buf = malloc(MAX_MSG + 8 + 4 + TILE * TILE * 4 + 16);
+    size_t n = 4;
+    uint32_t count = 0;
+    for (int t = 0; t < TW * TH && n < MAX_MSG; t++) {
+        if (!c->dirty[t]) continue;
+        n += encode_tile(t % TW, t / TW, buf + n);
+        c->dirty[t] = 0;
+        c->ndirty--;
+        count++;
+    }
+    memcpy(buf, &count, 4);
+    if (count) ws_frame(c, 2, buf, n);
+}
+
+/* ---- main loop ------------------------------------------------------------------------------------------------- */
+int main(int argc, char **argv) {
+    const int port = argc > 1 ? atoi(argv[1]) : 8080;
+    signal(SIGPIPE, SIG_IGN);
+    setvbuf(stdout, NULL, _IOLBF, 0);
+    setpriority(PRIO_PROCESS, 0, 10);
+#ifdef SCHED_BATCH
+    struct sched_param sp = {0};
+    sched_setscheduler(0, SCHED_BATCH, &sp);
+#endif
+    for (int tries = 0; screen_open(); tries++) {   /* the display may not be up yet at boot */
+        if (tries == 0) LOG("waiting for the screen...");
+        sleep(2);
+    }
+    TW = (W + TILE - 1) / TILE;
+    TH = (H + TILE - 1) / TILE;
+    cur = calloc((size_t)W * H, 2);
+    prev = calloc((size_t)W * H, 2);
+    rowbuf = malloc((size_t)W * 4);
+    find_touch();
+    load_conf();
+
+    int ls = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0), one = 1;
+    setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    struct sockaddr_in a = {.sin_family = AF_INET, .sin_port = htons((uint16_t)port), .sin_addr.s_addr = htonl(INADDR_ANY)};
+    if (bind(ls, (struct sockaddr *)&a, sizeof a) || listen(ls, 8)) { LOG("can't listen on port %d: %s", port, strerror(errno)); return 1; }
+    LOG("mpc-remote: http://<this MPC's address>:%d/", port);
+    for (int i = 0; i < MAX_CLIENTS; i++) clients[i].fd = -1;
+
+    uint64_t last_frame = 0;
+    int have_prev = 0;
+    for (;;) {
+        struct pollfd pf[MAX_CLIENTS + 2];
+        int np = 0, viewers = 0;
+        pf[np++] = (struct pollfd){.fd = ls, .events = POLLIN};
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            Client *c = &clients[i];
+            if (c->fd < 0) continue;
+            if (c->ws == 1) viewers++;
+            pf[np++] = (struct pollfd){.fd = c->fd, .events = (short)(POLLIN | (c->outpos < c->outlen ? POLLOUT : 0))};
+        }
+        const int calidx = np;
+        if (cal.fd >= 0) pf[np++] = (struct pollfd){.fd = cal.fd, .events = POLLIN};
+        const uint64_t t = now_ms();
+        int wait = viewers ? (int)(last_frame + FRAME_MS > t ? last_frame + FRAME_MS - t : 0) : 1000;
+        poll(pf, (nfds_t)np, wait);
+
+        if (pf[0].revents & POLLIN) {
+            int fd = accept4(ls, NULL, NULL, SOCK_NONBLOCK | SOCK_CLOEXEC);
+            if (fd >= 0) {
+                int slot = -1;
+                for (int i = 0; i < MAX_CLIENTS; i++) if (clients[i].fd < 0) { slot = i; break; }
+                if (slot < 0) close(fd);
+                else { memset(&clients[slot], 0, sizeof clients[slot]); clients[slot].fd = fd; setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one); }
+            }
+        }
+        for (int k = 1; k < calidx; k++) {
+            Client *c = NULL;
+            for (int i = 0; i < MAX_CLIENTS; i++) if (clients[i].fd == pf[k].fd) c = &clients[i];
+            if (!c) continue;
+            if (pf[k].revents & (POLLERR | POLLHUP)) { if (c->ws) LOG("viewer left"); client_close(c); continue; }
+            if (pf[k].revents & POLLIN) {
+                ssize_t r = read(c->fd, c->in + c->inlen, sizeof c->in - 1 - c->inlen);
+                if (r <= 0) { if (c->ws) LOG("viewer left"); client_close(c); continue; }
+                c->inlen += (size_t)r;
+                c->in[c->inlen] = 0;
+                if (c->ws) handle_ws(c);
+                else if (strstr(c->in, "\r\n\r\n")) handle_http(c);
+                else if (c->inlen >= sizeof c->in - 1) { client_close(c); continue; }
+                if (c->fd < 0) continue;
+            }
+            if ((pf[k].revents & POLLOUT) && c->outpos < c->outlen) {
+                ssize_t w = write(c->fd, c->out + c->outpos, c->outlen - c->outpos);
+                if (w < 0 && errno != EAGAIN) { client_close(c); continue; }
+                if (w > 0) c->outpos += (size_t)w;
+                if (c->outpos == c->outlen) {
+                    c->outpos = c->outlen = 0;
+                    if (!c->ws || c->ws == 2) { client_close(c); continue; }   /* plain HTTP, or a closed WebSocket */
+                }
+            }
+        }
+
+        /* calibration taps */
+        if (cal.fd >= 0 && np > calidx && (pf[calidx].revents & POLLIN)) {
+            struct input_event ev[64];
+            ssize_t r = read(cal.fd, ev, sizeof ev);
+            for (ssize_t i = 0; i < r / (ssize_t)sizeof *ev; i++) {
+                if (ev[i].type == EV_ABS && (ev[i].code == ABS_MT_POSITION_X || ev[i].code == ABS_X)) cal.x = ev[i].value;
+                if (ev[i].type == EV_ABS && (ev[i].code == ABS_MT_POSITION_Y || ev[i].code == ABS_Y)) cal.y = ev[i].value;
+                if (ev[i].type == EV_KEY && ev[i].code == BTN_TOUCH) {
+                    if (ev[i].value) cal.down = 1;
+                    else if (cal.down) { cal.down = 0; cal_tap(cal.x, cal.y); }
+                }
+            }
+        }
+        if (cal.fd >= 0 && now_ms() - cal.started > 60000) {   /* never keep MPC's touchscreen for long */
+            cal_stop();
+            broadcast_text("{\"type\":\"cal\",\"error\":\"timed out\"}");
+        }
+
+        /* the screen: grab a frame, mark what changed for every viewer, send to whoever is ready */
+        if (viewers && now_ms() >= last_frame + FRAME_MS) {
+            last_frame = now_ms();
+            if (screen_grab() == 0) {
+                for (int ty = 0; ty < TH; ty++)
+                    for (int tx = 0; tx < TW; tx++) {
+                        int changed = !have_prev;
+                        const int x0 = tx * TILE, w = W - x0 < TILE ? W - x0 : TILE;
+                        for (int y = ty * TILE; y < H && y < (ty + 1) * TILE && !changed; y++)
+                            changed = memcmp(cur + (size_t)y * W + x0, prev + (size_t)y * W + x0, (size_t)w * 2) != 0;
+                        if (!changed) continue;
+                        for (int i = 0; i < MAX_CLIENTS; i++) {
+                            Client *c = &clients[i];
+                            if (c->fd >= 0 && c->ws == 1 && !c->dirty[ty * TW + tx]) { c->dirty[ty * TW + tx] = 1; c->ndirty++; }
+                        }
+                    }
+                have_prev = 1;
+                memcpy(prev, cur, (size_t)W * H * 2);
+            }
+        }
+        for (int i = 0; i < MAX_CLIENTS; i++) {
+            Client *c = &clients[i];
+            if (c->fd >= 0 && c->ws == 1 && c->ndirty && c->outlen == 0) send_tiles(c);
+        }
+    }
+}

@@ -1,0 +1,13 @@
+[Unit]
+Description=MPC Remote: the MPC screen in a web browser (port 8080)
+After=acvs.service
+
+[Service]
+Type=simple
+ExecStart=/usr/lib/nam-mpc/bin/mpc-remote 8080
+Restart=on-failure
+RestartSec=5
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

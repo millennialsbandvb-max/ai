@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>MPC Remote</title>
+<style>
+  :root { --bg: #111; --fg: #ddd; --dim: #888; --accent: #e5742b; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+               font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 12px; padding: 6px 12px; flex: none; }
+  header b { color: var(--accent); letter-spacing: .04em; }
+  #status { color: var(--dim); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  button { background: #222; color: var(--fg); border: 1px solid #444; border-radius: 6px; padding: 6px 12px;
+           font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  main { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; padding: 0 8px 8px; }
+  canvas { max-width: 100%; max-height: 100%; background: #000; touch-action: none; cursor: crosshair;
+           border-radius: 4px; box-shadow: 0 0 0 1px #333; }
+  #cal { position: fixed; inset: 0; background: rgba(0,0,0,.82); display: none; align-items: center;
+         justify-content: center; text-align: center; padding: 24px; }
+  #cal.on { display: flex; }
+  #cal div { max-width: 520px; }
+  #cal h2 { color: var(--accent); margin: 0 0 12px; }
+  #cal p { font-size: 17px; }
+</style>
+</head>
+<body>
+<header>
+  <b>MPC REMOTE</b>
+  <span id="status">connecting…</span>
+  <button id="calbtn" type="button">Calibrate touch</button>
+</header>
+<main><canvas id="screen" width="1280" height="800"></canvas></main>
+<div id="cal"><div>
+  <h2>Touch calibration</h2>
+  <p id="caltext"></p>
+  <button id="calcancel" type="button">Cancel</button>
+</div></div>
+<script>
+"use strict";
+const view = document.getElementById("screen"), vctx = view.getContext("2d");
+const statusEl = document.getElementById("status");
+const calEl = document.getElementById("cal"), calText = document.getElementById("caltext");
+let W = 0, H = 0, T = 32, ws = null, frame = null, fctx = null, dirty = false, calibrated = false;
+let tiles = 0, bytes = 0, lastStat = performance.now();
+
+const CAL_STEPS = {
+  1: "On the MPC itself, tap the <b>top-left</b> corner of the screen.",
+  2: "Now tap the <b>top-right</b> corner.",
+  3: "Now tap the <b>bottom-left</b> corner.",
+};
+
+function setStatus(s) { statusEl.textContent = s; }
+
+function connect() {
+  ws = new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws");
+  ws.binaryType = "arraybuffer";
+  ws.onopen = () => setStatus("connected");
+  ws.onclose = () => { setStatus("disconnected – retrying…"); setTimeout(connect, 1500); };
+  ws.onmessage = (e) => (typeof e.data === "string" ? onText(JSON.parse(e.data)) : onTiles(e.data));
+}
+
+function onText(m) {
+  if (m.type === "hello") {
+    W = m.w; H = m.h; T = m.tile; calibrated = m.calibrated;
+    frame = document.createElement("canvas");   // the picture as the panel scans it (portrait)
+    frame.width = W; frame.height = H;
+    fctx = frame.getContext("2d");
+    view.width = H; view.height = W;             // shown upright (landscape)
+    setStatus(calibrated ? "connected" : "connected – touch not calibrated yet (tap “Calibrate touch”)");
+  } else if (m.type === "cal") {
+    if (m.step) { calEl.classList.add("on"); calText.innerHTML = CAL_STEPS[m.step]; }
+    else {
+      calEl.classList.remove("on");
+      if (m.done) { calibrated = true; setStatus("touch calibrated"); }
+      else if (m.error) setStatus("calibration: " + m.error);
+      else if (m.cancelled) setStatus("calibration cancelled");
+    }
+  }
+}
+
+function onTiles(buf) {
+  const dv = new DataView(buf);
+  const n = dv.getUint32(0, true);
+  let p = 4;
+  for (let i = 0; i < n; i++) {
+    const tx = dv.getUint16(p, true), ty = dv.getUint16(p + 2, true), mode = dv.getUint8(p + 4);
+    const len = dv.getUint32(p + 8, true);
+    p += 12;
+    const x0 = tx * T, y0 = ty * T, w = Math.min(T, W - x0), h = Math.min(T, H - y0);
+    const img = fctx.createImageData(w, h), px = img.data;
+    let o = 0;
+    const put = (c) => {
+      px[o] = ((c >> 11) & 31) * 255 / 31; px[o + 1] = ((c >> 5) & 63) * 255 / 63;
+      px[o + 2] = (c & 31) * 255 / 31; px[o + 3] = 255; o += 4;
+    };
+    if (mode === 0) for (let k = 0; k < len; k += 2) put(dv.getUint16(p + k, true));
+    else for (let k = 0; k < len; k += 4) {
+      const run = dv.getUint16(p + k, true), c = dv.getUint16(p + k + 2, true);
+      for (let r = 0; r < run; r++) put(c);
+    }
+    fctx.putImageData(img, x0, y0);
+    p += len;
+  }
+  tiles += n; bytes += buf.byteLength;
+  if (!dirty) { dirty = true; requestAnimationFrame(draw); }
+}
+
+function draw() {   // rotate the portrait picture a quarter turn clockwise
+  dirty = false;
+  vctx.setTransform(0, 1, -1, 0, H, 0);
+  vctx.drawImage(frame, 0, 0);
+  vctx.setTransform(1, 0, 0, 1, 0, 0);
+  const now = performance.now();
+  if (now - lastStat > 2000) {
+    if (calibrated && statusEl.textContent.startsWith("connected"))
+      setStatus("connected · " + Math.round(bytes / 1024 / ((now - lastStat) / 1000)) + " KB/s");
+    tiles = 0; bytes = 0; lastStat = now;
+  }
+}
+
+// pointer -> portrait screen pixels (undoing the rotation)
+function toScreen(e) {
+  const r = view.getBoundingClientRect();
+  const sx = (e.clientX - r.left) * view.width / r.width, sy = (e.clientY - r.top) * view.height / r.height;
+  const px = Math.round(sy), py = Math.round(H - 1 - sx);
+  return [Math.max(0, Math.min(W - 1, px)), Math.max(0, Math.min(H - 1, py))];
+}
+function send(s) { if (ws && ws.readyState === 1) ws.send(s); }
+let down = false, lastMove = 0;
+view.addEventListener("pointerdown", (e) => {
+  if (!e.isPrimary || !W) return;
+  view.setPointerCapture(e.pointerId);
+  down = true;
+  const [x, y] = toScreen(e); send(`d ${x} ${y}`);
+  e.preventDefault();
+});
+view.addEventListener("pointermove", (e) => {
+  if (!down || !e.isPrimary) return;
+  const now = performance.now();
+  if (now - lastMove < 16) return;   // ~60 moves a second is plenty
+  lastMove = now;
+  const [x, y] = toScreen(e); send(`m ${x} ${y}`);
+});
+const up = (e) => { if (!down || !e.isPrimary) return; down = false; send("u"); };
+view.addEventListener("pointerup", up);
+view.addEventListener("pointercancel", up);
+view.addEventListener("contextmenu", (e) => e.preventDefault());
+
+document.getElementById("calbtn").onclick = () => send("cal");
+document.getElementById("calcancel").onclick = () => { send("calcancel"); calEl.classList.remove("on"); };
+connect();
+</script>
+</body>
+</html>
