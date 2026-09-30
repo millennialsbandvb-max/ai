@@ -1,0 +1,10 @@
+[Unit]
+Description=MPC probe: one-time screen/touch/web-server report to the SD card
+After=acvs.service
+
+[Service]
+Type=simple
+ExecStart=/bin/sh /usr/lib/nam-mpc/bin/mpc-probe.sh
+
+[Install]
+WantedBy=multi-user.target

@@ -6,6 +6,8 @@
 # Env: BUILD (nam-mpc/build: NAM-MPC.so and skin/ from build.sh); EXTRA: optional folder of more plugins to build in,
 #      laid out as plugins/*.so, skins/<page folders>, entries/*.xml (their MPC.settings entries, file= pointing at
 #      /usr/lib/nam-mpc/plugins/<name>.so), e.g. dragonfly-mpc/build/bundle from dragonfly-mpc/build.sh bundle.
+#      Optionally also bin/ (tools, installed in /usr/lib/nam-mpc/bin/) and services/*.service (systemd services,
+#      installed in /etc/systemd/system/ and enabled), e.g. mpc-remote/probe's.
 # Nothing in the official image is changed except what NAM MPC adds:
 #   /usr/lib/nam-mpc/{NAM-MPC.so, nam-mpc-boot.sh, plugin_list.awk, entries/*.xml, plugins/*.so (EXTRA)}
 #   /usr/share/Akai/Content/Synths/NAM-MPC - VST - NAM MPC/   (its touchscreen page, and EXTRA's pages)
@@ -104,8 +106,18 @@ inject() {
       for f in "$EXTRA"/entries/*.xml; do put "$f" "/usr/lib/nam-mpc/entries/$(basename "$f")" 0100644; done
       (cd "$EXTRA/skins" && find . -mindepth 1 -type d | sort) | while read -r d; do mkd "/usr/share/Akai/Content/Synths/${d#./}"; done
       (cd "$EXTRA/skins" && find . -type f | sort) | while read -r rel; do put "$EXTRA/skins/${rel#./}" "/usr/share/Akai/Content/Synths/${rel#./}" 0100644; done
+      if [ -d "$EXTRA/bin" ]; then
+        mkd /usr/lib/nam-mpc/bin
+        for f in "$EXTRA"/bin/*; do put "$f" "/usr/lib/nam-mpc/bin/$(basename "$f")" 0100755; done
+      fi
     fi
     exists /etc/systemd/system/multi-user.target.wants || mkd /etc/systemd/system/multi-user.target.wants
+    if [ -n "${EXTRA:-}" ] && [ -d "$EXTRA/services" ]; then
+      for f in "$EXTRA"/services/*.service; do
+        put "$f" "/etc/systemd/system/$(basename "$f")" 0100644
+        echo "symlink /etc/systemd/system/multi-user.target.wants/$(basename "$f") /etc/systemd/system/$(basename "$f")"
+      done
+    fi
     put "$HERE/nam-mpc.service" /etc/systemd/system/nam-mpc.service 0100644
     echo "symlink /etc/systemd/system/multi-user.target.wants/nam-mpc.service /etc/systemd/system/nam-mpc.service"
     mkd "$syn"
@@ -136,6 +148,16 @@ inject() {
       dbg "dump \"/usr/share/Akai/Content/Synths/${rel#./}\" $tmp/x" >/dev/null
       cmp -s "$tmp/x" "$EXTRA/skins/${rel#./}" || die "page file ${rel#./} read back differs"
     done < <(cd "$EXTRA/skins" && find . -type f)
+    for f in "$EXTRA"/bin/* "$EXTRA"/services/*.service; do   # tools and services, if any
+      [ -f "$f" ] || continue
+      case "$f" in *.service) d=/etc/systemd/system ;; *) d=/usr/lib/nam-mpc/bin ;; esac
+      dbg "dump \"$d/$(basename "$f")\" $tmp/x" >/dev/null; cmp -s "$tmp/x" "$f" || die "$f read back differs"
+      case "$f" in
+        *.service) grep -q "Fast link dest: \"$d/$(basename "$f")\"" <<<"$(dbg "stat /etc/systemd/system/multi-user.target.wants/$(basename "$f")")" ||
+                     die "$(basename "$f"): service link missing" ;;
+        *) grep -q 'Mode:  0755' <<<"$(dbg "stat \"$d/$(basename "$f")\"")" || die "$(basename "$f") isn't executable" ;;
+      esac
+    done
   fi
   rm -rf "$tmp"
   echo "root filesystem OK"
