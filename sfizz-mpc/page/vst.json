@@ -1,0 +1,9 @@
+{
+  "name": "SFZ MPC",
+  "vendor": "SFZ-MPC",
+  "uid": "SFZM",
+  "version": 1000,
+  "so": "SFZ-MPC.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}

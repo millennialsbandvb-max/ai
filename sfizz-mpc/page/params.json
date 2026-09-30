@@ -1,0 +1,11 @@
+{
+  "name": "SFZ MPC",
+  "params": [
+    {"key": "instrument", "name": "Instrument", "min": 0, "max": 1, "display": "string", "type": "stepper"},
+    {"key": "instrument_prev", "name": "Instrument <", "options": ["Off", "On"], "momentary": true},
+    {"key": "instrument_next", "name": "Instrument >", "options": ["Off", "On"], "momentary": true},
+    {"key": "volume", "name": "Volume", "min": -24, "max": 12, "default": 0, "unit": "dB"},
+    {"key": "voices", "name": "Voices", "options": ["8", "16", "24", "32", "48", "64"]},
+    {"key": "quality", "name": "Quality", "options": ["Normal", "High", "Best"]}
+  ]
+}

@@ -39,32 +39,8 @@ sources() {
   ' "$1/Makefile" | sort -u
 }
 
-if [ "$MODE" = skin ]; then
-  # the same page generator and larger text as NAM MPC (nam-mpc/build.sh skin), one page per plugin
-  mv="$DEPS/mpc-vst-plugins-main" tools="$B/skin-tools"
-  [ -d "$mv" ] || unzip -q "$REPO/mpc-vst-plugins-main.zip" -d "$DEPS"
-  rm -rf "$tools" && cp -a "$mv/tools" "$tools"
-  python3 "$REPO/nam-mpc/skin/text_scale.py" "$tools/shadow_skin.py" "${TEXT_SCALE:-1.35}"
-  # choice buttons (Plate's algorithm, Early Reflections' program): taller, with a real font at a readable size
-  patch() {   # patch <file> <old> <new>: exactly one match, or stop
-    [ "$(grep -cF -- "$2" "$1")" = 1 ] || { echo "page patch no longer applies to $1: $2" >&2; exit 1; }
-    python3 -c 'import sys; p, o, n = sys.argv[1:]; s = open(p).read(); open(p, "w").write(s.replace(o, n))' "$1" "$2" "$3"
-  }
-  patch "$tools/shadow_skin.py" 'sw, sh, gap = w.get("sw") or 117, 33, 2' 'sw, sh, gap = w.get("sw") or 117, 44, 2'
-  patch "$tools/shadow_art.c" 'draw_text_c(x + w / 2, y + h / 2 - 6, a[7], 1.15f, HEX(a[6]));' \
-        'label_text_c(x + w / 2, y + h / 2 - 15, a[7], 2.1f, HEX(a[6]));'   # label_text_c: the real font
-  rm -f "$B/shadow_art"
-  gcc -O2 -I"$mv/tools/vendor/force-shadow/tools" -o "$B/shadow_art" "$tools/shadow_art.c" -lm
-  rm -rf "$B/skin" "$B"/preview_*.png && mkdir -p "$B/skin"
-  for d in "$HERE"/pages/*/; do
-    p=$(basename "$d"); w="$B/port-$p"
-    rm -rf "$w" && mkdir -p "$w/build" && cp "$d"/* "$w/" && cp "$B/shadow_art" "$w/build/"
-    { echo "font_label=$mv/tools/html_art/fonts/TitilliumWeb-SemiBold.ttf"; cat "$d/layout.conf"; } > "$w/layout.conf"
-    (cd "$w" && SHADOW_TITLE_FONT="$mv/tools/html_art/fonts/TitilliumWeb-Bold.ttf" python3 "$tools/gen_vst.py" vst.json >/dev/null)
-    cp -a "$w"/build/skin/* "$B/skin/"
-    python3 "$tools/studio.py" preview "$(ls -d "$w"/build/skin/*/)Plugin Skins" -o "$B/preview_${p}_%d.png" >/dev/null
-    echo "page: $(ls "$w/build/skin")"
-  done
+if [ "$MODE" = skin ]; then   # the shared page style (tools/build_pages.sh), one page per plugin
+  "$REPO/tools/build_pages.sh" "$B" "$B/skin" "$HERE"/pages/*/
   exit 0
 fi
 
