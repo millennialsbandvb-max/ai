@@ -31,6 +31,7 @@
 <header>
   <b>MPC REMOTE</b>
   <span id="status">connecting…</span>
+  <a href="/log" target="_blank" style="color:var(--dim)">log</a>
   <button id="calbtn" type="button">Calibrate touch</button>
 </header>
 <main><canvas id="screen" width="1280" height="800"></canvas></main>
@@ -64,7 +65,7 @@ function connect() {
 }
 
 function onText(m) {
-  if (m.type === "wait") { setStatus("waiting for the MPC to finish starting…"); return; }
+  if (m.type === "wait") { setStatus("no picture yet: " + (m.why || "waiting for the MPC") + " (details: /log)"); return; }
   if (m.type === "hello") {
     W = m.w; H = m.h; T = m.tile; calibrated = m.calibrated;
     frame = document.createElement("canvas");   // the picture as the panel scans it (portrait)

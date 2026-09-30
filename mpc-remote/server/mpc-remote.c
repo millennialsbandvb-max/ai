@@ -54,12 +54,31 @@ _Static_assert(sizeof(struct input_event) == 16, "32-bit ARM kernels expect 16-b
 #define CONF_DIR "/data/mpc-remote"
 #define CONF_FILE CONF_DIR "/touch.conf"
 
+/* log: to stderr (the system journal) and the last lines kept for http://<mpc>:8080/log */
+#define LOG_LINES 200
+static char log_ring[LOG_LINES][200];
+static int log_next, log_count;
+static struct timespec log_t0;
+static char why_waiting[160] = "starting";   /* what the page shows while there's no picture */
+
 static void logf_(const char *fmt, ...) {
+    char msg[180];
     va_list ap;
     va_start(ap, fmt);
-    vfprintf(stderr, fmt, ap);
+    vsnprintf(msg, sizeof msg, fmt, ap);
     va_end(ap);
-    fputc('\n', stderr);
+    fprintf(stderr, "%s\n", msg);
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    if (!log_t0.tv_sec) log_t0 = t;
+    snprintf(log_ring[log_next], sizeof log_ring[0], "%7.1fs %s", (double)(t.tv_sec - log_t0.tv_sec) +
+             (t.tv_nsec - log_t0.tv_nsec) / 1e9, msg);
+    log_next = (log_next + 1) % LOG_LINES;
+    if (log_count < LOG_LINES) log_count++;
+}
+
+__attribute__((unused)) static void waiting(const char *why) {   /* note why there's no picture, logging only when the reason changes */
+    if (strcmp(why, why_waiting)) { snprintf(why_waiting, sizeof why_waiting, "%s", why); logf_("no picture: %s", why); }
 }
 #define LOG(...) logf_(__VA_ARGS__)
 
@@ -123,36 +142,31 @@ static void fb_unmap(void) {
 static int fb_map(uint32_t fb_id) {   /* map the framebuffer the display is showing */
     fb_unmap();
     struct drm_mode_fb_cmd2 f = {.fb_id = fb_id};
-    if (ioctl(drm_fd, DRM_IOCTL_MODE_GETFB2, &f) || !f.handles[0]) return -1;
+    if (ioctl(drm_fd, DRM_IOCTL_MODE_GETFB2, &f) || !f.handles[0]) { LOG("GETFB2 %u: %s (handle %u)", fb_id, strerror(errno), f.handles[0]); return -1; }
     for (int i = 1; i < 4; i++)
         if (f.handles[i] && f.handles[i] != f.handles[0]) { struct drm_gem_close c = {.handle = f.handles[i]}; ioctl(drm_fd, DRM_IOCTL_GEM_CLOSE, &c); }
     fbm.fb_id = fb_id; fbm.handle = f.handles[0]; fbm.pitch = f.pitches[0]; fbm.format = f.pixel_format;
     if (f.pixel_format != DRM_FORMAT_XRGB8888 && f.pixel_format != DRM_FORMAT_ARGB8888) { LOG("unexpected pixel format %08x", f.pixel_format); fb_unmap(); return -1; }
     if ((int)f.width != W || (int)f.height != H) { LOG("screen size changed to %ux%u", f.width, f.height); fb_unmap(); return -1; }
     struct drm_mode_map_dumb md = {.handle = f.handles[0]};
-    if (ioctl(drm_fd, DRM_IOCTL_MODE_MAP_DUMB, &md)) { fb_unmap(); return -1; }
+    if (ioctl(drm_fd, DRM_IOCTL_MODE_MAP_DUMB, &md)) { LOG("MAP_DUMB: %s", strerror(errno)); fb_unmap(); return -1; }
     fbm.len = (size_t)f.pitches[0] * f.height + f.offsets[0];
     fbm.map = mmap(NULL, fbm.len, PROT_READ, MAP_SHARED, drm_fd, (off_t)md.offset);
-    if (fbm.map == MAP_FAILED) { fbm.map = NULL; fb_unmap(); return -1; }
+    if (fbm.map == MAP_FAILED) { LOG("mmap: %s", strerror(errno)); fbm.map = NULL; fb_unmap(); return -1; }
     return 0;
 }
 
-/* the display device MPC has open (/dev/dri/cardN), found through its open files; -1 if MPC isn't running yet or
- * hasn't opened its display */
+/* the display device (/dev/dri/cardN) that another program (MPC) already has open, found through the open files
+ * of every process; -1 if nothing has opened it yet. (Not by MPC's process name: MPC renames itself.) */
 static int mpc_display(char *path, size_t n) {
     DIR *proc = opendir("/proc");
     if (!proc) return -1;
     struct dirent *e;
     int found = -1;
+    const pid_t self = getpid();
     while (found && (e = readdir(proc))) {
-        if (e->d_name[0] < '1' || e->d_name[0] > '9') continue;
-        char p[300], comm[64] = {0};
-        snprintf(p, sizeof p, "/proc/%s/comm", e->d_name);
-        FILE *f = fopen(p, "r");
-        if (!f) continue;
-        const int ok = fgets(comm, sizeof comm, f) && !strcmp(comm, "MPC\n");
-        fclose(f);
-        if (!ok) continue;
+        if (e->d_name[0] < '1' || e->d_name[0] > '9' || atoi(e->d_name) == self) continue;
+        char p[300];
         snprintf(p, sizeof p, "/proc/%s/fd", e->d_name);
         DIR *fds = opendir(p);
         struct dirent *fe;
@@ -160,7 +174,18 @@ static int mpc_display(char *path, size_t n) {
             char l[600], t[128] = {0};
             snprintf(l, sizeof l, "/proc/%s/fd/%s", e->d_name, fe->d_name);
             const ssize_t r = readlink(l, t, sizeof t - 1);
-            if (r > 0 && !strncmp(t, "/dev/dri/card", 13)) { snprintf(path, n, "%s", t); found = 0; }
+            if (r > 0 && !strncmp(t, "/dev/dri/card", 13)) {
+                snprintf(path, n, "%s", t);
+                found = 0;
+                char comm[64] = {0};
+                snprintf(p, sizeof p, "/proc/%s/comm", e->d_name);
+                FILE *f = fopen(p, "r");
+                if (f) { if (fgets(comm, sizeof comm, f)) comm[strcspn(comm, "\n")] = 0; fclose(f); }
+                static char last[300];
+                char now[300];
+                snprintf(now, sizeof now, "%s is open in process %s (%s)", t, e->d_name, comm);
+                if (strcmp(now, last)) { LOG("display: %s", now); snprintf(last, sizeof last, "%s", now); }
+            }
         }
         if (fds) closedir(fds);
     }
@@ -170,12 +195,14 @@ static int mpc_display(char *path, size_t n) {
 
 static int screen_open(void) {
     char dev[128];
-    if (mpc_display(dev, sizeof dev)) return -1;   /* never before MPC owns the display */
+    if (mpc_display(dev, sizeof dev)) { waiting("MPC hasn't opened its display yet"); return -1; }   /* never before MPC */
     int fd = open(dev, O_RDWR | O_CLOEXEC);
-    if (fd < 0) return -1;
+    if (fd < 0) { char m[160]; snprintf(m, sizeof m, "can't open %s: %s", dev, strerror(errno)); waiting(m); return -1; }
     if (ioctl(fd, DRM_IOCTL_DROP_MASTER, 0) == 0) LOG("had become display owner by accident; gave it up");
     struct drm_mode_card_res res = {0};
-    if (ioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res) || !res.count_crtcs) { close(fd); return -1; }
+    if (ioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res) || !res.count_crtcs) {
+        char m[160]; snprintf(m, sizeof m, "%s: no display outputs (%s)", dev, strerror(errno)); waiting(m); close(fd); return -1;
+    }
     uint32_t *crtcs = calloc(res.count_crtcs, 4);
     struct drm_mode_card_res r2 = {.crtc_id_ptr = (uintptr_t)crtcs, .count_crtcs = res.count_crtcs};
     ioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &r2);
@@ -189,6 +216,7 @@ static int screen_open(void) {
     }
     free(crtcs);
     close(fd);
+    waiting("the display is on but shows no picture yet");
     return -1;
 }
 
@@ -200,8 +228,8 @@ static void screen_close(void) {
 
 static int screen_grab(void) {
     struct drm_mode_crtc c = {.crtc_id = crtc_id};
-    if (ioctl(drm_fd, DRM_IOCTL_MODE_GETCRTC, &c) || !c.fb_id) return -1;
-    if (c.fb_id != fbm.fb_id && fb_map(c.fb_id)) return -1;   /* MPC switched buffers */
+    if (ioctl(drm_fd, DRM_IOCTL_MODE_GETCRTC, &c) || !c.fb_id) { waiting("can't see which picture is on screen"); return -1; }
+    if (c.fb_id != fbm.fb_id && fb_map(c.fb_id)) { waiting("can't read the picture on screen"); return -1; }   /* MPC switched buffers */
     for (int y = 0; y < H; y++) {
         memcpy(rowbuf, fbm.map + (size_t)y * fbm.pitch, (size_t)W * 4);   /* one sequential read of uncached memory */
         uint16_t *d = cur + (size_t)y * W;
@@ -537,8 +565,16 @@ static void handle_http(Client *c) {   /* a complete request is in c->in */
         out_add(c, h, (size_t)hl);
         c->ws = 1;
         if (screen_ready) send_hello(c);
-        else ws_text(c, "{\"type\":\"wait\"}");
+        else ws_text(c, "{\"type\":\"wait\",\"why\":\"%s\"}", why_waiting);
         LOG("viewer connected");
+    } else if (!strncmp(c->in, "GET /log ", 9)) {   /* what the remote has been doing, for fixing problems */
+        static char body[LOG_LINES * 202 + 512];
+        size_t n = (size_t)snprintf(body, 512, "mpc-remote log (newest last)\npicture: %s\ntouch: %s, orientation %d%s\n\n",
+                                    screen_ready ? "ok" : why_waiting, touch_dev[0] ? touch_dev : "none",
+                                    orient < 0 ? GUESS : orient, orient < 0 ? " (not calibrated)" : "");
+        for (int i = 0; i < log_count; i++)
+            n += (size_t)snprintf(body + n, 202, "%s\n", log_ring[(log_next - log_count + i + LOG_LINES) % LOG_LINES]);
+        http_reply(c, "200 OK", "text/plain; charset=utf-8", body, n);
     } else if (!strncmp(c->in, "GET / ", 6) || !strncmp(c->in, "GET /index.html ", 16)) {
         http_reply(c, "200 OK", "text/html; charset=utf-8", INDEX_HTML, sizeof INDEX_HTML - 1);
     } else {
@@ -739,7 +775,16 @@ int main(int argc, char **argv) {
         /* the display: open it while someone watches (once MPC has it), close it when nobody does */
         if (viewers && !screen_ready && now_ms() >= next_try) {
             next_try = now_ms() + 2000;
-            if (screen_open() == 0) {
+            const int ok = screen_open() == 0;
+            static char told[160];
+            if (!ok && strcmp(told, why_waiting)) {   /* tell the page why there's no picture yet */
+                snprintf(told, sizeof told, "%s", why_waiting);
+                char m[256];
+                snprintf(m, sizeof m, "{\"type\":\"wait\",\"why\":\"%s\"}", why_waiting);
+                broadcast_text(m);
+            }
+            if (ok) {
+                told[0] = 0;
                 const int tw = (W + TILE - 1) / TILE, th = (H + TILE - 1) / TILE;
                 if (!cur || tw != TW || th != TH) {
                     TW = tw; TH = th;
