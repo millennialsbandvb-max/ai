@@ -316,6 +316,13 @@ void Plugin::process(float **out, int n) {
             send_midi(y->s, events[e].midiData, std::max(0, events[e].deltaFrames - off));
         float *o[2] = {out[0] + off, (out[1] ? out[1] : out[0]) + off};
         sfizz_render_block(y->s, o, 2, m);
+        for (int c = 0; c < 2; c++)   // never hand MPC a non-number (it would silence the whole mix) or anything absurd
+            for (int i = 0; i < m; i++) {
+                float v = o[c][i];
+                uint32_t u;
+                std::memcpy(&u, &v, 4);
+                o[c][i] = (u & 0x7f800000u) == 0x7f800000u ? 0.0f : v > 4.0f ? 4.0f : v < -4.0f ? -4.0f : v;
+            }
     }
     for (; e < nevents; e++) send_midi(y->s, events[e].midiData, std::max(0, n - 1));   // late events: at the end
     nevents = 0;

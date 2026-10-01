@@ -163,6 +163,7 @@ struct Cab {
         }
         return (a0 + a1) + (a2 + a3);
     }
+    void clear() { std::fill(hist.begin(), hist.end(), 0.0f); }
 };
 
 /* One-slot, lock-free handover from the worker to the audio thread.
@@ -200,6 +201,7 @@ struct Plugin {
     int model_pick = -1, ir_pick = -1;     // an absolute index
     std::string model_by_name, ir_by_name; // from a saved project
     bool rescan = true, reload = false, resize = false;
+    std::atomic<bool> poisoned{false};    // the model produced a non-number: the worker reloads it fresh
 
     // worker state; the UI thread reads names/status under lib_mutex
     std::mutex lib_mutex;
@@ -330,7 +332,7 @@ void Plugin::run_worker() {
         model.collect();
         cab.collect();
         lk.lock();
-        bool do_scan = rescan, do_reload = reload, do_resize = resize;
+        bool do_scan = rescan, do_reload = reload || poisoned.exchange(false), do_resize = resize;
         int mstep = model_step, istep = ir_step, mpick = model_pick, ipick = ir_pick;
         std::string mname = model_by_name, iname = ir_by_name;
         rescan = reload = resize = false;
@@ -440,7 +442,10 @@ void Plugin::process_chunk(const float *in, float *l, float *r, int n) {
     const float t_in = db_to_gain(value(kInput)), t_out = db_to_gain(value(kOutput));
     for (int i = 0; i < n; i++) {
         in_gain += smooth * (t_in - in_gain);
-        x[i] = (in ? in[i] : 0.0f) * in_gain;
+        float s = in ? in[i] : 0.0f;
+        if (!is_finite_bits(s)) s = 0.0f;   // a bad value from upstream never gets into our filters
+        s = s > 4.0f ? 4.0f : s < -4.0f ? -4.0f : s;   // nor an absurd one (over +12 dB)
+        x[i] = s * in_gain;
     }
 
     // noise gate: detect on the input, apply after the amp (so the amp's own hiss is gated too)
@@ -458,6 +463,7 @@ void Plugin::process_chunk(const float *in, float *l, float *r, int n) {
         gate_gain += (target > gate_gain ? att : rel) * (target - gate_gain);
         g[i] = gate_gain;
     }
+    if (!is_finite_bits(gate_power) || !is_finite_bits(gate_gain)) { gate_power = 0; gate_gain = 0; }
 
     Model *m = model.live.load(std::memory_order_relaxed);
     if (m) {
@@ -469,7 +475,9 @@ void Plugin::process_chunk(const float *in, float *l, float *r, int n) {
             m->dsp->process(xp, yp, n);
         }
         const float lg = norm[kNormalize].load() > 0.5f ? m->loudness_gain : 1.0f;
-        for (int i = 0; i < n; i++) y[i] *= lg * g[i];
+        bool bad = false;
+        for (int i = 0; i < n; i++) { if (!is_finite_bits(y[i])) { y[i] = 0; bad = true; } y[i] *= lg * g[i]; }
+        if (bad) poisoned.store(true);   // the model's memory holds a non-number: the worker loads a fresh copy
     } else {
         for (int i = 0; i < n; i++) y[i] = x[i] * g[i];
     }
@@ -494,7 +502,11 @@ void Plugin::process_chunk(const float *in, float *l, float *r, int n) {
         v = c ? c->run(dc) : dc;
         out_gain += smooth * (t_out - out_gain);
         v *= out_gain;
-        if (!is_finite_bits(v)) { v = 0; dc_x = dc_y = 0; bass.clear(); mid.clear(); treble.clear(); }
+        if (!is_finite_bits(v) || v > 64.0f || v < -64.0f) {   // a non-number (would silence MPC's whole mix) or blown up
+            v = 0; dc_x = dc_y = 0; bass.clear(); mid.clear(); treble.clear();
+            if (c) c->clear();
+        }
+        v = v > 4.0f ? 4.0f : v < -4.0f ? -4.0f : v;   // +12 dB ceiling: nothing absurd reaches MPC's mixer
         l[i] = v;
         if (r) r[i] = v;
     }

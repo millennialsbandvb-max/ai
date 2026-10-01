@@ -28,6 +28,64 @@ if [ ! -d "$D" ]; then
   [ "$(grep -c 'snprintf_f32((char\*)ptr, value, 24);' "$v2")" = 1 ] || { echo "DPF value-text patch no longer applies" >&2; exit 1; }
   sed -i 's|snprintf_f32((char\*)ptr, value, 24);|{ const float a_ = std::fabs(value); std::snprintf((char*)ptr, 24, a_ >= 100.f ? "%.0f" : a_ >= 10.f ? "%.1f" : "%.2f", value); }|' "$v2"
 fi
+# safety net around every audio block (applied once, also to an already unpacked tree): denormals flushed while the
+# reverb runs; non-numbers in the input replaced by silence, input held under +12 dB; if the reverb ever puts out a
+# non-number or blows up past +36 dB it is reset
+# (deactivate + activate clears its tail) instead of passing it on, since one would silence MPC's whole mix; and
+# outputs held under +12 dB
+python3 - "$DEPS/DPF-main/distrho/src/DistrhoPluginVST2.cpp" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+if "MPC safety net v2" not in s:
+    old = "        fPlugin.run(inputs, outputs, sampleFrames);\n      #endif"
+    assert s.count(old) == 1, "DPF safety-net patch no longer applies"
+    new = """        {   // MPC safety net v2
+           #if defined(__arm__)
+            uint32_t fpscr_saved_, fpscr_;
+            __asm__ volatile("vmrs %0, fpscr" : "=r"(fpscr_saved_));
+            fpscr_ = fpscr_saved_ | (1u << 24);
+            __asm__ volatile("vmsr fpscr, %0" : : "r"(fpscr_));
+           #endif
+            const float* safeIn_[DISTRHO_PLUGIN_NUM_INPUTS > 0 ? DISTRHO_PLUGIN_NUM_INPUTS : 1];
+            for (uint32_t c_ = 0; c_ < DISTRHO_PLUGIN_NUM_INPUTS; ++c_) {
+                std::vector<float>& b_ = fSafeIn_[c_];
+                if (b_.size() < (size_t)sampleFrames) b_.resize((size_t)sampleFrames);
+                for (int32_t i_ = 0; i_ < sampleFrames; ++i_) {
+                    const float v_ = inputs[c_][i_];
+                    uint32_t u_; std::memcpy(&u_, &v_, 4);
+                    b_[(size_t)i_] = ((u_ & 0x7f800000u) == 0x7f800000u) ? 0.0f : v_ > 4.0f ? 4.0f : v_ < -4.0f ? -4.0f : v_;
+                }
+                safeIn_[c_] = b_.data();
+            }
+            fPlugin.run(safeIn_, outputs, sampleFrames);
+            bool bad_ = false;
+            for (uint32_t c_ = 0; c_ < DISTRHO_PLUGIN_NUM_OUTPUTS; ++c_)
+                for (int32_t i_ = 0; i_ < sampleFrames; ++i_) {
+                    float v_ = outputs[c_][i_];
+                    uint32_t u_; std::memcpy(&u_, &v_, 4);
+                    if ((u_ & 0x7f800000u) == 0x7f800000u || v_ > 64.0f || v_ < -64.0f) { bad_ = true; v_ = 0.0f; }   // non-number, or blown up (+36 dB)
+                    outputs[c_][i_] = v_ > 4.0f ? 4.0f : v_ < -4.0f ? -4.0f : v_;
+                }
+            if (bad_) {
+                for (uint32_t c_ = 0; c_ < DISTRHO_PLUGIN_NUM_OUTPUTS; ++c_)
+                    std::memset(outputs[c_], 0, sizeof(float) * (size_t)sampleFrames);
+                fPlugin.deactivate();
+                fPlugin.activate();
+            }
+           #if defined(__arm__)
+            __asm__ volatile("vmsr fpscr, %0" : : "r"(fpscr_saved_));
+           #endif
+        }
+      #endif"""
+    s = s.replace(old, new)
+    anchor = "private:\n    // Plugin\n    PluginExporter fPlugin;"
+    assert s.count(anchor) == 1, "DPF member anchor no longer applies"
+    s = s.replace(anchor, anchor + "\n    std::vector<float> fSafeIn_[DISTRHO_PLUGIN_NUM_INPUTS > 0 ? DISTRHO_PLUGIN_NUM_INPUTS : 1];   // MPC safety net")
+    if "#include <vector>" not in s:
+        s = s.replace("#include ", "#include <vector>\n#include <cstring>\n#include ", 1)
+    open(p, "w").write(s)
+    print("DPF: safety net added")
+PY
 
 # sources <plugin dir>: the .c/.cpp files in FILES_COMMON and FILES_DSP (not FILES_UI), relative to that dir
 sources() {

@@ -52,7 +52,39 @@ static intptr_t dispatch(AEffect *e, int32_t op, int32_t index, intptr_t value, 
     }
 }
 
-static void process(AEffect *e, float **in, float **out, int32_t n) { self(e)->processReplacing(in, out, n); }
+static inline float clean(float v, float lim) {   // a non-number -> 0, anything else held within +-lim
+    uint32_t u;
+    memcpy(&u, &v, 4);
+    if ((u & 0x7f800000u) == 0x7f800000u) return 0.0f;
+    return v > lim ? lim : v < -lim ? -lim : v;
+}
+
+/* Safety net around every block: one non-number reaching MPC's mixer silences everything until a restart, so the
+ * input is cleaned (non-numbers -> silence, held under +12 dB), denormals are flushed while the effect runs, and the
+ * output is cleaned the same way. */
+static void process(AEffect *e, float **in, float **out, int32_t n) {
+    AudioEffect *fx = self(e);
+    static thread_local float buf[2][4096];
+    float *safe[2] = {buf[0], buf[1]};
+#if defined(__arm__)
+    uint32_t saved, v;
+    __asm__ volatile("vmrs %0, fpscr" : "=r"(saved));
+    v = saved | (1u << 24);
+    __asm__ volatile("vmsr fpscr, %0" : : "r"(v));
+#endif
+    for (int32_t off = 0; off < n; off += 4096) {
+        const int32_t m = n - off < 4096 ? n - off : 4096;
+        for (int c = 0; c < 2; c++)
+            for (int32_t i = 0; i < m; i++) buf[c][i] = in && in[c] ? clean(in[c][off + i], 4.0f) : 0.0f;
+        float *o[2] = {out[0] + off, out[1] + off};
+        fx->processReplacing(safe, o, m);
+        for (int c = 0; c < 2; c++)
+            for (int32_t i = 0; i < m; i++) o[c][i] = clean(o[c][i], 4.0f);
+    }
+#if defined(__arm__)
+    __asm__ volatile("vmsr fpscr, %0" : : "r"(saved));
+#endif
+}
 static void process_double(AEffect *e, double **in, double **out, int32_t n) {
     self(e)->processDoubleReplacing(in, out, n);
 }
