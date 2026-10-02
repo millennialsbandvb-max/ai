@@ -121,6 +121,8 @@ struct Plugin {
     // audio thread
     Handover<Synth> synth;
     VstMidiEvent events[kMaxEvents];
+    std::atomic<bool> panic{false};
+    bool off_pending[128] = {};   // note-offs carried to the next chunk (audio thread)
     int nevents = 0;
     std::atomic<bool> release[kNumParams];
     std::atomic<bool> update_display{false};
@@ -280,7 +282,11 @@ static void send_midi(sfizz_synth_t *s, const unsigned char *m, int delay) {
     switch (st) {
     case 0x90: if (m[2]) { sfizz_send_note_on(s, delay, m[1], m[2]); break; } /* velocity 0 = note off */ [[fallthrough]];
     case 0x80: sfizz_send_note_off(s, delay, m[1], m[2]); break;
-    case 0xb0: sfizz_send_cc(s, delay, m[1], m[2]); break;
+    case 0xb0:
+        if (m[1] == 120) sfizz_all_sound_off(s);   // all sound off: silence now
+        else if (m[1] == 123) { for (int k = 0; k < 128; k++) sfizz_send_note_off(s, delay, k, 0); }   // all notes off
+        else sfizz_send_cc(s, delay, m[1], m[2]);
+        break;
     case 0xe0: sfizz_send_pitch_wheel(s, delay, (int)((m[2] << 7) | m[1]) - 8192); break;
     case 0xd0: sfizz_send_channel_aftertouch(s, delay, m[1]); break;
     case 0xa0: sfizz_send_poly_aftertouch(s, delay, m[1], m[2]); break;
@@ -309,11 +315,31 @@ void Plugin::process(float **out, int n) {
     if (q != y->quality) { sfizz_set_sample_quality(y->s, SFIZZ_PROCESS_LIVE, q); y->quality = q; }
 
     int e = 0;
-    std::sort(events, events + nevents, [](const VstMidiEvent &a, const VstMidiEvent &b) { return a.deltaFrames < b.deltaFrames; });
+    // stable: events at the same moment keep MPC's order (a note's on before its off), or the note would hang
+    std::stable_sort(events, events + nevents, [](const VstMidiEvent &a, const VstMidiEvent &b) { return a.deltaFrames < b.deltaFrames; });
+    if (panic.exchange(false)) sfizz_all_sound_off(y->s);   // MPC stopped or bypassed us: nothing keeps sounding
+    // sfizz ignores a note-off for a voice that hasn't started sounding yet, so a note whose off lands on the same
+    // sample as its on would hang: such an off goes one sample later (or to the start of the next chunk)
+    int on_at[128];
+    auto send = [&](const unsigned char *md, int d, int m) {
+        const int st = md[0] & 0xf0, key = md[1] & 0x7f;
+        const bool on = st == 0x90 && md[2], offn = st == 0x80 || (st == 0x90 && !md[2]);
+        if (on) on_at[key] = d;
+        if (offn && on_at[key] >= d) {
+            if (on_at[key] + 1 < m) { sfizz_send_note_off(y->s, on_at[key] + 1, key, md[2]); return; }
+            off_pending[key] = true;
+            return;
+        }
+        if (offn) off_pending[key] = false;
+        send_midi(y->s, md, d);
+    };
     for (int off = 0; off < n; off += kChunk) {
         const int m = std::min(kChunk, n - off);
+        std::fill(on_at, on_at + 128, -1);
+        for (int k = 0; k < 128; k++)
+            if (off_pending[k]) { off_pending[k] = false; sfizz_send_note_off(y->s, 0, k, 0); }
         for (; e < nevents && events[e].deltaFrames < off + m; e++)
-            send_midi(y->s, events[e].midiData, std::max(0, events[e].deltaFrames - off));
+            send(events[e].midiData, std::max(0, events[e].deltaFrames - off), m);
         float *o[2] = {out[0] + off, (out[1] ? out[1] : out[0]) + off};
         sfizz_render_block(y->s, o, 2, m);
         for (int c = 0; c < 2; c++)   // never hand MPC a non-number (it would silence the whole mix) or anything absurd
@@ -324,7 +350,7 @@ void Plugin::process(float **out, int n) {
                 o[c][i] = (u & 0x7f800000u) == 0x7f800000u ? 0.0f : v > 4.0f ? 4.0f : v < -4.0f ? -4.0f : v;
             }
     }
-    for (; e < nevents; e++) send_midi(y->s, events[e].midiData, std::max(0, n - 1));   // late events: at the end
+    for (; e < nevents; e++) send(events[e].midiData, std::max(0, n - 1), n);   // late events: at the end
     nevents = 0;
 }
 
@@ -449,7 +475,8 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t v, void
     case effSetSampleRate:
         if (opt > 0 && std::fabs(opt - s->sample_rate.load()) > 0.5) { s->sample_rate = opt; s->post([&] { s->reload = true; }); }
         return 1;
-    case effSetBlockSize: case effMainsChanged: return 1;
+    case effSetBlockSize: return 1;
+    case effMainsChanged: if (!v) s->panic = true; return 1;
     case effProcessEvents: {
         const VstEvents *ev = (const VstEvents *)p;
         for (int k = 0; ev && k < ev->numEvents && s->nevents < kMaxEvents; k++)

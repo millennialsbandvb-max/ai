@@ -125,6 +125,29 @@ int main(int argc, char **argv) {
     e->setParameter(e, kVolume, 2.0f / 3.0f);
     midi(e, {{0xb0, 123, 0}});   // all notes off
 
+    // stuck notes: a zero-length note (its on and off at the same moment) must not hang, and "all notes off" (CC123)
+    // must release a held note
+    {
+        VstMidiEvent ev2[2] = {};
+        VstEvents l2 = {};
+        for (int i = 0; i < 2; i++) { ev2[i].type = 1; ev2[i].byteSize = sizeof(VstMidiEvent); ev2[i].deltaFrames = 10; l2.events[i] = &ev2[i]; }
+        ev2[0].midiData[0] = 0x90; ev2[0].midiData[1] = 62; ev2[0].midiData[2] = 100;
+        ev2[1].midiData[0] = 0x80; ev2[1].midiData[1] = 62; ev2[1].midiData[2] = 0;
+        l2.numEvents = 2;
+        midi(e, {{0xb0, 120, 0}});
+        run(e, 400);
+        for (int k = 0; k < 20; k++) { e->dispatcher(e, effProcessEvents, 0, 0, &l2, 0); run(e, 1); }
+        run(e, 1200);   // let the release fade
+        const double hung = run(e, 50);
+        CHECK(hung < 1e-3, "zero-length notes don't hang (level after release %.5f)", hung);
+        midi(e, {{0x90, 64, 100}});
+        run(e, 100);
+        midi(e, {{0xb0, 123, 0}});
+        run(e, 1200);
+        const double held = run(e, 50);
+        CHECK(held < 1e-3, "all notes off (CC123) releases a held note (level %.5f)", held);
+    }
+
     // save, then restore into a new instance: the same instrument by name
     e->setParameter(e, kQuality, 1.0f);
     void *data = nullptr;
