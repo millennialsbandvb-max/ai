@@ -47,6 +47,7 @@
 #include <drm/drm_fourcc.h>
 #include <drm/drm_mode.h>
 #include <linux/input.h>
+#include <sound/asequencer.h>
 
 #include "index_html.h"   /* generated from index.html: static const char INDEX_HTML[] */
 
@@ -473,6 +474,244 @@ static void cal_tap(int x, int y) {   /* a finished tap on the real screen durin
     LOG("touch orientation %d saved", o);
 }
 
+/* ---- MPC's buttons ----------------------------------------------------------------------------------------------
+ * MPC reads its panel as MIDI from its internal controller. mpc-buttons.so (preloaded into MPC by mpc-launch) feeds
+ * that input through the ALSA sequencer and says where in /tmp/mpc-buttons; a press here is the same MIDI message the
+ * real button sends, sent to that input. Which message each button sends is learned once (press the real button
+ * when asked) and kept in /data/mpc-remote/buttons.conf. */
+#define BTN_FILE CONF_DIR "/buttons.conf"
+#define BTN_STATUS "/tmp/mpc-buttons"
+#define NO_BUTTONS CONF_DIR "/no-buttons"
+#define LAUNCHES CONF_DIR "/launches"
+static const char *const BTN_NAMES[] = {"menu", "main", "mix", "mute", "rec", "overdub", "stop", "play", "playstart"};
+#define NBTN (int)(sizeof BTN_NAMES / sizeof *BTN_NAMES)
+static struct { int set; uint8_t on[3], off[3]; } btn[NBTN];
+static int seq_fd = -1, seq_me = -1, seq_port = -1;
+static struct { int idx, have_on, subscribed; uint64_t started, on_at; struct snd_seq_addr hw; } learn = {.idx = -1};
+
+static int btn_index(const char *name) {
+    for (int i = 0; i < NBTN; i++) if (!strcmp(name, BTN_NAMES[i])) return i;
+    return -1;
+}
+
+static void btn_load(void) {
+    FILE *f = fopen(BTN_FILE, "r");
+    if (!f) return;
+    char name[32];
+    unsigned a, b, c, d, e, g;
+    int n = 0;
+    while (fscanf(f, "%31s %x %x %x %x %x %x", name, &a, &b, &c, &d, &e, &g) == 7) {
+        const int i = btn_index(name);
+        if (i < 0) continue;
+        btn[i].set = 1;
+        btn[i].on[0] = (uint8_t)a; btn[i].on[1] = (uint8_t)b; btn[i].on[2] = (uint8_t)c;
+        btn[i].off[0] = (uint8_t)d; btn[i].off[1] = (uint8_t)e; btn[i].off[2] = (uint8_t)g;
+        n++;
+    }
+    fclose(f);
+    LOG("%d buttons learned (from %s)", n, BTN_FILE);
+}
+
+static void btn_save(void) {
+    mkdir(CONF_DIR, 0755);
+    FILE *f = fopen(BTN_FILE ".new", "w");
+    if (!f) { LOG("can't save %s: %s", BTN_FILE, strerror(errno)); return; }
+    for (int i = 0; i < NBTN; i++)
+        if (btn[i].set)
+            fprintf(f, "%s %02x %02x %02x %02x %02x %02x\n", BTN_NAMES[i], btn[i].on[0], btn[i].on[1], btn[i].on[2],
+                    btn[i].off[0], btn[i].off[1], btn[i].off[2]);
+    fclose(f);
+    rename(BTN_FILE ".new", BTN_FILE);
+    sync();
+}
+
+/* where MPC's panel input is now (it changes when MPC restarts): virt, and the real controller's port hw */
+static int btn_where(struct snd_seq_addr *virt, struct snd_seq_addr *hw, int *pid) {
+    FILE *f = fopen(BTN_STATUS, "r");
+    if (!f) return -1;
+    int vc, vp, hc, hp, p;
+    const int n = fscanf(f, "virt=%d:%d hw=%d:%d pid=%d", &vc, &vp, &hc, &hp, &p);
+    fclose(f);
+    if (n != 5) return -1;
+    char d[32];
+    snprintf(d, sizeof d, "/proc/%d", p);
+    if (access(d, F_OK)) return -1;   /* that MPC has gone */
+    virt->client = (unsigned char)vc; virt->port = (unsigned char)vp;
+    hw->client = (unsigned char)hc; hw->port = (unsigned char)hp;
+    if (pid) *pid = p;
+    return 0;
+}
+
+static void seq_open_(void) {
+    if (seq_fd >= 0) return;
+    seq_fd = open("/dev/snd/seq", O_RDWR | O_NONBLOCK | O_CLOEXEC);
+    if (seq_fd < 0) { LOG("buttons: can't open the ALSA sequencer: %s", strerror(errno)); return; }
+    struct snd_seq_client_info ci;
+    memset(&ci, 0, sizeof ci);
+    if (ioctl(seq_fd, SNDRV_SEQ_IOCTL_CLIENT_ID, &seq_me) < 0) goto fail;
+    ci.client = seq_me;
+    if (ioctl(seq_fd, SNDRV_SEQ_IOCTL_GET_CLIENT_INFO, &ci) < 0) goto fail;
+    snprintf(ci.name, sizeof ci.name, "MPC Remote");   /* mpc-buttons.so hides this name from MPC's MIDI devices */
+    ioctl(seq_fd, SNDRV_SEQ_IOCTL_SET_CLIENT_INFO, &ci);
+    struct snd_seq_port_info pi;
+    memset(&pi, 0, sizeof pi);
+    pi.addr.client = (unsigned char)seq_me;
+    snprintf(pi.name, sizeof pi.name, "MPC Remote");
+    pi.capability = SNDRV_SEQ_PORT_CAP_READ | SNDRV_SEQ_PORT_CAP_WRITE | SNDRV_SEQ_PORT_CAP_SUBS_WRITE |
+                    SNDRV_SEQ_PORT_CAP_NO_EXPORT;
+    pi.type = SNDRV_SEQ_PORT_TYPE_APPLICATION;
+    if (ioctl(seq_fd, SNDRV_SEQ_IOCTL_CREATE_PORT, &pi) < 0) goto fail;
+    seq_port = pi.addr.port;
+    LOG("buttons: sequencer client %d:%d", seq_me, seq_port);
+    return;
+fail:
+    LOG("buttons: sequencer setup failed: %s", strerror(errno));
+    close(seq_fd);
+    seq_fd = -1;
+}
+
+static int seq_send(const uint8_t m[3], struct snd_seq_addr dest) {
+    struct snd_seq_event ev;
+    memset(&ev, 0, sizeof ev);
+    const int st = m[0] & 0xf0;
+    if (st == 0x90) { ev.type = SNDRV_SEQ_EVENT_NOTEON; ev.data.note.note = m[1]; ev.data.note.velocity = m[2]; }
+    else if (st == 0x80) { ev.type = SNDRV_SEQ_EVENT_NOTEOFF; ev.data.note.note = m[1]; ev.data.note.velocity = m[2]; }
+    else if (st == 0xb0) { ev.type = SNDRV_SEQ_EVENT_CONTROLLER; ev.data.control.param = m[1]; ev.data.control.value = m[2]; }
+    else return -1;
+    ev.data.note.channel = m[0] & 15;   /* the same place in note and control events */
+    ev.data.control.channel = m[0] & 15;
+    ev.flags = SNDRV_SEQ_TIME_STAMP_TICK | SNDRV_SEQ_TIME_MODE_ABS | SNDRV_SEQ_EVENT_LENGTH_FIXED;
+    ev.queue = SNDRV_SEQ_QUEUE_DIRECT;
+    ev.source.client = (unsigned char)seq_me;
+    ev.source.port = (unsigned char)seq_port;
+    ev.dest = dest;
+    return write(seq_fd, &ev, sizeof ev) == (ssize_t)sizeof ev ? 0 : -1;
+}
+
+static void btn_press(const char *name, int down) {
+    const int i = btn_index(name);
+    if (i < 0) return;
+    if (!btn[i].set) { broadcast_text("{\"type\":\"btn\",\"error\":\"that button isn't learned yet (Learn buttons)\"}"); return; }
+    struct snd_seq_addr virt, hw;
+    seq_open_();
+    if (seq_fd < 0 || btn_where(&virt, &hw, NULL)) {
+        broadcast_text("{\"type\":\"btn\",\"error\":\"MPC's button input isn't available (details: /log)\"}");
+        return;
+    }
+    if (seq_send(down ? btn[i].on : btn[i].off, virt)) LOG("buttons: sending %s failed: %s", name, strerror(errno));
+}
+
+static void learn_subscribe(int on) {
+    if (learn.subscribed == on || seq_fd < 0) return;
+    struct snd_seq_port_subscribe s;
+    memset(&s, 0, sizeof s);
+    s.sender = learn.hw;
+    s.dest.client = (unsigned char)seq_me;
+    s.dest.port = (unsigned char)seq_port;
+    if (ioctl(seq_fd, on ? SNDRV_SEQ_IOCTL_SUBSCRIBE_PORT : SNDRV_SEQ_IOCTL_UNSUBSCRIBE_PORT, &s) < 0 && on) {
+        LOG("buttons: can't listen to the controller %d:%d: %s", s.sender.client, s.sender.port, strerror(errno));
+        return;
+    }
+    learn.subscribed = on;
+}
+
+static void learn_stop(void) { learn_subscribe(0); learn.idx = -1; }
+
+static void learn_start(const char *name) {
+    const int i = btn_index(name);
+    if (i < 0) return;
+    struct snd_seq_addr virt;
+    seq_open_();
+    learn_stop();
+    if (seq_fd < 0 || btn_where(&virt, &learn.hw, NULL)) {
+        broadcast_text("{\"type\":\"learn\",\"error\":\"MPC's button input isn't available (details: /log)\"}");
+        return;
+    }
+    learn_subscribe(1);
+    if (!learn.subscribed) { broadcast_text("{\"type\":\"learn\",\"error\":\"can't listen to the MPC's buttons\"}"); return; }
+    learn.idx = i; learn.have_on = 0; learn.started = now_ms();
+    char m[96];
+    snprintf(m, sizeof m, "{\"type\":\"learn\",\"name\":\"%s\"}", BTN_NAMES[i]);
+    broadcast_text(m);
+}
+
+static void learn_done(void) {
+    const int i = learn.idx;
+    btn[i].set = 1;
+    btn_save();
+    LOG("button %s: on %02x %02x %02x, off %02x %02x %02x", BTN_NAMES[i], btn[i].on[0], btn[i].on[1], btn[i].on[2],
+        btn[i].off[0], btn[i].off[1], btn[i].off[2]);
+    char m[96];
+    snprintf(m, sizeof m, "{\"type\":\"learn\",\"done\":\"%s\"}", BTN_NAMES[i]);
+    learn_stop();
+    broadcast_text(m);
+}
+
+static void seq_read(void) {   /* the controller's messages, while learning */
+    uint8_t buf[4096];
+    const ssize_t r = read(seq_fd, buf, sizeof buf);
+    for (ssize_t p = 0; r > 0 && p + (ssize_t)sizeof(struct snd_seq_event) <= r;) {
+        struct snd_seq_event ev;
+        memcpy(&ev, buf + p, sizeof ev);
+        p += (ssize_t)sizeof ev;
+        if ((ev.flags & SNDRV_SEQ_EVENT_LENGTH_MASK) == SNDRV_SEQ_EVENT_LENGTH_VARIABLE) p += ev.data.ext.len;
+        if (learn.idx < 0 || ev.source.client != learn.hw.client || ev.source.port != learn.hw.port) continue;
+        uint8_t m[3];
+        int press, key;
+        if (ev.type == SNDRV_SEQ_EVENT_NOTEON || ev.type == SNDRV_SEQ_EVENT_NOTEOFF) {
+            m[0] = (uint8_t)((ev.type == SNDRV_SEQ_EVENT_NOTEON ? 0x90 : 0x80) | (ev.data.note.channel & 15));
+            m[1] = ev.data.note.note & 127; m[2] = ev.data.note.velocity & 127;
+            press = ev.type == SNDRV_SEQ_EVENT_NOTEON && m[2];
+            key = 0x100 | m[1];
+        } else if (ev.type == SNDRV_SEQ_EVENT_CONTROLLER) {
+            m[0] = (uint8_t)(0xb0 | (ev.data.control.channel & 15));
+            m[1] = (uint8_t)(ev.data.control.param & 127); m[2] = (uint8_t)(ev.data.control.value & 127);
+            press = m[2] != 0;
+            key = 0x200 | m[1];
+        } else continue;
+        LOG("learn: controller sent %02x %02x %02x", m[0], m[1], m[2]);
+        const int i = learn.idx;
+        if (!learn.have_on) {
+            if (!press) continue;
+            memcpy(btn[i].on, m, 3);
+            learn.have_on = key;
+            learn.on_at = now_ms();
+        } else if (!press && key == learn.have_on) {
+            memcpy(btn[i].off, m, 3);
+            learn_done();
+            return;
+        }
+    }
+}
+
+static void learn_tick(void) {
+    if (learn.idx < 0) return;
+    const uint64_t t = now_ms();
+    if (learn.have_on && t - learn.on_at > 3000) {   /* no release message: a press is a toggle; send it as is */
+        const int i = learn.idx;
+        memcpy(btn[i].off, btn[i].on, 3);
+        btn[i].off[2] = (btn[i].on[0] & 0xf0) == 0x90 ? 0 : btn[i].on[2];
+        if ((btn[i].on[0] & 0xf0) == 0xb0) btn[i].off[2] = 0;
+        learn_done();
+    } else if (!learn.have_on && t - learn.started > 30000) {
+        learn_stop();
+        broadcast_text("{\"type\":\"learn\",\"error\":\"timed out\"}");
+    }
+}
+
+/* MPC has run a minute with mpc-buttons.so: it works, so mpc-launch may keep loading it */
+static void launch_ok(void) {
+    static int done_pid;
+    struct snd_seq_addr v, h;
+    int pid;
+    struct stat st;
+    if (btn_where(&v, &h, &pid) || pid == done_pid || stat(BTN_STATUS, &st) || time(NULL) - st.st_mtime < 60) return;
+    done_pid = pid;
+    FILE *f = fopen(LAUNCHES, "w");
+    if (f) { fputs("0\n", f); fclose(f); sync(); }
+    LOG("buttons: MPC (pid %d) is up with the button input; panel input via %d:%d", pid, v.client, v.port);
+}
+
 static void client_close(Client *c) {
     if (c->fd >= 0) close(c->fd);
     free(c->out);
@@ -553,8 +792,12 @@ static void send_hello(Client *c) {   /* screen size, and the whole screen to co
     c->dirty = malloc((size_t)TW * TH);
     memset(c->dirty, 1, (size_t)TW * TH);
     c->ndirty = TW * TH;
-    ws_text(c, "{\"type\":\"hello\",\"w\":%d,\"h\":%d,\"tile\":%d,\"calibrated\":%s,\"touch\":\"%s\"}", W, H, TILE,
-            orient >= 0 ? "true" : "false", touch_dev);
+    char learned[160] = "";
+    for (int i = 0; i < NBTN; i++)
+        if (btn[i].set) snprintf(learned + strlen(learned), sizeof learned - strlen(learned), "%s\"%s\"", learned[0] ? "," : "", BTN_NAMES[i]);
+    ws_text(c, "{\"type\":\"hello\",\"w\":%d,\"h\":%d,\"tile\":%d,\"calibrated\":%s,\"touch\":\"%s\",\"learned\":[%s],"
+            "\"buttons\":%s}", W, H, TILE, orient >= 0 ? "true" : "false", touch_dev, learned,
+            access(NO_BUTTONS, F_OK) ? "true" : "false");
 }
 
 static void handle_http(Client *c) {   /* a complete request is in c->in */
@@ -576,10 +819,24 @@ static void handle_http(Client *c) {   /* a complete request is in c->in */
         else ws_text(c, "{\"type\":\"wait\",\"why\":\"%s\"}", why_waiting);
         LOG("viewer connected");
     } else if (!strncmp(c->in, "GET /log ", 9)) {   /* what the remote has been doing, for fixing problems */
-        static char body[LOG_LINES * 202 + 512];
+        static char body[LOG_LINES * 202 + 8192];
         size_t n = (size_t)snprintf(body, 512, "mpc-remote log (newest last)\npicture: %s\ntouch: %s, orientation %d%s\n\n",
                                     screen_ready ? "ok" : why_waiting, touch_dev[0] ? touch_dev : "none",
                                     orient < 0 ? GUESS : orient, orient < 0 ? " (not calibrated)" : "");
+        struct snd_seq_addr v, h;
+        char b[200] = "";
+        if (!access(NO_BUTTONS, F_OK)) snprintf(b, sizeof b, "off (switched off on the page)");
+        else if (!btn_where(&v, &h, NULL)) snprintf(b, sizeof b, "MPC's panel input at %d:%d (controller %d:%d)", v.client, v.port, h.client, h.port);
+        else snprintf(b, sizeof b, "not available: MPC wasn't started with mpc-buttons.so (see below)");
+        n += (size_t)snprintf(body + n, 300, "buttons: %s\n", b);
+        FILE *pl = fopen("/tmp/mpc-buttons.log", "r");   /* what mpc-buttons.so did inside MPC */
+        if (pl) {
+            char line[200];
+            n += (size_t)snprintf(body + n, 64, "\nmpc-buttons.so (inside MPC):\n");
+            while (fgets(line, sizeof line, pl) && n < 4096) n += (size_t)snprintf(body + n, 202, "  %s", line);
+            fclose(pl);
+        }
+        n += (size_t)snprintf(body + n, 8, "\n");
         for (int i = 0; i < log_count; i++)
             n += (size_t)snprintf(body + n, 202, "%s\n", log_ring[(log_next - log_count + i + LOG_LINES) % LOG_LINES]);
         http_reply(c, "200 OK", "text/plain; charset=utf-8", body, n);
@@ -605,6 +862,17 @@ static void handle_command(Client *c, char *s) {   /* a text message from the pa
     } else if (!strcmp(s, "calcancel")) {
         cal_stop();
         broadcast_text("{\"type\":\"cal\",\"cancelled\":true}");
+    } else if (!strncmp(s, "bd ", 3)) btn_press(s + 3, 1);
+    else if (!strncmp(s, "bu ", 3)) btn_press(s + 3, 0);
+    else if (!strncmp(s, "learn ", 6)) learn_start(s + 6);
+    else if (!strcmp(s, "learncancel")) learn_stop();
+    else if (!strcmp(s, "buttons off") || !strcmp(s, "buttons on")) {   /* takes effect when MPC next starts */
+        mkdir(CONF_DIR, 0755);
+        if (s[9] == 'f') { FILE *f = fopen(NO_BUTTONS, "w"); if (f) fclose(f); }
+        else { unlink(NO_BUTTONS); unlink(LAUNCHES); }
+        sync();
+        LOG("buttons %s from the next MPC start", s[9] == 'f' ? "off" : "on");
+        if (screen_ready) send_hello(c);
     }
 #ifdef MPC_REMOTE_FAKE
     else if (sscanf(s, "fakecal %d %d", &x, &y) == 2) cal_tap(x, y);   /* test hook: a raw tap on the "real" screen */
@@ -850,6 +1118,8 @@ int main(int argc, char **argv) {
 #endif
     find_touch();
     load_conf();
+    btn_load();
+    seq_open_();
 
     int ls = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0), one = 1;
     setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
@@ -862,7 +1132,7 @@ int main(int argc, char **argv) {
     zlib_load();
     mdns_open();
     for (;;) {
-        struct pollfd pf[MAX_CLIENTS + 3];
+        struct pollfd pf[MAX_CLIENTS + 4];
         int np = 0, viewers = 0;
         pf[np++] = (struct pollfd){.fd = ls, .events = POLLIN};
         for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -875,8 +1145,10 @@ int main(int argc, char **argv) {
         if (cal.fd >= 0) pf[np++] = (struct pollfd){.fd = cal.fd, .events = POLLIN};
         const int mdnsidx = np;
         if (mdns_fd >= 0) pf[np++] = (struct pollfd){.fd = mdns_fd, .events = POLLIN};
+        const int seqidx = np;
+        if (seq_fd >= 0) pf[np++] = (struct pollfd){.fd = seq_fd, .events = POLLIN};
         const uint64_t t = now_ms();
-        int wait = !viewers ? 1000 : !screen_ready ? 500 : (int)(next_frame > t ? next_frame - t : 0);
+        int wait = learn.idx >= 0 ? 200 : !viewers ? 1000 : !screen_ready ? 500 : (int)(next_frame > t ? next_frame - t : 0);
         poll(pf, (nfds_t)np, wait);
 
         if (pf[0].revents & POLLIN) {
@@ -915,6 +1187,10 @@ int main(int argc, char **argv) {
         }
 
         if (mdns_fd >= 0 && np > mdnsidx && (pf[mdnsidx].revents & POLLIN)) mdns_handle();
+        if (seq_fd >= 0 && np > seqidx && (pf[seqidx].revents & POLLIN)) seq_read();
+        learn_tick();
+        static uint64_t next_launch_check;
+        if (now_ms() >= next_launch_check) { next_launch_check = now_ms() + 10000; launch_ok(); }
         if (mdns_fd >= 0 && now_ms() >= next_join) { next_join = now_ms() + 15000; mdns_join(); }   /* Wi-Fi (re)connects */
 
         /* calibration taps */

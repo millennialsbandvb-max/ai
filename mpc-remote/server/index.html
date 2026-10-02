@@ -19,12 +19,25 @@
   main { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; padding: 0 8px 8px; }
   canvas { max-width: 100%; max-height: 100%; background: #000; touch-action: none; cursor: crosshair;
            border-radius: 4px; box-shadow: 0 0 0 1px #333; }
-  #cal { position: fixed; inset: 0; background: rgba(0,0,0,.82); display: none; align-items: center;
+  #cal, #lrn { position: fixed; inset: 0; background: rgba(0,0,0,.82); display: none; align-items: center;
          justify-content: center; text-align: center; padding: 24px; }
-  #cal.on { display: flex; }
-  #cal div { max-width: 520px; }
-  #cal h2 { color: var(--accent); margin: 0 0 12px; }
+  #cal.on, #lrn.on { display: flex; }
+  #cal div, #lrn div { max-width: 520px; }
+  #cal h2, #lrn h2 { color: var(--accent); margin: 0 0 12px; }
   #cal p { font-size: 17px; }
+  #pad { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; padding: 0 8px 10px; flex: none; }
+  #pad .grp { display: flex; gap: 8px; }
+  #pad button { min-width: 74px; padding: 12px 10px; font-weight: 600; letter-spacing: .03em; touch-action: none;
+                user-select: none; -webkit-user-select: none; }
+  #pad button.on { background: var(--accent); color: #111; }
+  #pad button.unset { opacity: .45; }
+  #pad button.rec { color: #f55; }
+  #pad button.rec.on { color: #111; }
+  @media (max-width: 640px) {
+    #pad .grp { width: 100%; gap: 6px; }
+    #pad button { flex: 1; min-width: 0; padding: 12px 2px; font-size: 12px; }
+  }
+  #lrn .small { margin-top: 18px; font-size: 13px; color: var(--dim); }
 </style>
 </head>
 <body>
@@ -32,13 +45,32 @@
   <b>MPC REMOTE</b>
   <span id="status">connecting…</span>
   <a href="/log" target="_blank" style="color:var(--dim)">log</a>
+  <button id="lrnbtn" type="button">Learn buttons</button>
   <button id="calbtn" type="button">Calibrate touch</button>
 </header>
 <main><canvas id="screen" width="1280" height="800"></canvas></main>
+<div id="pad">
+  <div class="grp">
+    <button type="button" data-b="menu">MENU</button><button type="button" data-b="main">MAIN</button>
+    <button type="button" data-b="mix">MIX</button><button type="button" data-b="mute">MUTE</button>
+  </div>
+  <div class="grp">
+    <button type="button" data-b="rec" class="rec">REC</button><button type="button" data-b="overdub" class="rec">OVERDUB</button>
+    <button type="button" data-b="stop">STOP</button><button type="button" data-b="play">PLAY</button>
+    <button type="button" data-b="playstart">PLAY START</button>
+  </div>
+</div>
 <div id="cal"><div>
   <h2>Touch calibration</h2>
   <p id="caltext"></p>
   <button id="calcancel" type="button">Cancel</button>
+</div></div>
+<div id="lrn"><div>
+  <h2>Learn buttons</h2>
+  <p id="lrntext"></p>
+  <button id="lrnskip" type="button">Skip</button> <button id="lrncancel" type="button">Done</button>
+  <p class="small">If the MPC's own buttons or pads ever act up with this firmware, switch the button input off here
+    and restart the MPC: <button id="lrnoff" type="button">Button input off</button></p>
 </div></div>
 <script>
 "use strict";
@@ -82,6 +114,13 @@ function onText(m) {
     fctx = frame.getContext("2d");
     view.width = H; view.height = W;             // shown upright (landscape)
     setStatus(calibrated ? "connected" : "connected – touch not calibrated yet (tap “Calibrate touch”)");
+    learned = new Set(m.learned || []); buttonsOn = m.buttons !== false; showPad();
+  } else if (m.type === "learn") {
+    if (m.name) { lrnText.innerHTML = "On the MPC, press and release <b>" + LABEL[m.name] + "</b>."; return; }
+    if (m.done) { learned.add(m.done); showPad(); return learnNext(); }
+    if (m.error) { lrnEl.classList.remove("on"); learning = -1; setStatus("learn buttons: " + m.error); }
+  } else if (m.type === "btn") {
+    if (m.error) setStatus(m.error);
   } else if (m.type === "cal") {
     if (m.step) { calEl.classList.add("on"); calText.innerHTML = CAL_STEPS[m.step]; }
     else {
@@ -160,6 +199,38 @@ const up = (e) => { if (!down || !e.isPrimary) return; down = false; send("u"); 
 view.addEventListener("pointerup", up);
 view.addEventListener("pointercancel", up);
 view.addEventListener("contextmenu", (e) => e.preventDefault());
+
+// MPC's buttons: held while the on-screen button is held
+const LABEL = {menu: "MENU", main: "MAIN", mix: "MIX", mute: "MUTE", rec: "REC", overdub: "OVERDUB", stop: "STOP",
+               play: "PLAY", playstart: "PLAY START"};
+const ORDER = Object.keys(LABEL);
+const lrnEl = document.getElementById("lrn"), lrnText = document.getElementById("lrntext");
+let learned = new Set(), buttonsOn = true, learning = -1;
+function showPad() {
+  for (const b of document.querySelectorAll("#pad button")) b.classList.toggle("unset", !learned.has(b.dataset.b));
+  document.getElementById("lrnoff").textContent = buttonsOn ? "Button input off" : "Button input on";
+}
+for (const b of document.querySelectorAll("#pad button")) {
+  let held = false;
+  b.addEventListener("pointerdown", (e) => {
+    b.setPointerCapture(e.pointerId); held = true; b.classList.add("on"); send("bd " + b.dataset.b); e.preventDefault();
+  });
+  const rel = () => { if (!held) return; held = false; b.classList.remove("on"); send("bu " + b.dataset.b); };
+  b.addEventListener("pointerup", rel);
+  b.addEventListener("pointercancel", rel);
+  b.addEventListener("contextmenu", (e) => e.preventDefault());
+}
+function learnNext() {
+  if (++learning >= ORDER.length) { lrnEl.classList.remove("on"); learning = -1; setStatus("buttons learned"); return; }
+  send("learn " + ORDER[learning]);
+}
+document.getElementById("lrnbtn").onclick = () => { learning = -1; lrnText.textContent = "…"; lrnEl.classList.add("on"); learnNext(); };
+document.getElementById("lrnskip").onclick = () => { send("learncancel"); learnNext(); };
+document.getElementById("lrncancel").onclick = () => { send("learncancel"); learning = -1; lrnEl.classList.remove("on"); };
+document.getElementById("lrnoff").onclick = () => {
+  buttonsOn = !buttonsOn; send(buttonsOn ? "buttons on" : "buttons off"); showPad();
+  setStatus("button input " + (buttonsOn ? "on" : "off") + " from the next MPC restart");
+};
 
 document.getElementById("calbtn").onclick = () => send("cal");
 document.getElementById("calcancel").onclick = () => { send("calcancel"); calEl.classList.remove("on"); };

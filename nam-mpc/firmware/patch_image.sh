@@ -7,7 +7,8 @@
 #      laid out as plugins/*.so, skins/<page folders>, entries/*.xml (their MPC.settings entries, file= pointing at
 #      /usr/lib/nam-mpc/plugins/<name>.so), e.g. dragonfly-mpc/build/bundle from dragonfly-mpc/build.sh bundle.
 #      Optionally also bin/ (tools, installed in /usr/lib/nam-mpc/bin/) and services/*.service (systemd services,
-#      installed in /etc/systemd/system/ and enabled), e.g. mpc-remote/probe's.
+#      installed in /etc/systemd/system/ and enabled), e.g. mpc-remote/probe's, and dropins/<unit>.d/*.conf
+#      (systemd drop-ins for the image's own units, e.g. mpc-remote's for acvs.service, which runs MPC).
 # Nothing in the official image is changed except what NAM MPC adds:
 #   /usr/lib/nam-mpc/{NAM-MPC.so, nam-mpc-boot.sh, plugin_list.awk, entries/*.xml, plugins/*.so (EXTRA)}
 #   /usr/share/Akai/Content/Synths/NAM-MPC - VST - NAM MPC/   (its touchscreen page, and EXTRA's pages)
@@ -118,6 +119,12 @@ inject() {
         echo "symlink /etc/systemd/system/multi-user.target.wants/$(basename "$f") /etc/systemd/system/$(basename "$f")"
       done
     fi
+    if [ -n "${EXTRA:-}" ] && [ -d "$EXTRA/dropins" ]; then   # drop-ins changing the image's own units
+      for d in "$EXTRA"/dropins/*.d; do
+        exists "/etc/systemd/system/$(basename "$d")" || mkd "/etc/systemd/system/$(basename "$d")"
+        for f in "$d"/*.conf; do put "$f" "/etc/systemd/system/$(basename "$d")/$(basename "$f")" 0100644; done
+      done
+    fi
     put "$HERE/nam-mpc.service" /etc/systemd/system/nam-mpc.service 0100644
     echo "symlink /etc/systemd/system/multi-user.target.wants/nam-mpc.service /etc/systemd/system/nam-mpc.service"
     mkd "$syn"
@@ -157,6 +164,12 @@ inject() {
                      die "$(basename "$f"): service link missing" ;;
         *) grep -q 'Mode:  0755' <<<"$(dbg "stat \"$d/$(basename "$f")\"")" || die "$(basename "$f") isn't executable" ;;
       esac
+    done
+  fi
+  if [ -n "${EXTRA:-}" ] && [ -d "$EXTRA/dropins" ]; then
+    for f in "$EXTRA"/dropins/*.d/*.conf; do
+      d="/etc/systemd/system/$(basename "$(dirname "$f")")"
+      dbg "dump \"$d/$(basename "$f")\" $tmp/x" >/dev/null; cmp -s "$tmp/x" "$f" || die "$f read back differs"
     done
   fi
   rm -rf "$tmp"

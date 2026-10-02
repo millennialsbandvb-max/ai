@@ -1,0 +1,21 @@
+#!/bin/sh
+# Starts MPC (in place of acvs.service's own ExecStart, via a drop-in) exactly as the firmware's launcher
+# /usr/bin/az01-launch-MPC does, with mpc-buttons.so added to the libraries that launcher preloads, for the browser
+# remote's MPC buttons. The launcher itself is not changed: a copy with that one addition is run from /tmp.
+# MPC starts without mpc-buttons.so if: it has failed to come up with it 3 times in a row (mpc-remote resets the
+# count once MPC has run a minute), /data/mpc-remote/no-buttons exists (the remote page's "Button input off"),
+# or the launcher doesn't look as expected.
+L=/usr/bin/az01-launch-MPC
+SO=/usr/lib/nam-mpc/bin/mpc-buttons.so
+D=/data/mpc-remote
+n=$(cat "$D/launches" 2>/dev/null)
+case "$n" in ''|*[!0-9]*) n=0 ;; esac
+if [ -f "$SO" ] && [ ! -e "$D/no-buttons" ] && [ "$n" -lt 3 ] && grep -q 'export LD_PRELOAD="' "$L"; then
+    mkdir -p "$D" && echo $((n + 1)) > "$D/launches" && sync
+    rm -f /tmp/mpc-buttons
+    if sed 's|export LD_PRELOAD="\([^"]*\)"|export LD_PRELOAD="\1 '"$SO"'"|' "$L" > /tmp/az01-launch-MPC.remote &&
+        grep -q "$SO" /tmp/az01-launch-MPC.remote; then
+        exec /bin/sh /tmp/az01-launch-MPC.remote "$@"
+    fi
+fi
+exec "$L" "$@"
