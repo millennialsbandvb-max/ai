@@ -122,7 +122,10 @@ struct Plugin {
     Handover<Synth> synth;
     VstMidiEvent events[kMaxEvents];
     std::atomic<bool> panic{false};
-    bool off_pending[128] = {};   // note-offs carried to the next chunk (audio thread)
+    static constexpr int kQueue = 64;   // MIDI carried to the next chunk (audio thread)
+    unsigned char queued[kQueue][3];
+    int nqueued = 0;
+    bool queued_on[128] = {};
     int nevents = 0;
     std::atomic<bool> release[kNumParams];
     std::atomic<bool> update_display{false};
@@ -318,26 +321,50 @@ void Plugin::process(float **out, int n) {
     // stable: events at the same moment keep MPC's order (a note's on before its off), or the note would hang
     std::stable_sort(events, events + nevents, [](const VstMidiEvent &a, const VstMidiEvent &b) { return a.deltaFrames < b.deltaFrames; });
     if (panic.exchange(false)) sfizz_all_sound_off(y->s);   // MPC stopped or bypassed us: nothing keeps sounding
-    // sfizz ignores a note-off for a voice that hasn't started sounding yet, so a note whose off lands on the same
-    // sample as its on would hang: such an off goes one sample later (or to the start of the next chunk)
-    int on_at[128];
+    // Two sfizz quirks would leave notes hanging, so notes are spaced out by a sample where needed (inaudible):
+    //  - an off on the same sample as its own on is ignored (the voice hasn't started): the off goes 1 sample later
+    //  - notes starting on the same sample, in an instrument where a new note cuts the last (a sax), fail to cut it
+    //    (a chord leaves a note sounding forever): each note-on goes at least 1 sample after the previous one
+    // Anything pushed past the end of a chunk waits in a small queue for the start of the next chunk.
+    int on_at[128], last_on = -1;
+    auto queue = [&](const unsigned char *md) {
+        if (nqueued < kQueue) { std::memcpy(queued[nqueued], md, 3); nqueued++; return true; }
+        return false;
+    };
     auto send = [&](const unsigned char *md, int d, int m) {
         const int st = md[0] & 0xf0, key = md[1] & 0x7f;
         const bool on = st == 0x90 && md[2], offn = st == 0x80 || (st == 0x90 && !md[2]);
-        if (on) on_at[key] = d;
-        if (offn && on_at[key] >= d) {
-            if (on_at[key] + 1 < m) { sfizz_send_note_off(y->s, on_at[key] + 1, key, md[2]); return; }
-            off_pending[key] = true;
+        if (on) {
+            if (d <= last_on) d = last_on + 1;
+            if (d >= m && queue(md)) { queued_on[key] = true; return; }
+            d = std::min(d, m - 1);
+            last_on = d;
+            on_at[key] = d;
+            sfizz_send_note_on(y->s, d, key, md[2]);
             return;
         }
-        if (offn) off_pending[key] = false;
+        if (offn) {
+            if (queued_on[key] && queue(md)) return;   // its note hasn't been sent yet: keep the order
+            if (on_at[key] >= d) {
+                if (on_at[key] + 1 < m) sfizz_send_note_off(y->s, on_at[key] + 1, key, md[2]);
+                else if (!queue(md)) sfizz_send_note_off(y->s, m - 1, key, md[2]);
+                return;
+            }
+        }
         send_midi(y->s, md, d);
     };
     for (int off = 0; off < n; off += kChunk) {
         const int m = std::min(kChunk, n - off);
         std::fill(on_at, on_at + 128, -1);
-        for (int k = 0; k < 128; k++)
-            if (off_pending[k]) { off_pending[k] = false; sfizz_send_note_off(y->s, 0, k, 0); }
+        last_on = -1;
+        if (nqueued) {   // what the last chunk couldn't fit, first, in order
+            unsigned char q[kQueue][3];
+            const int nq = nqueued;
+            std::memcpy(q, queued, sizeof q);
+            nqueued = 0;
+            std::fill(queued_on, queued_on + 128, false);
+            for (int k = 0; k < nq; k++) send(q[k], 0, m);
+        }
         for (; e < nevents && events[e].deltaFrames < off + m; e++)
             send(events[e].midiData, std::max(0, events[e].deltaFrames - off), m);
         float *o[2] = {out[0] + off, (out[1] ? out[1] : out[0]) + off};
