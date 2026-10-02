@@ -187,7 +187,9 @@ static int redirect(int card, snd_rawmidi_t **in, int mode) {
         while (next_client(seq, ci) >= 0) before[p_snd_seq_client_info_get_client(ci) & 255] = 1;
         p_snd_seq_client_info_free(ci);
     }
-    if (real_open()(in, NULL, "virtual", mode) < 0) { logf_("can't open a virtual MIDI input"); *in = NULL; goto out; }
+    /* MERGE=0: every message with its status byte. The default sends "running status" (a repeated status byte left
+     * out, e.g. a button's release as just "7b 00"), which MPC's panel reader doesn't understand. */
+    if (real_open()(in, NULL, "virtual:MERGE=0", mode) < 0) { logf_("can't open a virtual MIDI input"); *in = NULL; goto out; }
     if (find_client(seq, -1, (int)getpid(), "Virtual RawMIDI", before, &virt, -1) < 0) {
         logf_("can't find the virtual input's sequencer port");
         goto fail;

@@ -72,7 +72,9 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
 - MPC's panel (buttons, pads) is MIDI from its internal controller's "private" port, which MPC opens as raw MIDI
   `hw:<card>,0,1`; there are no Linux input devices for it. The remote's buttons work by giving MPC an ALSA virtual
   raw MIDI input fed through the sequencer (as Hakai's driver does) and sending the learned button messages to it.
-  `mpc-launch` stops loading it after 3 failed starts; the page has "Button input off".
+  `mpc-launch` stops loading it after 3 failed starts; the page has "Button input off". The virtual input must be
+  opened as `virtual:MERGE=0`: the default leaves out repeated status bytes (running status) and MPC's panel reader
+  then ignores everything (all buttons and pads dead).
 - `pkill -f <pattern>` kills your own shell when the pattern appears in the command line: use `pgrep -x` + `kill`.
 - Hidden `._` files (macOS) on the card must be skipped (NAM used to error on them).
 - NAM's Size knob is capped at 49%: slimmable A2 models switch to full size at 50%.
