@@ -483,7 +483,8 @@ static void cal_tap(int x, int y) {   /* a finished tap on the real screen durin
 #define BTN_STATUS "/tmp/mpc-buttons"
 #define NO_BUTTONS CONF_DIR "/no-buttons"
 #define LAUNCHES CONF_DIR "/launches"
-static const char *const BTN_NAMES[] = {"menu", "main", "mix", "mute", "rec", "overdub", "stop", "play", "playstart"};
+static const char *const BTN_NAMES[] = {"menu", "main", "mix", "mute", "rec", "overdub", "stop", "play", "playstart",
+                                       "shift", "undo"};
 #define NBTN (int)(sizeof BTN_NAMES / sizeof *BTN_NAMES)
 static struct { int set; uint8_t on[3], off[3]; } btn[NBTN];
 static int seq_fd = -1, seq_me = -1, seq_port = -1;
@@ -792,7 +793,7 @@ static void send_hello(Client *c) {   /* screen size, and the whole screen to co
     c->dirty = malloc((size_t)TW * TH);
     memset(c->dirty, 1, (size_t)TW * TH);
     c->ndirty = TW * TH;
-    char learned[160] = "";
+    char learned[256] = "";
     for (int i = 0; i < NBTN; i++)
         if (btn[i].set) snprintf(learned + strlen(learned), sizeof learned - strlen(learned), "%s\"%s\"", learned[0] ? "," : "", BTN_NAMES[i]);
     ws_text(c, "{\"type\":\"hello\",\"w\":%d,\"h\":%d,\"tile\":%d,\"calibrated\":%s,\"touch\":\"%s\",\"learned\":[%s],"

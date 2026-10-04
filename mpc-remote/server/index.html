@@ -51,8 +51,13 @@
 <main><canvas id="screen" width="1280" height="800"></canvas></main>
 <div id="pad">
   <div class="grp">
-    <button type="button" data-b="menu">MENU</button><button type="button" data-b="main">MAIN</button>
+    <button type="button" data-b="menu">MENU</button><button type="button" data-b="shift+menu">BROWSE</button>
+    <button type="button" data-b="main">MAIN</button>
     <button type="button" data-b="mix">MIX</button><button type="button" data-b="mute">MUTE</button>
+  </div>
+  <div class="grp">
+    <button type="button" data-b="undo">UNDO</button><button type="button" data-b="shift+undo">REDO</button>
+    <button type="button" data-b="shift">SHIFT</button>
   </div>
   <div class="grp">
     <button type="button" data-b="rec" class="rec">REC</button><button type="button" data-b="overdub" class="rec">OVERDUB</button>
@@ -201,30 +206,40 @@ view.addEventListener("pointercancel", up);
 view.addEventListener("contextmenu", (e) => e.preventDefault());
 
 // MPC's buttons: held while the on-screen button is held
-const LABEL = {menu: "MENU", main: "MAIN", mix: "MIX", mute: "MUTE", rec: "REC", overdub: "OVERDUB", stop: "STOP",
+const LABEL = {menu: "MENU", shift: "SHIFT", undo: "UNDO", main: "MAIN", mix: "MIX", mute: "MUTE", rec: "REC", overdub: "OVERDUB", stop: "STOP",
                play: "PLAY", playstart: "PLAY START"};
 const ORDER = Object.keys(LABEL);
 const lrnEl = document.getElementById("lrn"), lrnText = document.getElementById("lrntext");
 let learned = new Set(), buttonsOn = true, learning = -1;
 function showPad() {
-  for (const b of document.querySelectorAll("#pad button")) b.classList.toggle("unset", !learned.has(b.dataset.b));
+  for (const b of document.querySelectorAll("#pad button"))
+    b.classList.toggle("unset", !b.dataset.b.split("+").every((n) => learned.has(n)));
   document.getElementById("lrnoff").textContent = buttonsOn ? "Button input off" : "Button input on";
 }
 for (const b of document.querySelectorAll("#pad button")) {
   let held = false;
   b.addEventListener("pointerdown", (e) => {
-    b.setPointerCapture(e.pointerId); held = true; b.classList.add("on"); send("bd " + b.dataset.b); e.preventDefault();
+    b.setPointerCapture(e.pointerId); held = true; b.classList.add("on"); e.preventDefault();
+    for (const n of b.dataset.b.split("+")) send("bd " + n);   // a combination (SHIFT+MENU): held in order
   });
-  const rel = () => { if (!held) return; held = false; b.classList.remove("on"); send("bu " + b.dataset.b); };
+  const rel = () => {
+    if (!held) return;
+    held = false; b.classList.remove("on");
+    for (const n of b.dataset.b.split("+").reverse()) send("bu " + n);   // released in reverse
+  };
   b.addEventListener("pointerup", rel);
   b.addEventListener("pointercancel", rel);
   b.addEventListener("contextmenu", (e) => e.preventDefault());
 }
+let todo = ORDER;   // the buttons this round of learning asks for
 function learnNext() {
-  if (++learning >= ORDER.length) { lrnEl.classList.remove("on"); learning = -1; setStatus("buttons learned"); return; }
-  send("learn " + ORDER[learning]);
+  if (++learning >= todo.length) { lrnEl.classList.remove("on"); learning = -1; setStatus("buttons learned"); return; }
+  send("learn " + todo[learning]);
 }
-document.getElementById("lrnbtn").onclick = () => { learning = -1; lrnText.textContent = "…"; lrnEl.classList.add("on"); learnNext(); };
+document.getElementById("lrnbtn").onclick = () => {
+  todo = ORDER.filter((n) => !learned.has(n));   // new ones only; everything again once all are learned
+  if (!todo.length) todo = ORDER;
+  learning = -1; lrnText.textContent = "…"; lrnEl.classList.add("on"); learnNext(); };
 document.getElementById("lrnskip").onclick = () => { send("learncancel"); learnNext(); };
 document.getElementById("lrncancel").onclick = () => { send("learncancel"); learning = -1; lrnEl.classList.remove("on"); };
 document.getElementById("lrnoff").onclick = () => {
