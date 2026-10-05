@@ -149,6 +149,32 @@
         "On"
       ],
       "momentary": true
+    },
+    {
+      "key": "ir_folder",
+      "name": "IR Folder",
+      "min": 0,
+      "max": 1,
+      "display": "string",
+      "type": "stepper"
+    },
+    {
+      "key": "ir_folder_prev",
+      "name": "IR Folder <",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
+    },
+    {
+      "key": "ir_folder_next",
+      "name": "IR Folder >",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
     }
   ]
 }

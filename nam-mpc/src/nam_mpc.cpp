@@ -59,7 +59,8 @@ static constexpr double kTargetLoudnessDb = -18.0;
 /* ---- parameters ------------------------------------------------------------------------------------------ */
 enum {
     kInput, kGate, kBass, kMiddle, kTreble, kOutput, kModel, kModelPrev, kModelNext,
-    kCab, kIr, kIrPrev, kIrNext, kNormalize, kSize, kFolder, kFolderPrev, kFolderNext, kNumParams
+    kCab, kIr, kIrPrev, kIrNext, kNormalize, kSize, kFolder, kFolderPrev, kFolderNext,
+    kIrFolder, kIrFolderPrev, kIrFolderNext, kNumParams
 };   // new parameters go at the end: saved projects and MPC's Q-Link assignments refer to them by index
 struct ParamInfo { const char *key, *name, *unit; float min, max, def; };
 static const ParamInfo PARAMS[kNumParams] = {
@@ -81,6 +82,9 @@ static const ParamInfo PARAMS[kNumParams] = {
     {"folder", "Folder", "", 0, 1, 0},
     {"folder_prev", "Folder <", "", 0, 1, 0},
     {"folder_next", "Folder >", "", 0, 1, 0},
+    {"ir_folder", "IR Folder", "", 0, 1, 0},
+    {"ir_folder_prev", "IR Folder <", "", 0, 1, 0},
+    {"ir_folder_next", "IR Folder >", "", 0, 1, 0},
 };
 
 static float clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
@@ -236,18 +240,18 @@ struct Plugin {
     std::mutex req_mutex;
     std::condition_variable req_cv;
     bool quit = false;
-    int model_step = 0, ir_step = 0, folder_step = 0;   // +-1 per arrow press
-    int model_pick = -1, ir_pick = -1, folder_pick = -1; // an absolute index (model: in the folder's view)
+    int model_step = 0, ir_step = 0;       // +-1 per arrow press
+    int model_pick = -1, ir_pick = -1;     // an absolute index (in the folder's view)
     std::string model_by_name, ir_by_name; // from a saved project
-    std::string folder_by_name;            // from a saved project ("" = All)
-    bool folder_restore = false;
+    struct FolderReq { int step = 0, pick = -1; std::string by_name; bool restore = false; } mfolder, ifolder;
     bool rescan = true, reload = false, resize = false;
     std::atomic<bool> poisoned{false};    // the model produced a non-number: the worker reloads it fresh
 
     // worker state; the UI thread reads names/status under lib_mutex
     std::mutex lib_mutex;
     Library models, irs;
-    std::atomic<int> model_count{0}, model_index{0}, ir_count{0}, ir_index{0}, folder_count{1}, folder_idx{0};
+    std::atomic<int> model_count{0}, model_index{0}, ir_count{0}, ir_index{0}, folder_count{1}, folder_idx{0},
+        ir_folder_count{1}, ir_folder_idx{0};
     std::atomic<double> sample_rate{44100.0};
     std::thread worker;
 
@@ -374,22 +378,23 @@ void Plugin::run_worker() {
         cab.collect();
         lk.lock();
         bool do_scan = rescan, do_reload = reload || poisoned.exchange(false), do_resize = resize;
-        int mstep = model_step, istep = ir_step, mpick = model_pick, ipick = ir_pick, fstep = folder_step, fpick = folder_pick;
-        std::string mname = model_by_name, iname = ir_by_name, fname = folder_by_name;
-        const bool frestore = folder_restore;
-        rescan = reload = resize = folder_restore = false;
-        model_step = ir_step = folder_step = 0;
-        model_pick = ir_pick = folder_pick = -1;
+        int mstep = model_step, istep = ir_step, mpick = model_pick, ipick = ir_pick;
+        std::string mname = model_by_name, iname = ir_by_name;
+        const FolderReq mf_req = mfolder, if_req = ifolder;
+        rescan = reload = resize = false;
+        model_step = ir_step = 0;
+        model_pick = ir_pick = -1;
         model_by_name.clear();
         ir_by_name.clear();
-        folder_by_name.clear();
+        mfolder = ifolder = FolderReq();
+        auto asked = [](const FolderReq &r) { return r.step || r.pick >= 0 || r.restore; };
         if (!do_scan && !do_reload && !do_resize && !mstep && !istep && mpick < 0 && ipick < 0 && mname.empty() &&
-            iname.empty() && !fstep && fpick < 0 && !frestore)
+            iname.empty() && !asked(mf_req) && !asked(if_req))
             continue;
         lk.unlock();
 
         const double sr = sample_rate.load();
-        if (do_scan || mstep || istep || fstep || fpick >= 0) {   // pick up files copied in since the last look
+        if (do_scan || mstep || istep || mf_req.step || mf_req.pick >= 0 || if_req.step || if_req.pick >= 0) {   // pick up files copied in since the last look
             auto mf = scan(bases, "Models", ".nam"), inf = scan(bases, "IRs", ".wav");
             std::lock_guard<std::mutex> l(lib_mutex);
             auto keep = [](Library &lib, std::vector<fs::path> files) {
@@ -404,21 +409,24 @@ void Plugin::run_worker() {
             if (models.files.empty()) models.status = "No models";
             if (irs.files.empty()) irs.status = "No IRs";
         }
-        // a model folder chosen (arrows, a touch, a saved project): the model arrows then stay in it
-        bool folder_changed = false;
-        if (fstep || fpick >= 0 || frestore) {
+        // a folder chosen (arrows, a touch, a saved project): the arrows then stay in it; -> whether to jump to its
+        // first file (not for a restored project, which loads its own file below)
+        auto choose_folder = [&](Library &lib, const FolderReq &r) -> bool {
+            if (!asked(r)) return false;
             std::lock_guard<std::mutex> l(lib_mutex);
-            const int nf = (int)models.folders.size();
-            int fi = folder_index(models);
-            if (frestore) fi = 0;
-            if (frestore)
-                for (int i = 1; i < nf; i++) if (models.folders[i] == fname) fi = i;
-            if (fpick >= 0) fi = std::min(fpick, nf - 1);
-            else if (fstep) fi = ((fi + fstep) % nf + nf) % nf;
-            models.folder = fi ? models.folders[fi] : "";
-            rebuild(models);
-            folder_changed = !frestore;   // a restored project loads its own model, below
-        }
+            const int nf = (int)lib.folders.size();
+            int fi = folder_index(lib);
+            if (r.restore) {
+                fi = 0;
+                for (int i = 1; i < nf; i++) if (lib.folders[i] == r.by_name) fi = i;
+            }
+            if (r.pick >= 0) fi = std::min(r.pick, nf - 1);
+            else if (r.step) fi = ((fi + r.step) % nf + nf) % nf;
+            lib.folder = fi ? lib.folders[fi] : "";
+            rebuild(lib);
+            return !r.restore;
+        };
+        const bool mjump = choose_folder(models, mf_req), ijump = choose_folder(irs, if_req);
         // resolve what to load next
         auto choose = [&](Library &lib, int step, int pick, const std::string &name, bool first, bool jump) -> int {
             std::lock_guard<std::mutex> l(lib_mutex);
@@ -443,8 +451,8 @@ void Plugin::run_worker() {
             lib.status = "Loading...";
             return target;
         };
-        const int mi = choose(models, mstep, mpick, mname, do_scan, folder_changed);
-        const int ii = choose(irs, istep, ipick, iname, do_scan, false);
+        const int mi = choose(models, mstep, mpick, mname, do_scan, mjump);
+        const int ii = choose(irs, istep, ipick, iname, do_scan, ijump);
         update_display = true;
         auto file_of = [&](Library &lib, int i) { std::lock_guard<std::mutex> l(lib_mutex); return lib.files[i]; };
         if (mi >= 0) {
@@ -482,6 +490,8 @@ void Plugin::run_worker() {
             ir_index = std::max(view_pos(irs), 0);
             folder_count = (int)models.folders.size();
             folder_idx = folder_index(models);
+            ir_folder_count = (int)irs.folders.size();
+            ir_folder_idx = folder_index(irs);
         }
         update_display = true;
         lk.lock();
@@ -584,16 +594,18 @@ void Plugin::process_chunk(const float *in, float *l, float *r, int n) {
 static Plugin *P(AEffect *e) { return (Plugin *)e->object; }
 
 static int library_count(Plugin *s, int i) {
-    return i == kModel ? s->model_count.load() : i == kFolder ? s->folder_count.load() : s->ir_count.load();
+    return i == kModel ? s->model_count.load() : i == kFolder ? s->folder_count.load() :
+           i == kIrFolder ? s->ir_folder_count.load() : s->ir_count.load();
 }
 static int library_index(Plugin *s, int i) {
-    return i == kModel ? s->model_index.load() : i == kFolder ? s->folder_idx.load() : s->ir_index.load();
+    return i == kModel ? s->model_index.load() : i == kFolder ? s->folder_idx.load() :
+           i == kIrFolder ? s->ir_folder_idx.load() : s->ir_index.load();
 }
 
 static float getParameter(AEffect *e, int32_t i) {
     Plugin *s = P(e);
     if (i < 0 || i >= kNumParams) return 0;
-    if (i == kModel || i == kIr || i == kFolder) {
+    if (i == kModel || i == kIr || i == kFolder || i == kIrFolder) {
         const int n = library_count(s, i);
         return n > 1 ? (float)library_index(s, i) / (n - 1) : 0.0f;
     }
@@ -605,7 +617,7 @@ static void setParameter(AEffect *e, int32_t i, float v) {
     if (i < 0 || i >= kNumParams) return;
     v = clamp01(v);
     switch (i) {
-    case kModel: case kIr: case kFolder: {
+    case kModel: case kIr: case kFolder: case kIrFolder: {
         // A value on an entry (a touch, automation) selects it; one in between is a Q-Link nudge: step one entry.
         const int n = library_count(s, i);
         if (n < 1) { s->post([&] { s->rescan = true; }); return; }
@@ -616,17 +628,20 @@ static void setParameter(AEffect *e, int32_t i, float v) {
         if (pick == (int)cur) return;
         s->post([&] {
             if (i == kModel) { if (step) s->model_step += step; else s->model_pick = pick; }
-            else if (i == kFolder) { if (step) s->folder_step += step; else s->folder_pick = pick; }
+            else if (i == kFolder) { if (step) s->mfolder.step += step; else s->mfolder.pick = pick; }
+            else if (i == kIrFolder) { if (step) s->ifolder.step += step; else s->ifolder.pick = pick; }
             else { if (step) s->ir_step += step; else s->ir_pick = pick; }
         });
         return;
     }
     case kModelPrev: case kModelNext: case kIrPrev: case kIrNext: case kFolderPrev: case kFolderNext:
+    case kIrFolderPrev: case kIrFolderNext:
         if (v > 0.5f) {
-            const int d = (i == kModelNext || i == kIrNext || i == kFolderNext) ? 1 : -1;
+            const int d = (i == kModelNext || i == kIrNext || i == kFolderNext || i == kIrFolderNext) ? 1 : -1;
             s->post([&] {
                 if (i == kModelPrev || i == kModelNext) s->model_step += d;
-                else if (i == kFolderPrev || i == kFolderNext) s->folder_step += d;
+                else if (i == kFolderPrev || i == kFolderNext) s->mfolder.step += d;
+                else if (i == kIrFolderPrev || i == kIrFolderNext) s->ifolder.step += d;
                 else s->ir_step += d;
             });
             s->release[i] = true;
@@ -661,13 +676,14 @@ static void param_display(Plugin *s, int i, char *out) {
         else copy_str(out, lib.files[lib.current].stem().string().c_str(), n);
         return;
     }
-    case kFolder: {
+    case kFolder: case kIrFolder: {
         std::lock_guard<std::mutex> l(s->lib_mutex);
-        std::snprintf(out, n, "Folder: %s", s->models.folder.empty() ? "All" : s->models.folder.c_str());
+        const Library &lib = i == kFolder ? s->models : s->irs;
+        std::snprintf(out, n, "Folder: %s", lib.folder.empty() ? "All" : lib.folder.c_str());
         return;
     }
-    case kModelPrev: case kIrPrev: case kFolderPrev: copy_str(out, "<", n); return;
-    case kModelNext: case kIrNext: case kFolderNext: copy_str(out, ">", n); return;
+    case kModelPrev: case kIrPrev: case kFolderPrev: case kIrFolderPrev: copy_str(out, "<", n); return;
+    case kModelNext: case kIrNext: case kFolderNext: case kIrFolderNext: copy_str(out, ">", n); return;
     case kCab: case kNormalize: copy_str(out, s->norm[i].load() > 0.5f ? "On" : "Off", n); return;
     case kSize: std::snprintf(out, n, "%.0f", s->value(i)); return;
     default: std::snprintf(out, n, "%.1f", s->value(i));
@@ -679,12 +695,13 @@ static void get_state(Plugin *s, std::string &out) {
     out = "NAMMPC 1\n";
     char buf[64];
     for (int i = 0; i < kNumParams; i++) {
-        if (i == kModel || i == kIr || i == kFolder) continue;
+        if (i == kModel || i == kIr || i == kFolder || i == kIrFolder) continue;
         std::snprintf(buf, sizeof buf, "%s=%.6f\n", PARAMS[i].key, s->norm[i].load());
         out += buf;
     }
     std::lock_guard<std::mutex> l(s->lib_mutex);
     out += "model_folder=" + s->models.folder + "\n";
+    out += "ir_folder=" + s->irs.folder + "\n";
     if (s->models.current >= 0 && s->models.current < (int)s->models.files.size())
         out += "model_file=" + s->models.files[s->models.current].stem().string() + "\n";
     if (s->irs.current >= 0 && s->irs.current < (int)s->irs.files.size())
@@ -694,8 +711,8 @@ static void get_state(Plugin *s, std::string &out) {
 static void set_state(Plugin *s, const char *data, size_t len) {
     std::string text(data, strnlen(data, len));
     if (text.rfind("NAMMPC ", 0) != 0) return;
-    std::string mname, iname, fname;
-    bool has_folder = false;
+    std::string mname, iname, fname, ifname;
+    bool has_folder = false, has_ir_folder = false;
     size_t p = 0;
     while (p < text.size()) {
         size_t e = text.find('\n', p);
@@ -707,16 +724,19 @@ static void set_state(Plugin *s, const char *data, size_t len) {
         const std::string k = line.substr(0, eq), v = line.substr(eq + 1);
         if (k == "model_file") mname = v;
         else if (k == "model_folder") { fname = v; has_folder = true; }
+        else if (k == "ir_folder") { ifname = v; has_ir_folder = true; }
         else if (k == "ir_file") iname = v;
         else
             for (int i = 0; i < kNumParams; i++)
-                if (k == PARAMS[i].key && i != kModel && i != kIr && i != kFolder) s->norm[i] = clamp01((float)std::atof(v.c_str()));
+                if (k == PARAMS[i].key && i != kModel && i != kIr && i != kFolder && i != kIrFolder) s->norm[i] = clamp01((float)std::atof(v.c_str()));
     }
     s->post([&] {
         s->model_by_name = mname;
         s->ir_by_name = iname;
-        s->folder_by_name = fname;
-        s->folder_restore = has_folder;
+        s->mfolder.by_name = fname;
+        s->mfolder.restore = has_folder;
+        s->ifolder.by_name = ifname;
+        s->ifolder.restore = has_ir_folder;
         s->resize = true;
     });
     s->update_display = true;

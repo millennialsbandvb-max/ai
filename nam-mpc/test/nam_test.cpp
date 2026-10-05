@@ -17,7 +17,8 @@
 #include "../src/vst2.h"
 
 enum { kInput, kGate, kBass, kMiddle, kTreble, kOutput, kModel, kModelPrev, kModelNext, kCab, kIr, kIrPrev, kIrNext,
-       kNormalize, kSize, kFolder, kFolderPrev, kFolderNext, kNumParams };
+       kNormalize, kSize, kFolder, kFolderPrev, kFolderNext,
+       kIrFolder, kIrFolderPrev, kIrFolderNext, kNumParams };
 
 static int failures = 0, automates = 0, updates = 0;
 #define CHECK(c, ...) do { if (c) std::printf("  ok    " __VA_ARGS__); else { std::printf("  FAIL  " __VA_ARGS__); failures++; } std::printf("\n"); } while (0)
@@ -167,6 +168,20 @@ int main(int argc, char **argv) {
         e->setParameter(e, kModelPrev, 1.0f);   // back to where the earlier checks expect
         model = settle(e, a, kModel, "A2");
     } else CHECK(false, "folder parameter (%s)", display(e, kFolder).c_str());
+
+    // IR folders work the same way
+    {
+        const std::string before = display(e, kIr);
+        e->setParameter(e, kIrFolderNext, 1.0f);
+        std::string im = settle(e, a, kIr, before);
+        CHECK(display(e, kIrFolder) == "Folder: Celestion" && im == "V30", "IR folder: %s, IR %s", display(e, kIrFolder).c_str(), im.c_str());
+        void *fd = nullptr;
+        intptr_t fl = e->dispatcher(e, effGetChunk, 0, 0, &fd, 0);
+        CHECK(std::string((const char *)fd, fl > 0 ? fl : 0).find("ir_folder=Celestion\n") != std::string::npos, "the project keeps the IR folder");
+        e->setParameter(e, kIrFolderPrev, 1.0f);   // back to All
+        for (int t = 0; t < 40 && display(e, kIrFolder) != "Folder: All"; t++) { a.run(e, 4); std::this_thread::sleep_for(std::chrono::milliseconds(25)); }
+        CHECK(display(e, kIrFolder) == "Folder: All", "IR folder back to All");
+    }
 
     // project save and restore into a fresh instance
     e->setParameter(e, kBass, 0.2f);

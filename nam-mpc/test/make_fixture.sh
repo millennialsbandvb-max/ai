@@ -22,4 +22,5 @@ w.setnchannels(1); w.setsampwidth(2); w.setframerate(48000)
 w.writeframes(b"".join(struct.pack("<h", int(30000 * (1 if i == 0 else random.uniform(-1, 1) * math.exp(-i / 300)))) for i in range(n)))
 w.close()
 PY
+mkdir -p "$D/IRs/Celestion" && cp "$D/IRs/Test Cab.wav" "$D/IRs/Celestion/V30.wav"   # an IR folder
 echo "fixture: $D"
