@@ -7,6 +7,7 @@ D="$1"; EX="$2"
 rm -rf "$D" && mkdir -p "$D/Models/sub" "$D/IRs"
 cp "$EX/wavenet.nam" "$EX/lstm.nam" "$D/Models/"
 cp "$EX/A2.nam" "$D/Models/sub/"   # a slimmable model, one folder down
+mkdir -p "$D/Models/Fender" && cp "$EX/wavenet.nam" "$D/Models/Fender/clean.nam"   # a second model folder
 cp "$EX/wavenet_a1_standard.nam" "$D/Models/"
 # macOS "._" twins and hidden folders, as a Mac leaves on a FAT/exFAT card: must be ignored
 printf '\0\5\26\7Mac OS X        ' > "$D/Models/._A2.nam"

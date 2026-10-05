@@ -17,7 +17,7 @@
 #include "../src/vst2.h"
 
 enum { kInput, kGate, kBass, kMiddle, kTreble, kOutput, kModel, kModelPrev, kModelNext, kCab, kIr, kIrPrev, kIrNext,
-       kNormalize, kSize, kNumParams };
+       kNormalize, kSize, kFolder, kFolderPrev, kFolderNext, kNumParams };
 
 static int failures = 0, automates = 0, updates = 0;
 #define CHECK(c, ...) do { if (c) std::printf("  ok    " __VA_ARGS__); else { std::printf("  FAIL  " __VA_ARGS__); failures++; } std::printf("\n"); } while (0)
@@ -135,6 +135,38 @@ int main(int argc, char **argv) {
     CHECK(updates > 0, "host told to refresh names (%d)", updates);
     e->setParameter(e, kModelPrev, 1.0f);
     CHECK(settle(e, a, kModel, next) == model || next == model, "previous model is back");
+
+    // model folders: "All", then each sub-folder of Models/; a folder jumps to its first model and the model arrows
+    // stay in it; a project remembers the folder
+    if (display(e, kFolder) == "Folder: All" && display(e, kFolderNext) == ">") {
+        CHECK(true, "folder starts at All");
+        e->setParameter(e, kFolderNext, 1.0f);
+        std::string fm = settle(e, a, kModel, display(e, kModel));
+        CHECK(display(e, kFolder) == "Folder: Fender" && fm == "clean", "next folder: %s, model %s", display(e, kFolder).c_str(), fm.c_str());
+        e->setParameter(e, kModelNext, 1.0f);
+        CHECK(settle(e, a, kModel, "nothing") == "clean", "model arrows stay in a one-model folder");
+        e->setParameter(e, kFolderNext, 1.0f);
+        fm = settle(e, a, kModel, "clean");
+        CHECK(display(e, kFolder) == "Folder: sub" && fm == "A2", "next folder: %s, model %s", display(e, kFolder).c_str(), fm.c_str());
+        void *fd = nullptr;
+        intptr_t fl = e->dispatcher(e, effGetChunk, 0, 0, &fd, 0);
+        std::string fs_((const char *)fd, fl > 0 ? fl : 0);
+        CHECK(fs_.find("model_folder=sub\n") != std::string::npos, "the project keeps the folder");
+        AEffect *g = open(lib);
+        Audio c;
+        settle(g, c, kModel);
+        g->dispatcher(g, effSetChunk, 0, (intptr_t)fs_.size(), (void *)fs_.data(), 0);
+        std::string gm;
+        for (int t = 0; t < 100 && (gm = settle(g, c, kModel)) != "A2"; t++) {}
+        CHECK(gm == "A2" && display(g, kFolder) == "Folder: sub", "restored folder %s, model %s", display(g, kFolder).c_str(), gm.c_str());
+        g->dispatcher(g, effClose, 0, 0, nullptr, 0);
+        e->setParameter(e, kFolderNext, 1.0f);   // back to All: the model stays
+        settle(e, a, kModel);
+        for (int t = 0; t < 40 && display(e, kFolder) != "Folder: All"; t++) a.run(e, 4);
+        CHECK(display(e, kFolder) == "Folder: All" && display(e, kModel) == "A2", "All keeps the model (%s)", display(e, kModel).c_str());
+        e->setParameter(e, kModelPrev, 1.0f);   // back to where the earlier checks expect
+        model = settle(e, a, kModel, "A2");
+    } else CHECK(false, "folder parameter (%s)", display(e, kFolder).c_str());
 
     // project save and restore into a fresh instance
     e->setParameter(e, kBass, 0.2f);

@@ -59,8 +59,8 @@ static constexpr double kTargetLoudnessDb = -18.0;
 /* ---- parameters ------------------------------------------------------------------------------------------ */
 enum {
     kInput, kGate, kBass, kMiddle, kTreble, kOutput, kModel, kModelPrev, kModelNext,
-    kCab, kIr, kIrPrev, kIrNext, kNormalize, kSize, kNumParams
-};
+    kCab, kIr, kIrPrev, kIrNext, kNormalize, kSize, kFolder, kFolderPrev, kFolderNext, kNumParams
+};   // new parameters go at the end: saved projects and MPC's Q-Link assignments refer to them by index
 struct ParamInfo { const char *key, *name, *unit; float min, max, def; };
 static const ParamInfo PARAMS[kNumParams] = {
     {"input", "Input", "dB", -24, 24, 0},
@@ -78,6 +78,9 @@ static const ParamInfo PARAMS[kNumParams] = {
     {"ir_next", "IR >", "", 0, 1, 0},
     {"normalize", "Normalize", "", 0, 1, 1},
     {"size", "Size", "%", 0, 49, 49},   // capped below 50%: slimmable models switch to their full size at 50%
+    {"folder", "Folder", "", 0, 1, 0},
+    {"folder_prev", "Folder <", "", 0, 1, 0},
+    {"folder_next", "Folder >", "", 0, 1, 0},
 };
 
 static float clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
@@ -186,7 +189,43 @@ struct Library {   // a scanned folder of models or IRs
     std::vector<fs::path> files;
     int current = -1;      // index into files of what's loaded (or loading)
     std::string status;    // shown when nothing is loaded: "No models", "Loading...", an error
+    // folders: the sub-folders the files are in ("All" first); the arrows step through view, the files in the
+    // chosen folder (all of them for "All")
+    std::vector<std::string> folders{"All"};
+    std::string folder;    // the chosen one; "" = All
+    std::vector<int> view;
 };
+
+/* the sub-folder a file is in ("" for one directly in Models/ or IRs/) */
+static std::string folder_of(const fs::path &f) {
+    const std::string d = f.parent_path().filename().string();
+    return d == "Models" || d == "IRs" ? "" : d;
+}
+static int folder_index(const Library &lib) {
+    for (int i = 1; i < (int)lib.folders.size(); i++) if (lib.folders[i] == lib.folder) return i;
+    return 0;
+}
+static int view_pos(const Library &lib) {   // where the loaded file is in the view, or -1
+    for (int i = 0; i < (int)lib.view.size(); i++) if (lib.view[i] == lib.current) return i;
+    return -1;
+}
+static void rebuild(Library &lib) {   // folders and view, after the files or the chosen folder changed
+    std::vector<std::string> names;
+    for (const auto &f : lib.files) { std::string d = folder_of(f); if (!d.empty()) names.push_back(d); }
+    std::sort(names.begin(), names.end(), [](const std::string &a, const std::string &b) {
+        std::string x = a, y = b;
+        for (auto &c : x) c = (char)std::tolower((unsigned char)c);
+        for (auto &c : y) c = (char)std::tolower((unsigned char)c);
+        return x != y ? x < y : a < b;
+    });
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    lib.folders.assign(1, "All");
+    lib.folders.insert(lib.folders.end(), names.begin(), names.end());
+    if (!folder_index(lib)) lib.folder.clear();   // gone (the card was taken out): back to All
+    lib.view.clear();
+    for (int i = 0; i < (int)lib.files.size(); i++)
+        if (lib.folder.empty() || folder_of(lib.files[i]) == lib.folder) lib.view.push_back(i);
+}
 
 struct Plugin {
     AEffect fx{};
@@ -197,16 +236,18 @@ struct Plugin {
     std::mutex req_mutex;
     std::condition_variable req_cv;
     bool quit = false;
-    int model_step = 0, ir_step = 0;       // +-1 per arrow press
-    int model_pick = -1, ir_pick = -1;     // an absolute index
+    int model_step = 0, ir_step = 0, folder_step = 0;   // +-1 per arrow press
+    int model_pick = -1, ir_pick = -1, folder_pick = -1; // an absolute index (model: in the folder's view)
     std::string model_by_name, ir_by_name; // from a saved project
+    std::string folder_by_name;            // from a saved project ("" = All)
+    bool folder_restore = false;
     bool rescan = true, reload = false, resize = false;
     std::atomic<bool> poisoned{false};    // the model produced a non-number: the worker reloads it fresh
 
     // worker state; the UI thread reads names/status under lib_mutex
     std::mutex lib_mutex;
     Library models, irs;
-    std::atomic<int> model_count{0}, model_index{0}, ir_count{0}, ir_index{0};
+    std::atomic<int> model_count{0}, model_index{0}, ir_count{0}, ir_index{0}, folder_count{1}, folder_idx{0};
     std::atomic<double> sample_rate{44100.0};
     std::thread worker;
 
@@ -333,19 +374,22 @@ void Plugin::run_worker() {
         cab.collect();
         lk.lock();
         bool do_scan = rescan, do_reload = reload || poisoned.exchange(false), do_resize = resize;
-        int mstep = model_step, istep = ir_step, mpick = model_pick, ipick = ir_pick;
-        std::string mname = model_by_name, iname = ir_by_name;
-        rescan = reload = resize = false;
-        model_step = ir_step = 0;
-        model_pick = ir_pick = -1;
+        int mstep = model_step, istep = ir_step, mpick = model_pick, ipick = ir_pick, fstep = folder_step, fpick = folder_pick;
+        std::string mname = model_by_name, iname = ir_by_name, fname = folder_by_name;
+        const bool frestore = folder_restore;
+        rescan = reload = resize = folder_restore = false;
+        model_step = ir_step = folder_step = 0;
+        model_pick = ir_pick = folder_pick = -1;
         model_by_name.clear();
         ir_by_name.clear();
-        if (!do_scan && !do_reload && !do_resize && !mstep && !istep && mpick < 0 && ipick < 0 && mname.empty() && iname.empty())
+        folder_by_name.clear();
+        if (!do_scan && !do_reload && !do_resize && !mstep && !istep && mpick < 0 && ipick < 0 && mname.empty() &&
+            iname.empty() && !fstep && fpick < 0 && !frestore)
             continue;
         lk.unlock();
 
         const double sr = sample_rate.load();
-        if (do_scan || mstep || istep) {   // pick up files copied in since the last look
+        if (do_scan || mstep || istep || fstep || fpick >= 0) {   // pick up files copied in since the last look
             auto mf = scan(bases, "Models", ".nam"), inf = scan(bases, "IRs", ".wav");
             std::lock_guard<std::mutex> l(lib_mutex);
             auto keep = [](Library &lib, std::vector<fs::path> files) {
@@ -353,32 +397,54 @@ void Plugin::run_worker() {
                 lib.files = std::move(files);
                 auto it = std::find(lib.files.begin(), lib.files.end(), cur);
                 lib.current = it == lib.files.end() ? -1 : (int)(it - lib.files.begin());
+                rebuild(lib);
             };
             keep(models, mf);
             keep(irs, inf);
             if (models.files.empty()) models.status = "No models";
             if (irs.files.empty()) irs.status = "No IRs";
         }
-        // resolve what to load next
-        auto choose = [&](Library &lib, int step, int pick, const std::string &name, bool first) -> int {
+        // a model folder chosen (arrows, a touch, a saved project): the model arrows then stay in it
+        bool folder_changed = false;
+        if (fstep || fpick >= 0 || frestore) {
             std::lock_guard<std::mutex> l(lib_mutex);
-            const int n = (int)lib.files.size();
-            if (!n) return -1;
+            const int nf = (int)models.folders.size();
+            int fi = folder_index(models);
+            if (frestore) fi = 0;
+            if (frestore)
+                for (int i = 1; i < nf; i++) if (models.folders[i] == fname) fi = i;
+            if (fpick >= 0) fi = std::min(fpick, nf - 1);
+            else if (fstep) fi = ((fi + fstep) % nf + nf) % nf;
+            models.folder = fi ? models.folders[fi] : "";
+            rebuild(models);
+            folder_changed = !frestore;   // a restored project loads its own model, below
+        }
+        // resolve what to load next
+        auto choose = [&](Library &lib, int step, int pick, const std::string &name, bool first, bool jump) -> int {
+            std::lock_guard<std::mutex> l(lib_mutex);
+            const int n = (int)lib.view.size();
+            if (lib.files.empty()) return -1;
             int target = -2;   // -2: no change
             if (!name.empty()) {
-                for (int i = 0; i < n; i++)
+                for (int i = 0; i < (int)lib.files.size(); i++)
                     if (lib.files[i].stem().string() == name) target = i;
                 if (target == -2) { lib.status = "Missing: " + name; return -1; }
-            } else if (pick >= 0) target = std::min(pick, n - 1);
-            else if (step) target = lib.current < 0 ? 0 : ((lib.current + step) % n + n) % n;
-            else if (first && lib.current < 0) target = 0;
+                if (!lib.folder.empty() && folder_of(lib.files[target]) != lib.folder) {   // not in the folder: go to its own
+                    lib.folder = folder_of(lib.files[target]);
+                    rebuild(lib);
+                }
+            } else if (!n) return -1;
+            else if (pick >= 0) target = lib.view[std::min(pick, n - 1)];
+            else if (step) { const int p = view_pos(lib); target = lib.view[p < 0 ? 0 : ((p + step) % n + n) % n]; }
+            else if (jump && view_pos(lib) < 0) target = lib.view[0];   // a new folder: its first model
+            else if (first && lib.current < 0) target = lib.view[0];
             if (target == -2 || (target == lib.current && !do_reload)) return do_reload ? lib.current : -1;
             lib.current = target;
             lib.status = "Loading...";
             return target;
         };
-        const int mi = choose(models, mstep, mpick, mname, do_scan);
-        const int ii = choose(irs, istep, ipick, iname, do_scan);
+        const int mi = choose(models, mstep, mpick, mname, do_scan, folder_changed);
+        const int ii = choose(irs, istep, ipick, iname, do_scan, false);
         update_display = true;
         auto file_of = [&](Library &lib, int i) { std::lock_guard<std::mutex> l(lib_mutex); return lib.files[i]; };
         if (mi >= 0) {
@@ -410,10 +476,12 @@ void Plugin::run_worker() {
         }
         {
             std::lock_guard<std::mutex> l(lib_mutex);
-            model_count = (int)models.files.size();
-            model_index = std::max(models.current, 0);
-            ir_count = (int)irs.files.size();
-            ir_index = std::max(irs.current, 0);
+            model_count = (int)models.view.size();
+            model_index = std::max(view_pos(models), 0);
+            ir_count = (int)irs.view.size();
+            ir_index = std::max(view_pos(irs), 0);
+            folder_count = (int)models.folders.size();
+            folder_idx = folder_index(models);
         }
         update_display = true;
         lk.lock();
@@ -515,13 +583,17 @@ void Plugin::process_chunk(const float *in, float *l, float *r, int n) {
 /* ---- VST2 entry points ---------------------------------------------------------------------------- */
 static Plugin *P(AEffect *e) { return (Plugin *)e->object; }
 
-static int library_count(Plugin *s, int i) { return i == kModel ? s->model_count.load() : s->ir_count.load(); }
-static int library_index(Plugin *s, int i) { return i == kModel ? s->model_index.load() : s->ir_index.load(); }
+static int library_count(Plugin *s, int i) {
+    return i == kModel ? s->model_count.load() : i == kFolder ? s->folder_count.load() : s->ir_count.load();
+}
+static int library_index(Plugin *s, int i) {
+    return i == kModel ? s->model_index.load() : i == kFolder ? s->folder_idx.load() : s->ir_index.load();
+}
 
 static float getParameter(AEffect *e, int32_t i) {
     Plugin *s = P(e);
     if (i < 0 || i >= kNumParams) return 0;
-    if (i == kModel || i == kIr) {
+    if (i == kModel || i == kIr || i == kFolder) {
         const int n = library_count(s, i);
         return n > 1 ? (float)library_index(s, i) / (n - 1) : 0.0f;
     }
@@ -533,7 +605,7 @@ static void setParameter(AEffect *e, int32_t i, float v) {
     if (i < 0 || i >= kNumParams) return;
     v = clamp01(v);
     switch (i) {
-    case kModel: case kIr: {
+    case kModel: case kIr: case kFolder: {
         // A value on an entry (a touch, automation) selects it; one in between is a Q-Link nudge: step one entry.
         const int n = library_count(s, i);
         if (n < 1) { s->post([&] { s->rescan = true; }); return; }
@@ -544,14 +616,19 @@ static void setParameter(AEffect *e, int32_t i, float v) {
         if (pick == (int)cur) return;
         s->post([&] {
             if (i == kModel) { if (step) s->model_step += step; else s->model_pick = pick; }
+            else if (i == kFolder) { if (step) s->folder_step += step; else s->folder_pick = pick; }
             else { if (step) s->ir_step += step; else s->ir_pick = pick; }
         });
         return;
     }
-    case kModelPrev: case kModelNext: case kIrPrev: case kIrNext:
+    case kModelPrev: case kModelNext: case kIrPrev: case kIrNext: case kFolderPrev: case kFolderNext:
         if (v > 0.5f) {
-            const int d = (i == kModelNext || i == kIrNext) ? 1 : -1;
-            s->post([&] { if (i == kModelPrev || i == kModelNext) s->model_step += d; else s->ir_step += d; });
+            const int d = (i == kModelNext || i == kIrNext || i == kFolderNext) ? 1 : -1;
+            s->post([&] {
+                if (i == kModelPrev || i == kModelNext) s->model_step += d;
+                else if (i == kFolderPrev || i == kFolderNext) s->folder_step += d;
+                else s->ir_step += d;
+            });
             s->release[i] = true;
         }
         s->norm[i] = 0;
@@ -584,8 +661,13 @@ static void param_display(Plugin *s, int i, char *out) {
         else copy_str(out, lib.files[lib.current].stem().string().c_str(), n);
         return;
     }
-    case kModelPrev: case kIrPrev: copy_str(out, "<", n); return;
-    case kModelNext: case kIrNext: copy_str(out, ">", n); return;
+    case kFolder: {
+        std::lock_guard<std::mutex> l(s->lib_mutex);
+        std::snprintf(out, n, "Folder: %s", s->models.folder.empty() ? "All" : s->models.folder.c_str());
+        return;
+    }
+    case kModelPrev: case kIrPrev: case kFolderPrev: copy_str(out, "<", n); return;
+    case kModelNext: case kIrNext: case kFolderNext: copy_str(out, ">", n); return;
     case kCab: case kNormalize: copy_str(out, s->norm[i].load() > 0.5f ? "On" : "Off", n); return;
     case kSize: std::snprintf(out, n, "%.0f", s->value(i)); return;
     default: std::snprintf(out, n, "%.1f", s->value(i));
@@ -597,11 +679,12 @@ static void get_state(Plugin *s, std::string &out) {
     out = "NAMMPC 1\n";
     char buf[64];
     for (int i = 0; i < kNumParams; i++) {
-        if (i == kModel || i == kIr) continue;
+        if (i == kModel || i == kIr || i == kFolder) continue;
         std::snprintf(buf, sizeof buf, "%s=%.6f\n", PARAMS[i].key, s->norm[i].load());
         out += buf;
     }
     std::lock_guard<std::mutex> l(s->lib_mutex);
+    out += "model_folder=" + s->models.folder + "\n";
     if (s->models.current >= 0 && s->models.current < (int)s->models.files.size())
         out += "model_file=" + s->models.files[s->models.current].stem().string() + "\n";
     if (s->irs.current >= 0 && s->irs.current < (int)s->irs.files.size())
@@ -611,7 +694,8 @@ static void get_state(Plugin *s, std::string &out) {
 static void set_state(Plugin *s, const char *data, size_t len) {
     std::string text(data, strnlen(data, len));
     if (text.rfind("NAMMPC ", 0) != 0) return;
-    std::string mname, iname;
+    std::string mname, iname, fname;
+    bool has_folder = false;
     size_t p = 0;
     while (p < text.size()) {
         size_t e = text.find('\n', p);
@@ -622,14 +706,17 @@ static void set_state(Plugin *s, const char *data, size_t len) {
         if (eq == std::string::npos) continue;
         const std::string k = line.substr(0, eq), v = line.substr(eq + 1);
         if (k == "model_file") mname = v;
+        else if (k == "model_folder") { fname = v; has_folder = true; }
         else if (k == "ir_file") iname = v;
         else
             for (int i = 0; i < kNumParams; i++)
-                if (k == PARAMS[i].key && i != kModel && i != kIr) s->norm[i] = clamp01((float)std::atof(v.c_str()));
+                if (k == PARAMS[i].key && i != kModel && i != kIr && i != kFolder) s->norm[i] = clamp01((float)std::atof(v.c_str()));
     }
     s->post([&] {
         s->model_by_name = mname;
         s->ir_by_name = iname;
+        s->folder_by_name = fname;
+        s->folder_restore = has_folder;
         s->resize = true;
     });
     s->update_display = true;

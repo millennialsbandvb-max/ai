@@ -123,6 +123,32 @@
       "max": 49,
       "default": 49,
       "unit": "%"
+    },
+    {
+      "key": "folder",
+      "name": "Folder",
+      "min": 0,
+      "max": 1,
+      "display": "string",
+      "type": "stepper"
+    },
+    {
+      "key": "folder_prev",
+      "name": "Folder <",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
+    },
+    {
+      "key": "folder_next",
+      "name": "Folder >",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
     }
   ]
 }
