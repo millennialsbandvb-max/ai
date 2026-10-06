@@ -75,6 +75,8 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   `mpc-launch` stops loading it after 3 failed starts; the page has "Button input off". The virtual input must be
   opened as `virtual:MERGE=0`: the default leaves out repeated status bytes (running status) and MPC's panel reader
   then ignores everything (all buttons and pads dead).
+- The remote's typing is a virtual USB keyboard (uinput, "MPC Remote Keyboard"), made the first time the page types;
+  MPC reads keyboards through libinput + xkb (US layout assumed by the page's character map).
 - `pkill -f <pattern>` kills your own shell when the pattern appears in the command line: use `pgrep -x` + `kill`.
 - Hidden `._` files (macOS) on the card must be skipped (NAM used to error on them).
 - NAM's Size knob is capped at 49%: slimmable A2 models switch to full size at 50%.

@@ -37,6 +37,11 @@
     #pad .grp { width: 100%; gap: 6px; }
     #pad button { flex: 1; min-width: 0; padding: 12px 2px; font-size: 12px; }
   }
+  #typebox { width: 170px; background: #1a1a1a; color: var(--fg); border: 1px solid #444; border-radius: 6px;
+             padding: 6px 8px; font: inherit; }
+  #typebox:focus { outline: none; border-color: var(--accent); }
+  #typebox[hidden] { display: none; }
+  @media (max-width: 640px) { header { flex-wrap: wrap; } #typebox { order: 9; width: 100%; } }
   #lrn .small { margin-top: 18px; font-size: 13px; color: var(--dim); }
 </style>
 </head>
@@ -45,6 +50,9 @@
   <b>MPC REMOTE</b>
   <span id="status">connecting…</span>
   <a href="/log" target="_blank" style="color:var(--dim)">log</a>
+  <input id="typebox" type="text" placeholder="type to the MPC" autocomplete="off" autocorrect="off"
+         autocapitalize="off" spellcheck="false" enterkeyhint="done">
+  <button id="keysbtn" type="button"></button>
   <button id="lrnbtn" type="button">Learn buttons</button>
   <button id="calbtn" type="button">Calibrate touch</button>
 </header>
@@ -246,6 +254,100 @@ document.getElementById("lrnoff").onclick = () => {
   buttonsOn = !buttonsOn; send(buttonsOn ? "buttons on" : "buttons off"); showPad();
   setStatus("button input " + (buttonsOn ? "on" : "off") + " from the next MPC restart");
 };
+
+// ---- the keyboard. Typing: what's typed goes to the MPC as key presses on a (virtual) USB keyboard, for naming
+// things; it works from a computer keyboard anywhere on the page, or from a phone's keyboard in the box.
+// Shortcuts: computer keys press MPC buttons. Off: the page ignores the keyboard.
+const KEYS = {};   // character -> [Linux key code, with shift]
+for (const [plain, shifted, first] of [["1234567890-=", "!@#$%^&*()_+", 2], ["qwertyuiop[]", "QWERTYUIOP{}", 16],
+                                      ["asdfghjkl;'`", "ASDFGHJKL:\"~", 30], ["\\", "|", 43],
+                                      ["zxcvbnm,./", "ZXCVBNM<>?", 44], [" ", " ", 57]])
+  for (let i = 0; i < plain.length; i++) { KEYS[plain[i]] = [first + i, false]; KEYS[shifted[i]] ??= [first + i, true]; }
+const SPECIAL = {Enter: 28, Backspace: 14, Tab: 15, Escape: 1, Delete: 111, Home: 102, End: 107,
+                 ArrowUp: 103, ArrowLeft: 105, ArrowRight: 106, ArrowDown: 108};
+const SHIFT = 42;
+function tap(code, shift = false) {
+  if (shift) send("kd " + SHIFT);
+  send("kd " + code); send("ku " + code);
+  if (shift) send("ku " + SHIFT);
+}
+function typeText(t) { for (const ch of t) { const k = KEYS[ch]; if (k) tap(k[0], k[1]); } }
+
+// shortcuts: key -> MPC button (combinations as on the button bar); Space starts and stops
+const SHORTCUTS = {r: "rec", o: "overdub", m: "menu", b: "shift+menu", h: "main", x: "mix", u: "mute",
+                   z: "undo", Z: "shift+undo", Enter: "playstart"};
+let playing = false;
+function pressBtn(name, down) {
+  const parts = name.split("+");
+  for (const n of down ? parts : parts.reverse()) send((down ? "bd " : "bu ") + n);
+}
+
+const MODES = ["typing", "shortcuts", "off"];
+let keyMode = "typing";
+try { keyMode = MODES.includes(localStorage.keyMode) ? localStorage.keyMode : "typing"; } catch (e) {}
+const typeBox = document.getElementById("typebox"), keysBtn = document.getElementById("keysbtn");
+const SENT = "\u200b";   // an invisible first character, so a phone's backspace in an "empty" box still arrives
+let prevTyped = SENT;
+function showKeys() {
+  keysBtn.textContent = "Keys: " + keyMode;
+  keysBtn.title = keyMode === "shortcuts"
+    ? "Space play/stop · Enter play start · R rec · O overdub · Z undo · Shift+Z redo · M menu · B browse · H main · X mix · U mute"
+    : keyMode === "typing" ? "Your typing goes to the MPC (names of tracks, programs, projects)" : "Keyboard ignored";
+  typeBox.hidden = keyMode !== "typing";
+  typeBox.value = "";
+  prevTyped = SENT;
+}
+keysBtn.onclick = () => {
+  keyMode = MODES[(MODES.indexOf(keyMode) + 1) % MODES.length];
+  try { localStorage.keyMode = keyMode; } catch (e) {}
+  showKeys();
+  if (keyMode === "typing") typeBox.focus();
+};
+showKeys();
+
+// the box: whatever changed since last time becomes backspaces and typing (works with phone keyboards' word
+// suggestions too, which replace whole words rather than sending single keys)
+typeBox.addEventListener("input", () => {
+  const v = typeBox.value;
+  let p = 0;
+  while (p < v.length && p < prevTyped.length && v[p] === prevTyped[p]) p++;
+  for (let i = p; i < prevTyped.length; i++) tap(SPECIAL.Backspace);
+  typeText(v.slice(p).replaceAll(SENT, ""));
+  if (!v.startsWith(SENT) || v.length > 40) typeBox.value = SENT + (v.length > 40 ? "" : v.replaceAll(SENT, ""));
+  prevTyped = typeBox.value;
+  typeBox.setSelectionRange(typeBox.value.length, typeBox.value.length);
+});
+typeBox.addEventListener("focus", () => { typeBox.value = prevTyped = SENT; });
+typeBox.addEventListener("blur", () => { typeBox.value = ""; prevTyped = SENT; });   // shows the hint again
+typeBox.addEventListener("keydown", (e) => {   // keys that don't type: straight to the MPC
+  if (e.isComposing || !(e.key in SPECIAL) || e.key === "Backspace") return;
+  e.preventDefault(); e.stopPropagation();
+  tap(SPECIAL[e.key]);
+  if (e.key === "Enter") typeBox.value = prevTyped = SENT;   // a name is done: start fresh
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.target === typeBox || e.ctrlKey && e.key !== "z" && e.key !== "Z" && e.key !== "y" || e.metaKey || e.altKey) return;
+  if (keyMode === "typing") {
+    if (e.ctrlKey) return;
+    if (e.key in SPECIAL) tap(SPECIAL[e.key]);
+    else if (e.key.length === 1 && KEYS[e.key]) tap(KEYS[e.key][0], KEYS[e.key][1]);
+    else return;
+    e.preventDefault();
+  } else if (keyMode === "shortcuts") {
+    let name = SHORTCUTS[e.key];
+    if (e.ctrlKey) name = e.key === "y" || e.shiftKey ? "shift+undo" : "undo";   // Ctrl+Z, Ctrl+Shift+Z, Ctrl+Y
+    if (e.key === " ") { name = playing ? "stop" : "play"; }
+    if (!name) return;
+    e.preventDefault();
+    if (e.repeat) return;
+    if (name === "play" || name === "playstart") playing = true;
+    if (name === "stop") playing = false;
+    pressBtn(name, true);
+    const up = (u) => { if (u.code === e.code) { pressBtn(name, false); document.removeEventListener("keyup", up); } };
+    document.addEventListener("keyup", up);
+  }
+});
 
 document.getElementById("calbtn").onclick = () => send("cal");
 document.getElementById("calcancel").onclick = () => { send("calcancel"); calEl.classList.remove("on"); };

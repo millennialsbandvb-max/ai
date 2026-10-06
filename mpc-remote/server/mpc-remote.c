@@ -47,6 +47,7 @@
 #include <drm/drm_fourcc.h>
 #include <drm/drm_mode.h>
 #include <linux/input.h>
+#include <linux/uinput.h>
 #include <sound/asequencer.h>
 
 #include "index_html.h"   /* generated from index.html: static const char INDEX_HTML[] */
@@ -316,6 +317,61 @@ static void emit(struct input_event *ev, int n) {
 #else
     if (touch_fd >= 0 && write(touch_fd, ev, sizeof *ev * n) < 0) LOG("touch write failed: %s", strerror(errno));
 #endif
+}
+
+/* ---- a keyboard ------------------------------------------------------------------------------------------------
+ * The page's typing becomes key presses on a virtual USB keyboard (uinput), which MPC (libinput + xkb) uses like a
+ * real one: names of tracks, programs, projects. Made the first time the page types, and kept from then on. */
+static int kbd_fd = -1;
+static uint8_t kbd_down[KEY_F24 + 1];
+
+static int kbd_open(void) {
+    if (kbd_fd >= 0) return 0;
+#ifdef MPC_REMOTE_FAKE
+    kbd_fd = open("/dev/null", O_WRONLY | O_CLOEXEC);
+    return kbd_fd < 0 ? -1 : 0;
+#else
+    const int fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK | O_CLOEXEC);
+    if (fd < 0) { LOG("keyboard: can't open /dev/uinput: %s", strerror(errno)); return -1; }
+    ioctl(fd, UI_SET_EVBIT, EV_KEY);
+    ioctl(fd, UI_SET_EVBIT, EV_SYN);
+    for (int k = KEY_ESC; k <= KEY_F24; k++) ioctl(fd, UI_SET_KEYBIT, k);   /* a full PC keyboard */
+    struct uinput_setup us;
+    memset(&us, 0, sizeof us);
+    us.id.bustype = BUS_USB;
+    us.id.vendor = 0x1d6b;   /* "Linux Foundation": a virtual device */
+    us.id.product = 0x0104;
+    us.id.version = 1;
+    snprintf(us.name, sizeof us.name, "MPC Remote Keyboard");
+    if (ioctl(fd, UI_DEV_SETUP, &us) < 0 || ioctl(fd, UI_DEV_CREATE) < 0) {
+        LOG("keyboard: can't create it: %s", strerror(errno));
+        close(fd);
+        return -1;
+    }
+    kbd_fd = fd;
+    LOG("keyboard: MPC Remote Keyboard created");
+    return 0;
+#endif
+}
+
+static void kbd_key(int code, int down) {
+    if (code < 1 || code > KEY_F24 || kbd_open()) return;
+    if (!down && !kbd_down[code]) return;
+    kbd_down[code] = (uint8_t)(down != 0);
+    struct input_event ev[2];
+    memset(ev, 0, sizeof ev);
+    ev[0].type = EV_KEY; ev[0].code = (uint16_t)code; ev[0].value = down != 0;
+    ev[1].type = EV_SYN; ev[1].code = SYN_REPORT;
+#ifdef MPC_REMOTE_FAKE
+    printf("key %d %s\n", code, down ? "down" : "up");
+    fflush(stdout);
+#else
+    if (write(kbd_fd, ev, sizeof ev) < 0) LOG("keyboard: write failed: %s", strerror(errno));
+#endif
+}
+
+static void kbd_release_all(void) {   /* nothing left held when the page goes away */
+    for (int k = 1; k <= KEY_F24; k++) if (kbd_down[k]) kbd_key(k, 0);
 }
 
 static void touch(char kind, int px, int py) {   /* 'd'own, 'm'ove, 'u'p, in portrait screen pixels */
@@ -863,7 +919,9 @@ static void handle_command(Client *c, char *s) {   /* a text message from the pa
     } else if (!strcmp(s, "calcancel")) {
         cal_stop();
         broadcast_text("{\"type\":\"cal\",\"cancelled\":true}");
-    } else if (!strncmp(s, "bd ", 3)) btn_press(s + 3, 1);
+    } else if (sscanf(s, "kd %d", &x) == 1) kbd_key(x, 1);
+    else if (sscanf(s, "ku %d", &x) == 1) kbd_key(x, 0);
+    else if (!strncmp(s, "bd ", 3)) btn_press(s + 3, 1);
     else if (!strncmp(s, "bu ", 3)) btn_press(s + 3, 0);
     else if (!strncmp(s, "learn ", 6)) learn_start(s + 6);
     else if (!strcmp(s, "learncancel")) learn_stop();
@@ -1165,10 +1223,10 @@ int main(int argc, char **argv) {
             Client *c = NULL;
             for (int i = 0; i < MAX_CLIENTS; i++) if (clients[i].fd == pf[k].fd) c = &clients[i];
             if (!c) continue;
-            if (pf[k].revents & (POLLERR | POLLHUP)) { if (c->ws) LOG("viewer left"); client_close(c); continue; }
+            if (pf[k].revents & (POLLERR | POLLHUP)) { if (c->ws) { LOG("viewer left"); kbd_release_all(); } client_close(c); continue; }
             if (pf[k].revents & POLLIN) {
                 ssize_t r = read(c->fd, c->in + c->inlen, sizeof c->in - 1 - c->inlen);
-                if (r <= 0) { if (c->ws) LOG("viewer left"); client_close(c); continue; }
+                if (r <= 0) { if (c->ws) { LOG("viewer left"); kbd_release_all(); } client_close(c); continue; }
                 c->inlen += (size_t)r;
                 c->in[c->inlen] = 0;
                 if (c->ws) handle_ws(c);
