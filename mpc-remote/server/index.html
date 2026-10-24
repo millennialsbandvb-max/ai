@@ -42,6 +42,14 @@
   #typebox:focus { outline: none; border-color: var(--accent); }
   #typebox[hidden] { display: none; }
   @media (max-width: 640px) { header { flex-wrap: wrap; } #typebox { order: 9; width: 100%; } }
+  #audio { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 4px 12px 8px; flex: none; }
+  #audio[hidden] { display: none; }
+  #audio .btn { background: #222; border: 1px solid #444; border-radius: 6px; padding: 6px 12px; cursor: pointer; }
+  #audio .btn:hover { border-color: var(--accent); }
+  #aname { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--dim); }
+  #apos { width: 220px; }
+  #audio select { background: #222; color: var(--fg); border: 1px solid #444; border-radius: 6px; padding: 4px; font: inherit; }
+  #astat { color: var(--dim); }
   #lrn .small { margin-top: 18px; font-size: 13px; color: var(--dim); }
 </style>
 </head>
@@ -53,9 +61,21 @@
   <input id="typebox" type="text" placeholder="type to the MPC" autocomplete="off" autocorrect="off"
          autocapitalize="off" spellcheck="false" enterkeyhint="done">
   <button id="keysbtn" type="button"></button>
+  <button id="audiobtn" type="button">Audio</button>
   <button id="lrnbtn" type="button">Learn buttons</button>
   <button id="calbtn" type="button">Calibrate touch</button>
 </header>
+<div id="audio" hidden>
+  <label class="btn">Choose file<input id="afile" type="file" accept="audio/*,video/*" hidden></label>
+  <span id="aname">no file</span>
+  <button id="aplay" type="button" disabled>&#9654; Send</button>
+  <button id="astop" type="button" disabled>&#9632; Stop</button>
+  <input id="apos" type="range" min="0" max="1000" value="0" disabled title="position">
+  <label>vol <input id="avol" type="range" min="0" max="100" value="80"></label>
+  <label><input id="aloop" type="checkbox"> loop</label>
+  <label>to <select id="apair"></select></label>
+  <span id="astat"></span>
+</div>
 <main><canvas id="screen" width="1280" height="800"></canvas></main>
 <div id="pad">
   <div class="grp">
@@ -128,6 +148,7 @@ function onText(m) {
     view.width = H; view.height = W;             // shown upright (landscape)
     setStatus(calibrated ? "connected" : "connected – touch not calibrated yet (tap “Calibrate touch”)");
     learned = new Set(m.learned || []); buttonsOn = m.buttons !== false; showPad();
+    showPairs(m.webin || {channels: 0, pair: 0});
   } else if (m.type === "learn") {
     if (m.name) { lrnText.innerHTML = "On the MPC, press and release <b>" + LABEL[m.name] + "</b>."; return; }
     if (m.done) { learned.add(m.done); showPad(); return learnNext(); }
@@ -347,6 +368,98 @@ document.addEventListener("keydown", (e) => {
     const up = (u) => { if (u.code === e.code) { pressBtn(name, false); document.removeEventListener("keyup", up); } };
     document.addEventListener("keyup", up);
   }
+});
+
+// ---- Web In: an audio file from this device, streamed in real time into one of MPC's inputs. Set an audio track's
+// input to that pair, arm it and record. 16-bit stereo over the WebSocket, paced by this page's clock; the MPC keeps
+// about 0.2 s in hand and follows small clock differences.
+const A = (id) => document.getElementById(id);
+const aPanel = A("audio"), aFile = A("afile"), aName = A("aname"), aPlay = A("aplay"), aStop = A("astop"),
+      aPos = A("apos"), aVol = A("avol"), aLoop = A("aloop"), aPair = A("apair"), aStat = A("astat");
+let aBuf = null, aTimer = null, aFrame = 0, aStartFrame = 0, aT0 = 0, aSending = false, aSeeking = false;
+const LEAD = 0.25, CHUNK = 2048;
+A("audiobtn").onclick = () => { aPanel.hidden = !aPanel.hidden; };
+function showPairs(w) {
+  const pairs = Math.max(1, Math.floor((w.channels || 0) / 2));
+  aPair.innerHTML = "";
+  for (let i = 0; i < Math.max(pairs, 2); i++) {
+    const o = document.createElement("option");
+    o.value = i; o.textContent = "Inputs " + (2 * i + 1) + "/" + (2 * i + 2);
+    aPair.appendChild(o);
+  }
+  aPair.value = String(w.pair || 0);
+  aStat.textContent = w.channels ? "" : "Web In isn't running in the MPC (needs the button input on)";
+}
+aPair.onchange = () => send("audio pair " + aPair.value);
+aFile.onchange = () => {
+  const f = aFile.files[0];
+  if (!f) return;
+  aStopSend();
+  aName.textContent = "decoding " + f.name + "…";
+  aPlay.disabled = true;
+  f.arrayBuffer().then((data) => {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    return new Promise((ok, bad) => ctx.decodeAudioData(data, ok, bad)).finally(() => ctx.close && ctx.close());
+  }).then((b) => {
+    aBuf = b; aStartFrame = 0; aPos.value = 0;
+    aName.textContent = f.name + " (" + Math.round(b.duration) + " s)";
+    aPlay.disabled = false; aPos.disabled = false;
+  }).catch(() => { aName.textContent = "can't read " + f.name; aBuf = null; });
+};
+function aChunk(from, n) {   // n frames from 'from' as 16-bit stereo, at the volume set
+  const L = aBuf.getChannelData(0), R = aBuf.numberOfChannels > 1 ? aBuf.getChannelData(1) : L;
+  const v = aVol.value / 100, out = new Int16Array(2 * n);
+  for (let i = 0; i < n; i++) {
+    const l = Math.max(-1, Math.min(1, L[from + i] * v)), r = Math.max(-1, Math.min(1, R[from + i] * v));
+    out[2 * i] = l * 32767; out[2 * i + 1] = r * 32767;
+  }
+  return out.buffer;
+}
+function aPump() {
+  if (!aSending || !ws || ws.readyState !== 1) return;
+  const rate = aBuf.sampleRate, len = aBuf.length;
+  const due = aStartFrame + ((performance.now() - aT0) / 1000 + LEAD) * rate;
+  while (aFrame < due && ws.bufferedAmount < 256 * 1024) {
+    if (aFrame >= len) {
+      if (!aLoop.checked) break;
+      aFrame = 0; aStartFrame -= len;   // loop: carry on from the start, same clock
+    }
+    const n = Math.min(CHUNK, len - aFrame);
+    ws.send(aChunk(aFrame, n));
+    aFrame += n;
+  }
+  const played = Math.max(0, aStartFrame + (performance.now() - aT0) / 1000 * rate);
+  if (!aSeeking) aPos.value = Math.round(1000 * Math.min(1, (played % len) / len));
+  if (!aLoop.checked && played >= len) aStopSend();
+}
+function aStartSend(fromFrame) {
+  if (!aBuf) return;
+  send("audio pair " + aPair.value);
+  send("audio start " + aBuf.sampleRate);
+  aStartFrame = aFrame = Math.max(0, Math.min(aBuf.length - 1, fromFrame | 0));
+  aT0 = performance.now();
+  aSending = true;
+  clearInterval(aTimer);
+  aTimer = setInterval(aPump, 20);
+  aPump();
+  aPlay.disabled = true; aStop.disabled = false;
+  aStat.textContent = "sending to inputs " + aPair.options[aPair.selectedIndex].textContent.slice(7) +
+                      " (keep this screen on)";
+}
+function aStopSend() {
+  if (aSending) send("audio stop");
+  aSending = false;
+  clearInterval(aTimer);
+  aPlay.disabled = !aBuf; aStop.disabled = true;
+  if (aStat.textContent.startsWith("sending")) aStat.textContent = "";
+}
+aPlay.onclick = () => aStartSend(aBuf ? aPos.value / 1000 * aBuf.length : 0);
+aStop.onclick = aStopSend;
+aPos.addEventListener("input", () => { aSeeking = true; });
+aPos.addEventListener("change", () => {
+  aSeeking = false;
+  if (aSending) aStartSend(aPos.value / 1000 * aBuf.length);   // jump: a fresh stream from there
 });
 
 document.getElementById("calbtn").onclick = () => send("cal");

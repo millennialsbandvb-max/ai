@@ -77,6 +77,10 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   `mpc-launch` stops loading it after 3 failed starts; the page has "Button input off". The virtual input must be
   opened as `virtual:MERGE=0`: the default leaves out repeated status bytes (running status) and MPC's panel reader
   then ignores everything (all buttons and pads dead).
+- **Web In**: the remote page streams an audio file (16-bit stereo over the WebSocket, paced by the page) into a ring
+  in `/dev/shm/mpc-webin` (`mpc-remote/webin.h`); `preload/webin.c` (in mpc-buttons.so) adds it to the chosen input
+  pair inside MPC's `snd_pcm_readi/readn`, resampling with drift control (~0.2 s buffer). Browsers only allow mic/tab
+  capture on https pages and the remote is http, so it's files only; the user declined AirPlay (shairport-sync).
 - The remote's typing is a virtual USB keyboard (uinput, "MPC Remote Keyboard"), made the first time the page types;
   MPC reads keyboards through libinput + xkb (US layout assumed by the page's character map).
 - `pkill -f <pattern>` kills your own shell when the pattern appears in the command line: use `pgrep -x` + `kill`.

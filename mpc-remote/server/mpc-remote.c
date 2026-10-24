@@ -50,7 +50,8 @@
 #include <linux/uinput.h>
 #include <sound/asequencer.h>
 
-#include "index_html.h"   /* generated from index.html: static const char INDEX_HTML[] */
+#include "index_html.h"
+#include "../webin.h"   /* generated from index.html: static const char INDEX_HTML[] */
 
 #define TILE 32
 #if defined(__arm__)
@@ -469,7 +470,7 @@ static int cal_finish(void) {   /* -> orientation, or -1 if the taps don't make 
 /* ---- clients: HTTP + WebSocket --------------------------------------------------------------------------------- */
 typedef struct {
     int fd, ws;
-    char in[8192];
+    char in[65536 + 16];   /* room for one audio message from the page */
     size_t inlen;
     uint8_t *out;
     size_t outlen, outcap, outpos;
@@ -769,6 +770,47 @@ static void launch_ok(void) {
     LOG("buttons: MPC (pid %d) is up with the button input; panel input via %d:%d", pid, v.client, v.port);
 }
 
+/* ---- Web In: the page's audio, streamed into one of MPC's inputs ---------------------------------------------
+ * The page sends 16-bit stereo audio; it goes into a ring in shared memory (../webin.h) that mpc-buttons.so, inside
+ * MPC, adds to the input pair the page chose. */
+static struct webin_ring *wring;
+
+static void webin_map(void) {
+    if (wring) return;
+    const int fd = open(WEBIN_PATH, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd < 0) { LOG("web in: can't open %s: %s", WEBIN_PATH, strerror(errno)); return; }
+    if (ftruncate(fd, sizeof(struct webin_ring)) == 0) {
+        void *m = mmap(NULL, sizeof(struct webin_ring), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (m != MAP_FAILED) wring = m;
+    }
+    close(fd);
+    if (wring && wring->magic != WEBIN_MAGIC) { memset(wring, 0, 64); wring->magic = WEBIN_MAGIC; wring->rate = 48000; }
+}
+
+/* MPC's input as the reader found it: number of channels (0: Web In isn't running inside MPC) */
+static int webin_channels(void) {
+    FILE *f = fopen(WEBIN_STATUS, "r");
+    if (!f) return 0;
+    int ch = 0, rate = 0, pid = 0;
+    const int n = fscanf(f, "channels=%d rate=%d pid=%d", &ch, &rate, &pid);
+    fclose(f);
+    char d[32];
+    snprintf(d, sizeof d, "/proc/%d", pid);
+    return n == 3 && !access(d, F_OK) ? ch : 0;
+}
+
+static void webin_write(const uint8_t *b, size_t n) {
+    if (!wring) return;
+    const uint32_t frames = (uint32_t)(n / 4), w = wring->write;
+    for (uint32_t i = 0; i < frames; i++) {
+        const int16_t l = (int16_t)(b[4 * i] | b[4 * i + 1] << 8), r = (int16_t)(b[4 * i + 2] | b[4 * i + 3] << 8);
+        float *d = wring->data + 2 * ((w + i) & (WEBIN_FRAMES - 1));
+        d[0] = l / 32768.0f;
+        d[1] = r / 32768.0f;
+    }
+    __atomic_store_n(&wring->write, w + frames, __ATOMIC_RELEASE);
+}
+
 static void client_close(Client *c) {
     if (c->fd >= 0) close(c->fd);
     free(c->out);
@@ -853,8 +895,8 @@ static void send_hello(Client *c) {   /* screen size, and the whole screen to co
     for (int i = 0; i < NBTN; i++)
         if (btn[i].set) snprintf(learned + strlen(learned), sizeof learned - strlen(learned), "%s\"%s\"", learned[0] ? "," : "", BTN_NAMES[i]);
     ws_text(c, "{\"type\":\"hello\",\"w\":%d,\"h\":%d,\"tile\":%d,\"calibrated\":%s,\"touch\":\"%s\",\"learned\":[%s],"
-            "\"buttons\":%s}", W, H, TILE, orient >= 0 ? "true" : "false", touch_dev, learned,
-            access(NO_BUTTONS, F_OK) ? "true" : "false");
+            "\"buttons\":%s,\"webin\":{\"channels\":%d,\"pair\":%u}}", W, H, TILE, orient >= 0 ? "true" : "false",
+            touch_dev, learned, access(NO_BUTTONS, F_OK) ? "true" : "false", webin_channels(), wring ? wring->pair : 0);
 }
 
 static void handle_http(Client *c) {   /* a complete request is in c->in */
@@ -886,6 +928,10 @@ static void handle_http(Client *c) {   /* a complete request is in c->in */
         else if (!btn_where(&v, &h, NULL)) snprintf(b, sizeof b, "MPC's panel input at %d:%d (controller %d:%d)", v.client, v.port, h.client, h.port);
         else snprintf(b, sizeof b, "not available: MPC wasn't started with mpc-buttons.so (see below)");
         n += (size_t)snprintf(body + n, 300, "buttons: %s\n", b);
+        const int wch = webin_channels();
+        if (wch) n += (size_t)snprintf(body + n, 200, "web in: MPC's input has %d channels; streams go to inputs %u/%u\n",
+                                       wch, (wring ? wring->pair : 0) * 2 + 1, (wring ? wring->pair : 0) * 2 + 2);
+        else n += (size_t)snprintf(body + n, 200, "web in: not running inside MPC (needs the button input on)\n");
         FILE *pl = fopen("/tmp/mpc-buttons.log", "r");   /* what mpc-buttons.so did inside MPC */
         if (pl) {
             char line[200];
@@ -919,7 +965,18 @@ static void handle_command(Client *c, char *s) {   /* a text message from the pa
     } else if (!strcmp(s, "calcancel")) {
         cal_stop();
         broadcast_text("{\"type\":\"cal\",\"cancelled\":true}");
-    } else if (sscanf(s, "kd %d", &x) == 1) kbd_key(x, 1);
+    } else if (sscanf(s, "audio start %d", &x) == 1) {
+        webin_map();
+        if (wring && x >= 8000 && x <= 192000) {
+            wring->rate = (uint32_t)x;
+            __atomic_add_fetch(&wring->stream, 1, __ATOMIC_RELEASE);
+            LOG("web in: stream started (%d Hz) into inputs %u/%u", x, wring->pair * 2 + 1, wring->pair * 2 + 2);
+        }
+    } else if (sscanf(s, "audio pair %d", &x) == 1) {
+        webin_map();
+        if (wring && x >= 0 && x < 16) wring->pair = (uint32_t)x;
+    } else if (!strcmp(s, "audio stop")) LOG("web in: stream stopped");
+    else if (sscanf(s, "kd %d", &x) == 1) kbd_key(x, 1);
     else if (sscanf(s, "ku %d", &x) == 1) kbd_key(x, 0);
     else if (!strncmp(s, "bd ", 3)) btn_press(s + 3, 1);
     else if (!strncmp(s, "bu ", 3)) btn_press(s + 3, 0);
@@ -950,6 +1007,13 @@ static void handle_ws(Client *c) {   /* parse complete frames from c->in */
         else if (n == 127) { client_close(c); return; }   /* the page never sends big messages */
         if (masked) hl += 4;
         if (c->inlen - pos < hl + n) break;
+        if (op == 2) {   /* binary: Web In audio */
+            static uint8_t audio[65536];
+            for (uint64_t i = 0; i < n; i++) audio[i] = (uint8_t)(p[hl + i] ^ (masked ? p[hl - 4 + (i & 3)] : 0));
+            webin_write(audio, (size_t)n);
+            pos += hl + n;
+            continue;
+        }
         char msg[1024];
         if (n >= sizeof msg) { client_close(c); return; }
         for (uint64_t i = 0; i < n; i++) msg[i] = (char)(p[hl + i] ^ (masked ? p[hl - 4 + (i & 3)] : 0));
@@ -1179,6 +1243,7 @@ int main(int argc, char **argv) {
     load_conf();
     btn_load();
     seq_open_();
+    webin_map();
 
     int ls = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0), one = 1;
     setsockopt(ls, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
