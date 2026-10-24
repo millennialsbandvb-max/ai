@@ -1,7 +1,7 @@
 # MPC Live II custom firmware: handoff
 
-This repo builds a custom firmware for the user's **Akai MPC Live II (Gen1, 32-bit ARM)**: their Hakai 3.9.1 image
-(a modded MPC OS 3.9.1) plus open-source VST2 plugins with touchscreen pages, and a browser remote. MPC OS's built-in
+This repo builds a custom firmware for the user's **Akai MPC Live II (Gen1, 32-bit ARM)**: their Hakai 3.10.0 image
+(a modded MPC OS 3.10.0; earlier builds were on Hakai 3.9.1) plus open-source VST2 plugins with touchscreen pages, and a browser remote. MPC OS's built-in
 JUCE host loads Linux VST2 `.so` files listed in `MPC.settings`; we install the plugins into the image and a boot
 service adds their entries. All of it has been tested on the user's MPC.
 
@@ -9,20 +9,21 @@ service adds their entries. All of it has been tested on the user's MPC.
 
 - **USB only.** They can't reach the MPC's shell, so every change ships as a **whole firmware image**, installed
   with the normal MPC USB update. They don't use SSH.
-- **Deliver the image as 7 pieces** with SendUserFile (`MPC-3.9.1-Gen1-update.img.part1` to `part7`): one file can
-  be at most 30 MiB and the image is ~188 MiB. Give the joined size and SHA-256. They join the pieces themselves.
+- **Deliver the image as 7 pieces** with SendUserFile (`MPC-3.10.0-Gen1-update.img.part1` to `part7`): one file can
+  be at most 30 MiB and the image is ~196 MiB. Give the joined size and SHA-256. They join the pieces themselves.
 - **The Hakai original is not in the repo** (too big). It's in the user's Google Drive:
-  https://drive.google.com/file/d/1dP3Ftm3UFZw04n4BblGSErE9-G5D7HKL/view (`MPC-3.9.1-Gen1-update.img`,
-  195,964,075 bytes, SHA-256 `e4428bb7ff1509089abd6741d379d13066af4c4a1f4ab6393f53342e29554d8a`). Download with
-  `curl -L -o MPC-3.9.1-Gen1-update.img "https://drive.usercontent.google.com/download?id=1dP3Ftm3UFZw04n4BblGSErE9-G5D7HKL&export=download&confirm=t"`
+  https://drive.google.com/file/d/1VhMwT7Kt1D1Bia1Rm5BtfDJ2DOzDutO3/view (Hakai on MPC OS 3.10.0, 204,576,287
+  bytes, SHA-256 `1776ae5e3a3eaa223e7242142c5ef10fc3cc4c4ded10599d76e9f7a6250dea9f`). Download with
+  `curl -L -o MPC-3.10.0-Gen1-update.img "https://drive.usercontent.google.com/download?id=1VhMwT7Kt1D1Bia1Rm5BtfDJ2DOzDutO3&export=download&confirm=t"`
   (needs "anyone with the link" sharing; otherwise ask them to share it, or read it via the Drive connector).
+  The older Hakai 3.9.1 (`1dP3Ftm3UFZw04n4BblGSErE9-G5D7HKL`, SHA-256 `e4428bb7…554d8a`) builds too.
 - They want short, plain answers; they decide workflows. NAM: **A2 models only** (A1 Standard is too heavy).
 - Firmware images are never published to the public repo (only source); keep them in the scratchpad.
 
 ## Build everything
 
 ```
-tools/build_firmware.sh <Hakai MPC-3.9.1-Gen1-update.img> <out dir>
+tools/build_firmware.sh <Hakai MPC-3.10.0-Gen1-update.img> <out dir>
 ```
 
 About 6 minutes. It builds every plugin for ARM with its page, the remote, patches the image

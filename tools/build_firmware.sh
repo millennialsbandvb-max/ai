@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Build the complete MPC Live II firmware from the user's Hakai image, in one go:
-#   tools/build_firmware.sh <Hakai MPC-3.9.1-Gen1-update.img> <output dir>
+#   tools/build_firmware.sh <Hakai MPC-<version>-Gen1-update.img> <output dir>
+# The result is named after the image's MPC OS version: MPC-<version>-Gen1-update.img (+ .part1 to .part7).
 # Builds every plugin for ARM (NAM, Dragonfly, SFZ, Airwindows) with their touchscreen pages, the browser remote,
 # puts them into the image with nam-mpc/firmware/patch_image.sh, and splits the result into 7 pieces under 30 MiB
 # (the most a single file can be when sent to the user in chat). Prints each piece's name and the image's SHA-256.
@@ -11,6 +12,11 @@ IN="$(realpath "$1")"
 OUT="$(mkdir -p "$2" && realpath "$2")"
 W="$OUT/work"
 mkdir -p "$W"
+VER="$(python3 "$REPO/nam-mpc/firmware/mpcfit.py" info "$IN" | sed -n 's/^\/:inmusic,version *//p')"
+[ -n "$VER" ] || { echo "can't read the image's MPC OS version" >&2; exit 1; }
+IMG="MPC-$VER-Gen1-update.img"
+# a sysroot unpacked from another image would test the plugins against the wrong libraries
+[ "$(cat "$W/sysroot.from" 2>/dev/null)" = "$(sha256sum < "$IN")" ] || rm -rf "$W/sysroot"
 
 # The image's own libraries, so the ARM plugin probes (which write each plugin's MPC.settings entry) run under
 # qemu exactly as on the MPC.
@@ -22,6 +28,7 @@ if [ ! -f "$W/sysroot/usr/lib/ld-linux-armhf.so.3" ]; then
   debugfs -R "rdump /usr $W/sysroot" "$W/rootfs.ext4" >/dev/null 2>&1
   ln -sfn usr/lib "$W/sysroot/lib"
   rm "$W/rootfs.ext4"
+  sha256sum < "$IN" > "$W/sysroot.from"
 fi
 export ARM_SYSROOT="$W/sysroot"
 
@@ -44,12 +51,12 @@ done
 echo "plugins: $(ls "$W/extra/plugins" | tr '\n' ' ')"
 
 echo "== the image"
-rm -f "$OUT/MPC-3.9.1-Gen1-update.img"
-EXTRA="$W/extra" "$REPO/nam-mpc/firmware/patch_image.sh" "$IN" "$OUT/MPC-3.9.1-Gen1-update.img" | grep -E 'root filesystem OK|wrote'
+rm -f "$OUT/$IMG"
+EXTRA="$W/extra" "$REPO/nam-mpc/firmware/patch_image.sh" "$IN" "$OUT/$IMG" | grep -E 'root filesystem OK|wrote'
 
 echo "== 7 pieces"
-rm -f "$OUT"/MPC-3.9.1-Gen1-update.img.part*
-(cd "$OUT" && split -n 7 -d -a 1 MPC-3.9.1-Gen1-update.img piece. &&
-  for i in 0 1 2 3 4 5 6; do mv "piece.$i" "MPC-3.9.1-Gen1-update.img.part$((i + 1))"; done)
-ls -l "$OUT"/MPC-3.9.1-Gen1-update.img.part*
-echo "size $(stat -c %s "$OUT/MPC-3.9.1-Gen1-update.img") bytes, SHA-256 $(sha256sum "$OUT/MPC-3.9.1-Gen1-update.img" | cut -d' ' -f1)"
+rm -f "$OUT"/MPC-*-Gen1-update.img.part*
+(cd "$OUT" && split -n 7 -d -a 1 "$IMG" piece. &&
+  for i in 0 1 2 3 4 5 6; do mv "piece.$i" "$IMG.part$((i + 1))"; done)
+ls -l "$OUT/$IMG".part*
+echo "size $(stat -c %s "$OUT/$IMG") bytes, SHA-256 $(sha256sum "$OUT/$IMG" | cut -d' ' -f1)"
