@@ -9,8 +9,9 @@ service adds their entries. All of it has been tested on the user's MPC.
 
 - **USB only.** They can't reach the MPC's shell, so every change ships as a **whole firmware image**, installed
   with the normal MPC USB update. They don't use SSH.
-- **Deliver the image as 7 pieces** with SendUserFile (`MPC-3.10.0-Gen1-update.img.part1` to `part7`): one file can
-  be at most 30 MiB and the image is ~196 MiB. Give the joined size and SHA-256. They join the pieces themselves.
+- **Deliver the whole image** (`MPC-3.10.0-Gen1-update.img`, ~196 MiB) with SendUserFile, plus its size and
+  SHA-256: that works since the user moved to Max (Oct 2026). The 7 pieces `build_firmware.sh` also writes
+  (`.part1` to `.part7`, under 30 MiB each, joined by the user) are the fallback if a whole-file send fails.
 - **The Hakai original is not in the repo** (too big). It's in the user's Google Drive:
   https://drive.google.com/file/d/1VhMwT7Kt1D1Bia1Rm5BtfDJ2DOzDutO3/view (Hakai on MPC OS 3.10.0, 204,576,287
   bytes, SHA-256 `1776ae5e3a3eaa223e7242142c5ef10fc3cc4c4ded10599d76e9f7a6250dea9f`). Download with
