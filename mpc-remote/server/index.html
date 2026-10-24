@@ -66,6 +66,7 @@
   <button id="calbtn" type="button">Calibrate touch</button>
 </header>
 <div id="audio" hidden>
+  <button id="alive" type="button">&#9673; Share live audio</button>
   <label class="btn">Choose file<input id="afile" type="file" accept="audio/*,video/*" hidden></label>
   <span id="aname">no file</span>
   <button id="aplay" type="button" disabled>&#9654; Send</button>
@@ -370,6 +371,81 @@ document.addEventListener("keydown", (e) => {
   }
 });
 
+// ---- Web In, live: what a Chrome tab (or, on Windows, the whole computer) plays, captured and streamed as it plays.
+// Browsers only allow this on secure pages; the remote is plain http, so Chrome has to be told to trust it once:
+// chrome://flags/#unsafely-treat-insecure-origin-as-secure with this page's address.
+let live = null;   // {stream, ctx, node}
+const aLive = A("alive");
+const canLive = () => !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+function liveStop() {
+  if (!live) return;
+  live.stream.getTracks().forEach((t) => t.stop());
+  live.ctx.close();
+  live = null;
+  send("audio stop");
+  aLive.innerHTML = "&#9673; Share live audio";
+  if (aStat.textContent.startsWith("live")) aStat.textContent = "";
+}
+aLive.onclick = async () => {
+  if (live) return liveStop();
+  if (!canLive()) {
+    aStat.innerHTML = "Live audio needs Chrome to trust this page: open <b>chrome://flags/#unsafely-treat-insecure-origin-as-secure</b>, " +
+      "add <b>" + location.origin + "</b>, set it to Enabled and relaunch Chrome.";
+    return;
+  }
+  aStopSend();
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: true, systemAudio: "include", selfBrowserSurface: "exclude",
+      audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false}});
+  } catch (e) { aStat.textContent = "live audio: not shared"; return; }
+  const tracks = stream.getAudioTracks();
+  if (!tracks.length) {
+    stream.getTracks().forEach((t) => t.stop());
+    aStat.textContent = "no audio in what was shared: pick a tab and tick \"Share tab audio\"";
+    return;
+  }
+  stream.getVideoTracks().forEach((t) => t.stop());   // only the sound is wanted
+  const ctx = new AudioContext();
+  // collect the audio in 2048-frame blocks on the audio thread and hand them over
+  const code = `class Grab extends AudioWorkletProcessor {
+    constructor() { super(); this.l = new Float32Array(2048); this.r = new Float32Array(2048); this.n = 0; }
+    process(inputs) {
+      const ch = inputs[0];
+      if (!ch || !ch.length) return true;
+      const L = ch[0], R = ch[1] || ch[0];
+      for (let i = 0; i < L.length; i++) {
+        this.l[this.n] = L[i]; this.r[this.n] = R[i];
+        if (++this.n === 2048) { this.port.postMessage([this.l, this.r]); this.l = new Float32Array(2048); this.r = new Float32Array(2048); this.n = 0; }
+      }
+      return true;
+    }
+  }
+  registerProcessor("grab", Grab);`;
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], {type: "text/javascript"})));
+  const node = new AudioWorkletNode(ctx, "grab", {numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2]});
+  const mute = ctx.createGain();
+  mute.gain.value = 0;   // the tab still plays on this computer as usual; this path only feeds the MPC
+  ctx.createMediaStreamSource(new MediaStream(tracks)).connect(node);
+  node.connect(mute).connect(ctx.destination);
+  node.port.onmessage = (e) => {
+    if (!ws || ws.readyState !== 1 || ws.bufferedAmount > 512 * 1024) return;
+    const [L, R] = e.data, v = aVol.value / 100, out = new Int16Array(2 * L.length);
+    for (let i = 0; i < L.length; i++) {
+      out[2 * i] = Math.max(-1, Math.min(1, L[i] * v)) * 32767;
+      out[2 * i + 1] = Math.max(-1, Math.min(1, R[i] * v)) * 32767;
+    }
+    ws.send(out.buffer);
+  };
+  tracks[0].addEventListener("ended", liveStop);   // Chrome's own "Stop sharing" button
+  send("audio pair " + aPair.value);
+  send("audio start " + ctx.sampleRate);
+  live = {stream, ctx, node};
+  aLive.innerHTML = "&#9632; Stop live audio";
+  aStat.textContent = "live: sending to inputs " + aPair.options[aPair.selectedIndex].textContent.slice(7);
+};
+
 // ---- Web In: an audio file from this device, streamed in real time into one of MPC's inputs. Set an audio track's
 // input to that pair, arm it and record. 16-bit stereo over the WebSocket, paced by this page's clock; the MPC keeps
 // about 0.2 s in hand and follows small clock differences.
@@ -435,6 +511,7 @@ function aPump() {
 }
 function aStartSend(fromFrame) {
   if (!aBuf) return;
+  liveStop();
   send("audio pair " + aPair.value);
   send("audio start " + aBuf.sampleRate);
   aStartFrame = aFrame = Math.max(0, Math.min(aBuf.length - 1, fromFrame | 0));
