@@ -15,6 +15,10 @@ with open(sys.argv[2], "w") as f:
     f.write("  0};\n")
 PY
 if command -v node >/dev/null; then node "$HERE/test_page.js"; else echo "page check skipped (no Node)"; fi
+# the browser's on-screen keyboard (picture + keys), drawn with the page tools' font
+[ -f "$B/fonts/TitilliumWeb-SemiBold.ttf" ] || unzip -qjo "$HERE/../../mpc-vst-plugins-main.zip" \
+  "mpc-vst-plugins-main/tools/html_art/fonts/TitilliumWeb-SemiBold.ttf" -d "$B/fonts"
+python3 "$HERE/make_keyboard.py" "$B/fonts/TitilliumWeb-SemiBold.ttf" "$B" >/dev/null
 gcc -O2 -Wall -Wextra -DMPC_REMOTE_FAKE -I"$B" -o "$B/mpc-remote-test" "$HERE/mpc-remote.c"
 rm -rf "$B/bundle" && mkdir -p "$B/bundle/bin" "$B/bundle/services"
 arm-linux-gnueabihf-gcc -O2 -Wall -Wextra -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -mtune=cortex-a17 \

@@ -97,6 +97,9 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   Any refused commit switches the layer off for the run. mpc-remote drives the tab itself (screencast at the area's
   size, libturbojpeg from the browser install, frames pre-turned for the portrait panel in `/dev/shm/mpc-overlay`).
   The plane geometry, marker search and touch mapping are unit-tested offline; the display path isn't device-tested.
+  On-screen keyboard: `server/make_keyboard.py` draws it (+ `keyboard.h`, key rects) at build time; mpc-remote shows it
+  under the page (the page's viewport shrinks by its height), on the plugin's KEYBOARD button or when a tap lands in
+  a text box (checked with Runtime.evaluate 350 ms after the tap), and types with Input.insertText/dispatchKeyEvent.
 - `server/test_page.js` (run by build.sh) loads the page and fails on script errors: a top-level error once shipped
   and stopped the whole page from connecting.
 - The remote's typing is a virtual USB keyboard (uinput, "MPC Remote Keyboard"), made the first time the page types;

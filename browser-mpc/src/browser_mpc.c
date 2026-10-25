@@ -1,7 +1,7 @@
 /* MPC Browser: a VST2 "effect" whose page is where the MPC browser shows on the MPC's own screen.
  * Its page is mostly an area painted OVERLAY_MARKER (see ../../mpc-remote/overlay.h): mpc-buttons.so, inside MPC,
  * finds that area on screen and puts the browser's picture over it; touches there go to the browser. The plugin
- * itself only has the page's buttons (back, forward, reload, home), passed on to mpc-remote, and lets the audio
+ * itself only has the page's buttons (back, forward, reload, home, keyboard), passed on to mpc-remote, and lets the audio
  * through untouched. The browser's sound reaches MPC as an input (Web In). */
 #include <fcntl.h>
 #include <math.h>
@@ -14,9 +14,9 @@
 #include "vst2.h"
 #include "../../mpc-remote/overlay.h"
 
-enum { kBack, kForward, kReload, kHome, kNumParams };
-static const char *const NAMES[kNumParams] = {"Back", "Forward", "Reload", "Home"};
-static const int CMDS[kNumParams] = {OV_CMD_BACK, OV_CMD_FORWARD, OV_CMD_RELOAD, OV_CMD_HOME};
+enum { kBack, kForward, kReload, kHome, kKeyboard, kNumParams };
+static const char *const NAMES[kNumParams] = {"Back", "Forward", "Reload", "Home", "Keyboard"};
+static const int CMDS[kNumParams] = {OV_CMD_BACK, OV_CMD_FORWARD, OV_CMD_RELOAD, OV_CMD_HOME, OV_CMD_KEYBOARD};
 
 typedef struct {
     AEffect fx;
