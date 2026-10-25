@@ -45,10 +45,9 @@ else
     # Widevine (copy protection, for Netflix): where this Chromium looks for it, real files rather than the package's links
     if [ -f "$R/opt/WidevineCdm/manifest.json" ]; then
         W="$N/chromium/WidevineCdm"
-        mkdir -p "$W/_platform_specific/linux_arm" "$N/home/.local/lib"
+        mkdir -p "$W/_platform_specific/linux_arm"
         cp "$R/opt/WidevineCdm/manifest.json" "$W/" &&
         cp "$R/opt/WidevineCdm/gmp-widevinecdm/latest/libwidevinecdm.so" "$W/_platform_specific/linux_arm/" || fail "arranging Widevine"
-        ln -sf ../../../chromium/WidevineCdm/_platform_specific/linux_arm/libwidevinecdm.so "$N/home/.local/lib/libwidevinecdm.so"
     fi
     cp "$B/browser-run.sh" "$N/run.sh" && cp "$B/browser-asoundrc" "$N/home/.asoundrc" || fail "missing files in the firmware"
     chmod 755 "$N/run.sh"

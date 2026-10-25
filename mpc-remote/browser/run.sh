@@ -29,9 +29,9 @@ echo "run.sh: Widevine files: $(ls -l chromium/WidevineCdm/manifest.json chromiu
 if [ -f chromium/WidevineCdm/manifest.json ]; then
   mkdir -p profile/WidevineCdm
   echo "{\"Path\":\"$D/chromium/WidevineCdm\"}" > profile/WidevineCdm/latest-component-updated-widevine-cdm
-  mkdir -p home/.local/lib
-  ln -sfn "$D/chromium/WidevineCdm/_platform_specific/linux_arm/libwidevinecdm.so" home/.local/lib/libwidevinecdm.so
 fi
+# (never home/.local/lib/libwidevinecdm.so: Debian's Chromium then takes that file for Widevine's folder and finds nothing)
+rm -f home/.local/lib/libwidevinecdm.so
 export HOME="$D/home" FONTCONFIG_FILE="$D/fonts.conf" LD_LIBRARY_PATH="$D/lib:$D/lib/pulseaudio:$D/chromium"
 export PULSE_SERVER=none   # no PulseAudio here: straight to ALSA
 exec "$D/chromium/chromium" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage \
