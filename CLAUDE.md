@@ -100,6 +100,9 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   On-screen keyboard: `server/make_keyboard.py` draws it (+ `keyboard.h`, key rects) at build time; mpc-remote shows it
   under the page (the page's viewport shrinks by its height), on the plugin's KEYBOARD button or when a tap lands in
   a text box (checked with Runtime.evaluate 350 ms after the tap), and types with Input.insertText/dispatchKeyEvent.
+  Lighter video: mpc-remote stays connected to the tab while the browser runs and adds a new-document script (needs
+  Page.enable on that session) hiding VP9/AV1 from MediaSource/canPlayType (Debian's armhf Chromium plays H.264/AAC)
+  and holding YouTube at 'tiny' quality; the MPC-screen screencast sends every 2nd frame at JPEG quality 60.
 - `server/test_page.js` (run by build.sh) loads the page and fails on script errors: a top-level error once shipped
   and stopped the whole page from connecting.
 - The remote's typing is a virtual USB keyboard (uinput, "MPC Remote Keyboard"), made the first time the page types;

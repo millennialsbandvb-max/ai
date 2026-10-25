@@ -1105,14 +1105,14 @@ static void ovs_map(void) {
 static void mv_send(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 static void mv_send(const char *fmt, ...) {   /* one DevTools command (a masked WebSocket text frame) */
     if (mv_fd < 0) return;
-    char body[1024];
+    char body[4096];
     va_list ap;
     va_start(ap, fmt);
-    char inner[900];
+    char inner[4000];
     vsnprintf(inner, sizeof inner, fmt, ap);
     va_end(ap);
     const int n = snprintf(body, sizeof body, "{\"id\":%d,%s}", ++mv_id, inner);
-    uint8_t f[1100];
+    uint8_t f[4200];
     size_t hl = 2;
     f[0] = 0x81;
     if (n < 126) f[1] = (uint8_t)(0x80 | n);
@@ -1165,6 +1165,18 @@ static int mv_open(void) {   /* DevTools: the first tab, as a WebSocket */
     mv_fd = fd;
     mv_len = 0;
     LOG("browser on the MPC: connected to its tab");
+    /* lighter video, for the MPC's processor: every page from now on (and this one) is told the browser only plays
+     * H.264 (sites then don't send VP9 or AV1, which are far heavier to decode without a graphics chip), and YouTube
+     * is held at its lowest picture quality (the sound is the same) */
+    static const char light[] =
+        "(function(){var bad=/vp0?9|av01/i;if(window.MediaSource){var s=MediaSource.isTypeSupported.bind(MediaSource);"
+        "MediaSource.isTypeSupported=function(t){return bad.test(t)?false:s(t)};}"
+        "var c=HTMLMediaElement.prototype.canPlayType;HTMLMediaElement.prototype.canPlayType=function(t){return bad.test(t)?'':c.call(this,t)};"
+        "if(location.hostname.indexOf('youtube')>=0)setInterval(function(){var p=document.getElementById('movie_player');"
+        "if(p&&p.setPlaybackQualityRange)try{p.setPlaybackQualityRange('tiny','tiny')}catch(e){}},2000);})()";
+    mv_send("\"method\":\"Page.enable\"");   /* (new-page scripts only take effect with the Page domain on) */
+    mv_send("\"method\":\"Page.addScriptToEvaluateOnNewDocument\",\"params\":{\"source\":\"%s\"}", light);
+    mv_send("\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"%s\"}", light);
     return 0;
 }
 
@@ -1265,8 +1277,8 @@ static void mv_resize(void) {   /* the web page's size changed (the keyboard cam
     mv_send("\"method\":\"Emulation.setDeviceMetricsOverride\",\"params\":{\"width\":%d,\"height\":%d,"
             "\"deviceScaleFactor\":1,\"mobile\":false}", mv_w, webh);
     mv_send("\"method\":\"Page.stopScreencast\"");
-    mv_send("\"method\":\"Page.startScreencast\",\"params\":{\"format\":\"jpeg\",\"quality\":70,"
-            "\"maxWidth\":%d,\"maxHeight\":%d}", mv_w, webh);
+    mv_send("\"method\":\"Page.startScreencast\",\"params\":{\"format\":\"jpeg\",\"quality\":60,"
+            "\"maxWidth\":%d,\"maxHeight\":%d,\"everyNthFrame\":2}", mv_w, webh);   /* every other picture: half the work */
     mv_publish();
 }
 
@@ -1343,6 +1355,7 @@ static void mv_read(void) {   /* DevTools messages (server frames: not masked) *
             const char saved = m[n];
             m[n] = 0;
             if (strstr(m, "\"method\":\"Page.screencastFrame\"")) mv_frame(m);
+            else if (!strncmp(m, "{\"id\":", 6) && strstr(m, "\"error\":")) LOG("browser on the MPC: the browser said %.160s", m);
             else if (mv_focus_id && !strncmp(m, "{\"id\":", 6) && atoi(m + 6) == mv_focus_id) {
                 mv_focus_id = 0;
                 if (strstr(m, "\"value\":true")) kb_show(1);
@@ -1360,6 +1373,8 @@ static void mpc_view_tick(void) {
     if (!ovs) return;
     const int vis = (int)__atomic_load_n(&ovs->visible, __ATOMIC_ACQUIRE);
     const uint64_t t = now_ms();
+    /* stay connected to the browser's tab whenever it runs (the lighter-video settings live on that connection) */
+    if (!vis && mv_fd < 0 && browser_pid > 0 && t >= mv_next_try) { mv_next_try = t + 3000; mv_open(); }
     if (vis) {
         mv_hidden_since = 0;
         if (browser_pid <= 0 && mv_fd < 0) {   /* the page is up: get the browser going (unless it already is) */
