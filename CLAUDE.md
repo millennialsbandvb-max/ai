@@ -109,7 +109,7 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   Address bar: mpc-remote draws a 48 px bar on top (font atlas from make_keyboard.py, FONT_*); tapping it types into
   the bar (Enter: Page.navigate; words without a dot search Google; bare addresses get https://). It follows the page
   via Page.frameNavigated / navigatedWithinDocument.
-  Netflix (untested): packages.txt's last line (a full URL) is Raspberry Pi's armhf Widevine; the installer puts it in
+  Netflix WORKS on the device (Oct 2026, after wvfix). History: packages.txt's last line (a full URL) is Raspberry Pi's armhf Widevine; the installer puts it in
   chromium/WidevineCdm, run.sh writes the profile's hint file and a ChromeOS user agent, and
   mv_open adds ChromeOS client hints (Emulation.setUserAgentOverride). First device try: Netflix error C7702-1003
   (Widevine registers, per a qemu test with a dummy .so in chromium/WidevineCdm, so it likely fails to load); /log now
