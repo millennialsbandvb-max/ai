@@ -1137,6 +1137,7 @@ static void mv_close(void) {
     mv_casting = 0;
 }
 
+#define CROS_UA "Mozilla/5.0 (X11; CrOS armv7l 15633.69.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
 static int mv_open(void) {   /* DevTools: the first tab, as a WebSocket */
     char page_id[128] = "";
     int fd = cdp_connect();
@@ -1194,6 +1195,12 @@ static int mv_open(void) {   /* DevTools: the first tab, as a WebSocket */
         "try{this.pause()}catch(e){}return Promise.reject(new DOMException('waiting for a tap on play','NotAllowedError'))}ok=h}"
         "return pl.apply(this,arguments)};})()";
     mv_send("\"method\":\"Page.enable\"");   /* (new-page scripts only take effect with the Page domain on) */
+    /* look like a Chromebook (ARM), as Netflix and other Widevine sites expect on ARM (run.sh sets the plain
+     * user agent; this adds the client hints) */
+    mv_send("\"method\":\"Emulation.setUserAgentOverride\",\"params\":{\"userAgent\":\"%s\",\"platform\":\"Linux armv7l\","
+            "\"userAgentMetadata\":{\"brands\":[{\"brand\":\"Google Chrome\",\"version\":\"150\"},"
+            "{\"brand\":\"Chromium\",\"version\":\"150\"}],\"fullVersion\":\"150.0.7871.181\",\"platform\":\"Chrome OS\","
+            "\"platformVersion\":\"15633.69.0\",\"architecture\":\"arm\",\"model\":\"\",\"mobile\":false}}", CROS_UA);
     mv_send("\"method\":\"Page.addScriptToEvaluateOnNewDocument\",\"params\":{\"source\":\"%s\"}", light);
     mv_send("\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"%s\"}", light);
     return 0;

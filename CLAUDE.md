@@ -108,7 +108,10 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   SCROLL_WHEEL (404) over the browser goes to it as OV_WHEEL (AXIS/touchpad scroll there is just kept from MPC).
   Address bar: mpc-remote draws a 48 px bar on top (font atlas from make_keyboard.py, FONT_*); tapping it types into
   the bar (Enter: Page.navigate; words without a dot search Google; bare addresses get https://). It follows the page
-  via Page.frameNavigated / navigatedWithinDocument. Videos wait for a tap: the injected script rejects play()
+  via Page.frameNavigated / navigatedWithinDocument.
+  Netflix (untested): packages.txt's last line (a full URL) is Raspberry Pi's armhf Widevine; the installer puts it in
+  chromium/WidevineCdm (+ home/.local/lib link), run.sh writes the profile's hint file and a ChromeOS user agent, and
+  mv_open adds ChromeOS client hints (Emulation.setUserAgentOverride). Videos wait for a tap: the injected script rejects play()
   without user activation and the first play() for each new address; once one is allowed there, later play() calls
   for that address pass (YouTube restarts playback after buffering; blocking those paused videos mid-play). YouTube
   quality is only set when not already tiny (setting it every time made it rebuffer). run.sh: autoplay needs a gesture.

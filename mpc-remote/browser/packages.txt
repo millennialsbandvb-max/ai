@@ -1,4 +1,5 @@
-# Debian 12 (bookworm) armhf packages for the MPC browser: <file in the Debian archive> <SHA-256>
+# Debian 12 (bookworm) armhf packages for the MPC browser: <file in the Debian archive, or a full URL> <SHA-256>
+# (the last line is Raspberry Pi's build of Widevine, the copy-protection module Netflix and others need)
 pool/main/a/at-spi2-core/at-spi2-common_2.46.0-5_all.deb 441bc1c6cefdc01f519310abf55823deb868898480dee09a05aa44e8c83cabc2
 pool/updates/main/c/chromium/chromium_150.0.7871.181-1~deb12u1_armhf.deb f135ba4ef3fa7d723297d57b07bb7e5a289159144c71f4fbe1bfc9a8c771ff70
 pool/updates/main/c/chromium/chromium-common_150.0.7871.181-1~deb12u1_armhf.deb bf98ac91bbfe132c4d6fdaf80bb4a83b5bbb144319894cd03cffdb626037e4a5
@@ -95,3 +96,4 @@ pool/main/libz/libzstd/libzstd1_1.5.4+dfsg2-5_armhf.deb a2ca48bc43bb51d3cbc6beb0
 pool/main/x/xkeyboard-config/xkb-data_2.35.1-1_all.deb 28a79c61b785f403da93af58c39aed13c022032935e3e54362c6707169cfe982
 pool/main/z/zlib/zlib1g_1.2.13.dfsg-1_armhf.deb b52fcc443085ff9c676648b4d0fc97cd31b8f119bdd4e7534e50b6e9386502ba
 pool/main/libj/libjpeg-turbo/libturbojpeg0_2.1.5-2_armhf.deb 1b6aa0a74b20a5347c110a01ace14eef3dbf5145ac9d9856c3617399d1c71600
+https://archive.raspberrypi.com/debian/pool/main/w/widevine/libwidevinecdm0_4.10.2662.3+1_armhf.deb 17c6d1f144c5063a34fbd55e772b0dec8629fcb1869156ff2f03c22adb96d22f

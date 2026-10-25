@@ -15,8 +15,9 @@ echo "== packages"
 grep -v '^#' "$HERE/packages.txt" | while read -r f sum; do
   d="$W/debs/$(basename "$f")"
   base=https://deb.debian.org/debian
-  case "$f" in pool/updates/*) base=https://deb.debian.org/debian-security ;; esac
-  [ -f "$d" ] && [ "$(sha256sum < "$d" | cut -d' ' -f1)" = "$sum" ] || curl -sSfL -m 600 -o "$d" "$base/$f"
+  url=$base/$f
+  case "$f" in pool/updates/*) url=https://deb.debian.org/debian-security/$f ;; https://*) url=$f ;; esac
+  [ -f "$d" ] && [ "$(sha256sum < "$d" | cut -d' ' -f1)" = "$sum" ] || curl -sSfL -m 600 -o "$d" "$url"
   [ "$(sha256sum < "$d" | cut -d' ' -f1)" = "$sum" ] || { echo "checksum mismatch: $f" >&2; exit 1; }
   dpkg-deb -x "$d" "$W/root"
 done
@@ -33,6 +34,13 @@ for d in "$W/root/usr/lib/arm-linux-gnueabihf" "$W/root/lib/arm-linux-gnueabihf"
 done
 rm -rf "$B/lib/gdk-pixbuf-2.0" "$B/lib/gio" "$B/lib/glib-2.0"
 cp -a "$W/root/usr/share/fonts" "$B/share/fonts"
+# Widevine (copy protection, for Netflix): where this Chromium looks for it, real files rather than the package's links
+if [ -f "$W/root/opt/WidevineCdm/manifest.json" ]; then
+  mkdir -p "$B/chromium/WidevineCdm/_platform_specific/linux_arm" "$B/home/.local/lib"
+  cp "$W/root/opt/WidevineCdm/manifest.json" "$B/chromium/WidevineCdm/"
+  cp "$W/root/opt/WidevineCdm/gmp-widevinecdm/latest/libwidevinecdm.so" "$B/chromium/WidevineCdm/_platform_specific/linux_arm/"
+  ln -sf ../../chromium/WidevineCdm/_platform_specific/linux_arm/libwidevinecdm.so "$B/home/.local/lib/libwidevinecdm.so"
+fi
 cp "$HERE/run.sh" "$B/run.sh"
 cp "$HERE/asoundrc" "$B/home/.asoundrc"
 chmod 755 "$B/run.sh"

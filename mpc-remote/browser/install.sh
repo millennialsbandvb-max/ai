@@ -26,8 +26,9 @@ else
         i=$((i + 1))
         say "downloading $i of $total: $(basename "$f")"
         base=https://deb.debian.org/debian
-        case "$f" in pool/updates/*) base=https://deb.debian.org/debian-security ;; esac
-        "$B/debfetch" get "$base/$f" "$sum" "$C/$(basename "$f")" || fail "download of $(basename "$f") (is the MPC online?)"
+        url=$base/$f
+        case "$f" in pool/updates/*) url=https://deb.debian.org/debian-security/$f ;; https://*) url=$f ;; esac
+        "$B/debfetch" get "$url" "$sum" "$C/$(basename "$f")" || fail "download of $(basename "$f") (is the MPC online?)"
         "$B/debfetch" data "$C/$(basename "$f")" "$N/root" || fail "unpacking $(basename "$f")"
     done < "$N/list"
     say "arranging"
@@ -41,6 +42,14 @@ else
     done
     rm -rf "$N/lib/gdk-pixbuf-2.0" "$N/lib/gio" "$N/lib/glib-2.0"
     mv "$R/usr/share/fonts" "$N/share/fonts"
+    # Widevine (copy protection, for Netflix): where this Chromium looks for it, real files rather than the package's links
+    if [ -f "$R/opt/WidevineCdm/manifest.json" ]; then
+        W="$N/chromium/WidevineCdm"
+        mkdir -p "$W/_platform_specific/linux_arm" "$N/home/.local/lib"
+        cp "$R/opt/WidevineCdm/manifest.json" "$W/" &&
+        cp "$R/opt/WidevineCdm/gmp-widevinecdm/latest/libwidevinecdm.so" "$W/_platform_specific/linux_arm/" || fail "arranging Widevine"
+        ln -sf ../../chromium/WidevineCdm/_platform_specific/linux_arm/libwidevinecdm.so "$N/home/.local/lib/libwidevinecdm.so"
+    fi
     cp "$B/browser-run.sh" "$N/run.sh" && cp "$B/browser-asoundrc" "$N/home/.asoundrc" || fail "missing files in the firmware"
     chmod 755 "$N/run.sh"
     rm -rf "$R" "$N/list"

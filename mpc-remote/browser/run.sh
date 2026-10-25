@@ -8,10 +8,16 @@ cat > fonts.conf <<EOC
 <?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd">
 <fontconfig><dir>$D/share/fonts</dir><cachedir>$D/cache</cachedir></fontconfig>
 EOC
+# Widevine (if installed): tell Chromium where it is, as its component updater would (that's off)
+if [ -f chromium/WidevineCdm/manifest.json ]; then
+  mkdir -p profile/WidevineCdm
+  echo "{\"Path\":\"$D/chromium/WidevineCdm\"}" > profile/WidevineCdm/latest-component-updated-widevine-cdm
+fi
 export HOME="$D/home" FONTCONFIG_FILE="$D/fonts.conf" LD_LIBRARY_PATH="$D/lib:$D/lib/pulseaudio:$D/chromium"
 export PULSE_SERVER=none   # no PulseAudio here: straight to ALSA
 exec "$D/chromium/chromium" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage \
   --remote-debugging-port=9222 --remote-allow-origins='*' --user-data-dir="$D/profile" --window-size=1240,544 \
   --autoplay-policy=user-gesture-required --renderer-process-limit=2 --disable-extensions --no-first-run \
   --disable-component-update --disable-background-networking --disable-features=Translate,MediaRouter \
+  --user-agent='Mozilla/5.0 (X11; CrOS armv7l 15633.69.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36' \
   --js-flags=--max-old-space-size=256 about:blank
