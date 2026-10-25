@@ -106,6 +106,10 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   Mouse wheel: Hakai's mpc_cursor.so (reads the mouse evdev without grabbing; clicks become virtual touches) places
   its cursor plane via drmModeAtomicAddProperty, so our hook learns the pointer from that plane's CRTC_X/Y; libinput
   SCROLL_WHEEL (404) over the browser goes to it as OV_WHEEL (AXIS/touchpad scroll there is just kept from MPC).
+  Address bar: mpc-remote draws a 48 px bar on top (font atlas from make_keyboard.py, FONT_*); tapping it types into
+  the bar (Enter: Page.navigate; words without a dot search Google; bare addresses get https://). It follows the page
+  via Page.frameNavigated / navigatedWithinDocument. Videos wait for a tap: the injected script rejects play()
+  without user activation, and the first play() for each new address (run.sh: --autoplay-policy=user-gesture-required).
 - `server/test_page.js` (run by build.sh) loads the page and fails on script errors: a top-level error once shipped
   and stopped the whole page from connecting.
 - The remote's typing is a virtual USB keyboard (uinput, "MPC Remote Keyboard"), made the first time the page types;

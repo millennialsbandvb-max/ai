@@ -1089,6 +1089,10 @@ static int mv_rw, mv_rh;
 static int kb_on, kb_shift, kb_pressed = -1, kb_slot = -1;
 static uint32_t *kb_px[2];                /* its pictures (lower, upper case), KB_W x KB_H */
 static int mv_focus_id;                   /* the "did that tap land in a text box?" question we asked */
+/* the address bar along the top: the page's address, or (tapped) what's being typed for a new one */
+#define BAR_H 48
+static char url_cur[512], url_edit[512];
+static int url_editing;
 static uint64_t mv_focus_at;
 static void mv_publish(void);
 
@@ -1151,7 +1155,12 @@ static int mv_open(void) {   /* DevTools: the first tab, as a WebSocket */
         char *q = p + 7, *e = strchr(q, '"');
         char *t = strstr(p, "\"type\": \"");
         if (!e || !t) break;
-        if (!strncmp(t + 9, "page\"", 5)) { snprintf(page_id, sizeof page_id, "%.*s", (int)(e - q), q); break; }
+        if (!strncmp(t + 9, "page\"", 5)) {
+            snprintf(page_id, sizeof page_id, "%.*s", (int)(e - q), q);
+            const char *u = strstr(t, "\"url\": \"");   /* its address, for the bar */
+            if (u) { u += 8; const char *ue = strchr(u, '"'); if (ue) snprintf(url_cur, sizeof url_cur, "%.*s", (int)(ue - u), u); }
+            break;
+        }
     }
     if (!page_id[0]) return -1;
     if ((fd = cdp_connect()) < 0) return -1;
@@ -1175,7 +1184,13 @@ static int mv_open(void) {   /* DevTools: the first tab, as a WebSocket */
         "MediaSource.isTypeSupported=function(t){return bad.test(t)?false:s(t)};}"
         "var c=HTMLMediaElement.prototype.canPlayType;HTMLMediaElement.prototype.canPlayType=function(t){return bad.test(t)?'':c.call(this,t)};"
         "if(location.hostname.indexOf('youtube')>=0)setInterval(function(){var p=document.getElementById('movie_player');"
-        "if(p&&p.setPlaybackQualityRange)try{p.setPlaybackQualityRange('tiny','tiny')}catch(e){}},2000);})()";
+        "if(p&&p.setPlaybackQualityRange)try{p.setPlaybackQualityRange('tiny','tiny')}catch(e){}},2000);"
+        /* videos wait for a tap: no playing without one (hover previews, autoplay), and a newly opened video waits
+         * for its own tap on play even if the tap that opened it was a moment ago */
+        "var pl=HTMLMediaElement.prototype.play,seen='';HTMLMediaElement.prototype.play=function(){"
+        "var ua=navigator.userActivation;if(!(ua&&ua.isActive)||seen!==location.href){seen=location.href;"
+        "try{this.pause()}catch(e){}return Promise.reject(new DOMException('waiting for a tap on play','NotAllowedError'))}"
+        "return pl.apply(this,arguments)};})()";
     mv_send("\"method\":\"Page.enable\"");   /* (new-page scripts only take effect with the Page domain on) */
     mv_send("\"method\":\"Page.addScriptToEvaluateOnNewDocument\",\"params\":{\"source\":\"%s\"}", light);
     mv_send("\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"%s\"}", light);
@@ -1230,6 +1245,78 @@ static void mv_frame(const char *msg) {   /* a screencast frame: acknowledge, de
     mv_publish();
 }
 
+/* text in the address bar's font, into the turned picture (as seen: x, y = the text's top-left); clipped to [x0, x1) */
+static void text_draw(uint32_t *dst, int W, int H, int x, int y, const char *t, uint32_t color, int x0, int x1) {
+    for (; *t; t++) {
+        const int c = (unsigned char)*t < 32 || (unsigned char)*t > 126 ? '?' - 32 : *t - 32;
+        for (int gx = 0; gx < FONT_ADV[c]; gx++) {
+            const int px = x + gx;
+            if (px < x0 || px >= x1 || px >= W) continue;
+            for (int gy = 0; gy < FONT_H && y + gy < H; gy++) {
+                const unsigned a = FONT_ALPHA[gy * FONT_ATLAS_W + FONT_X[c] + gx];
+                if (!a) continue;
+                uint32_t *d = dst + (size_t)(W - 1 - px) * H + y + gy;
+                uint32_t o = 0;
+                for (int sh = 0; sh < 24; sh += 8)
+                    o |= ((((*d >> sh) & 255) * (255 - a) + ((color >> sh) & 255) * a) / 255) << sh;
+                *d = o;
+            }
+        }
+        x += FONT_ADV[c];
+    }
+}
+
+static int text_width(const char *t) {
+    int w = 0;
+    for (; *t; t++) w += FONT_ADV[(unsigned char)*t < 32 || (unsigned char)*t > 126 ? '?' - 32 : *t - 32];
+    return w;
+}
+
+static void bar_draw(uint32_t *dst, int W, int H) {   /* the address bar: rows 0..BAR_H of the area */
+    const int fx0 = 8, fx1 = W - 8, fy0 = 6, fy1 = BAR_H - 6;
+    for (int x = 0; x < W; x++)
+        for (int y = 0; y < BAR_H; y++) {
+            uint32_t c = 0x1e1e20;
+            if (x >= fx0 && x < fx1 && y >= fy0 && y < fy1) {
+                const int edge = x < fx0 + 2 || x >= fx1 - 2 || y < fy0 + 2 || y >= fy1 - 2;
+                c = edge ? (url_editing ? 0xe5742b : 0x44444a) : 0x2c2c30;
+            }
+            dst[(size_t)(W - 1 - x) * H + y] = c;
+        }
+    char shown[530];
+    uint32_t color = 0xe6e6e6;
+    if (url_editing) snprintf(shown, sizeof shown, "%s|", url_edit);
+    else if (url_cur[0] && strcmp(url_cur, "about:blank")) snprintf(shown, sizeof shown, "%s", url_cur);
+    else { snprintf(shown, sizeof shown, "tap here to type an address or search"); color = 0x8a8a90; }
+    const int room = fx1 - fx0 - 24, tw = text_width(shown);
+    const int tx = fx0 + 12 - (url_editing && tw > room ? tw - room : 0);   /* while typing, keep the end in view */
+    text_draw(dst, W, H, tx, (BAR_H - FONT_H) / 2, shown, color, fx0 + 6, fx1 - 6);
+}
+
+static void url_go(const char *in) {   /* an address, or words to search for */
+    char u[1024];
+    size_t n = 0;
+    while (*in == ' ') in++;
+    if (!*in) return;
+    if (strstr(in, "://") || !strncmp(in, "about:", 6) || !strncmp(in, "data:", 5)) snprintf(u, sizeof u, "%s", in);
+    else if (strchr(in, ' ') || !strchr(in, '.')) {
+        n = (size_t)snprintf(u, sizeof u, "https://www.google.com/search?q=");
+        for (const char *p = in; *p && n < sizeof u - 4; p++) {
+            const unsigned char c = (unsigned char)*p;
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || strchr("-_.~", c)) u[n++] = (char)c;
+            else if (c == ' ') u[n++] = '+';
+            else n += (size_t)snprintf(u + n, sizeof u - n, "%%%02X", c);
+        }
+        u[n] = 0;
+    } else snprintf(u, sizeof u, "https://%s", in);
+    char e[1100];   /* JSON-escaped */
+    n = 0;
+    for (const char *p = u; *p && n < sizeof e - 3; p++) { if (*p == '"' || *p == '\\') e[n++] = '\\'; e[n++] = *p; }
+    e[n] = 0;
+    mv_send("\"method\":\"Page.navigate\",\"params\":{\"url\":\"%s\"}", e);
+    snprintf(url_cur, sizeof url_cur, "%.511s", u);
+}
+
 static void kb_load(void) {   /* decode the keyboard's two pictures (once the JPEG decoder is there) */
     if (kb_px[0] || !tjh) return;
     const unsigned char *src[2] = {KB_JPG_LOWER, KB_JPG_UPPER};
@@ -1246,13 +1333,15 @@ static void kb_load(void) {   /* decode the keyboard's two pictures (once the JP
 static void mv_publish(void) {
     if (!ovs || !mv_rgb || mv_w <= 0 || mv_h <= 0) return;
     kb_load();
-    const int W = mv_w, H = mv_h, kbh = kb_on && kb_px[0] ? KB_H : 0, webh = H - kbh;
+    const int W = mv_w, H = mv_h, kbh = kb_on && kb_px[0] ? KB_H : 0, webh = H - BAR_H - kbh;
     const uint32_t next = ovs->frame_seq + 1;
     uint32_t *dst = ovs->frame[next & 1];
+    bar_draw(dst, W, H);
     for (int y = 0; y < webh; y++) {
         const uint32_t *src = mv_rgb + (size_t)(mv_rh == webh ? y : y * mv_rh / webh) * mv_rw;
-        if (mv_rw == W) for (int x = 0; x < W; x++) dst[(size_t)(W - 1 - x) * H + y] = src[x];
-        else for (int x = 0; x < W; x++) dst[(size_t)(W - 1 - x) * H + y] = src[x * mv_rw / W];
+        uint32_t *col = dst + BAR_H + y;
+        if (mv_rw == W) for (int x = 0; x < W; x++) col[(size_t)(W - 1 - x) * H] = src[x];
+        else for (int x = 0; x < W; x++) col[(size_t)(W - 1 - x) * H] = src[x * mv_rw / W];
     }
     if (kbh) {
         const uint32_t *kp = kb_px[kb_shift ? 1 : 0];
@@ -1265,7 +1354,7 @@ static void mv_publish(void) {
                     const struct kb_key *k = &KB_KEYS[kb_pressed];
                     if (kx >= k->x && kx < k->x + k->w && y >= k->y && y < k->y + k->h) c ^= 0x00ffffff;   /* lit */
                 }
-                dst[(size_t)(W - 1 - x) * H + webh + y] = c;
+                dst[(size_t)(W - 1 - x) * H + BAR_H + webh + y] = c;
             }
         }
     }
@@ -1275,7 +1364,7 @@ static void mv_publish(void) {
 }
 
 static void mv_resize(void) {   /* the web page's size changed (the keyboard came or went): tell the browser */
-    const int webh = mv_h - (kb_on && kb_px[0] ? KB_H : 0);
+    const int webh = mv_h - BAR_H - (kb_on && kb_px[0] ? KB_H : 0);
     mv_send("\"method\":\"Emulation.setDeviceMetricsOverride\",\"params\":{\"width\":%d,\"height\":%d,"
             "\"deviceScaleFactor\":1,\"mobile\":false}", mv_w, webh);
     mv_send("\"method\":\"Page.stopScreencast\"");
@@ -1318,6 +1407,18 @@ static void kb_touch(int kind, int x, int y) {   /* a touch on the keyboard (y w
     if (i == n) return;
     const struct kb_key *k = &KB_KEYS[i];
     kb_pressed = i;
+    if (url_editing) {   /* typing an address: into the bar, not the page */
+        const size_t n = strlen(url_edit);
+        const char *add = !strcmp(k->kind, "c") ? (kb_shift ? k->upper : k->lower) : !strcmp(k->kind, "text") ? k->lower :
+                          !strcmp(k->kind, "space") ? " " : NULL;
+        if (add) { snprintf(url_edit + n, sizeof url_edit - n, "%s", add); if (!strcmp(k->kind, "c")) kb_shift = 0; }
+        else if (!strcmp(k->kind, "backspace")) { if (n) url_edit[n - 1] = 0; }
+        else if (!strcmp(k->kind, "shift")) kb_shift = !kb_shift;
+        else if (!strcmp(k->kind, "enter")) { url_editing = 0; url_go(url_edit); kb_pressed = -1; kb_show(0); return; }
+        else if (!strcmp(k->kind, "hide")) { url_editing = 0; kb_pressed = -1; kb_show(0); mv_publish(); return; }
+        mv_publish();
+        return;
+    }
     if (!strcmp(k->kind, "c")) { kb_type(kb_shift ? k->upper : k->lower); kb_shift = 0; }
     else if (!strcmp(k->kind, "text")) kb_type(k->lower);
     else if (!strcmp(k->kind, "space")) kb_type(" ");
@@ -1357,6 +1458,18 @@ static void mv_read(void) {   /* DevTools messages (server frames: not masked) *
             const char saved = m[n];
             m[n] = 0;
             if (strstr(m, "\"method\":\"Page.screencastFrame\"")) mv_frame(m);
+            else if ((strstr(m, "\"method\":\"Page.frameNavigated\"") && !strstr(m, "\"parentId\"")) ||
+                     strstr(m, "\"method\":\"Page.navigatedWithinDocument\"")) {   /* the page's address, for the bar */
+                const char *u = strstr(m, "\"url\":\"");
+                if (u) {
+                    u += 7;
+                    size_t n = 0;
+                    while (u[n] && u[n] != '"' && n < sizeof url_cur - 1) n++;
+                    memcpy(url_cur, u, n);
+                    url_cur[n] = 0;
+                    if (!url_editing) mv_publish();
+                }
+            }
             else if (!strncmp(m, "{\"id\":", 6) && strstr(m, "\"error\":")) LOG("browser on the MPC: the browser said %.160s", m);
             else if (mv_focus_id && !strncmp(m, "{\"id\":", 6) && atoi(m + 6) == mv_focus_id) {
                 mv_focus_id = 0;
@@ -1399,22 +1512,32 @@ static void mpc_view_tick(void) {
         /* touches on the area -> the browser */
         const uint32_t wr = __atomic_load_n(&ovs->touch_wr, __ATOMIC_ACQUIRE);
         if (wr - mv_touch_rd > OVERLAY_TOUCHES) mv_touch_rd = wr - OVERLAY_TOUCHES;
-        const int webh = mv_h - (kb_on && kb_px[0] ? KB_H : 0);
+        const int webh = mv_h - BAR_H - (kb_on && kb_px[0] ? KB_H : 0);
         for (; mv_touch_rd != wr; mv_touch_rd++) {
             const int k = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].kind, slot = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].slot;
             const int x = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].x, y = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].y;
             if (k == OV_WHEEL) {   /* the mouse wheel (slot = how far: 120 a notch) */
-                if (y < webh)
+                const int y = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].y - BAR_H;
+                if (y >= 0 && y < webh)
                     mv_send("\"method\":\"Input.dispatchMouseEvent\",\"params\":{\"type\":\"mouseWheel\",\"x\":%d,\"y\":%d,"
                             "\"deltaX\":0,\"deltaY\":%d}", x, y, slot * 100 / 120);
                 continue;
             }
-            if (k == OV_DOWN) kb_slot = webh < mv_h && y >= webh ? slot : -1;   /* this touch is on the keyboard */
-            if (kb_slot >= 0 && slot == kb_slot) { kb_touch(k, x, y - webh); if (k == OV_UP) kb_slot = -1; continue; }
+            if (k == OV_DOWN && y < BAR_H) {   /* the address bar: type a new address */
+                url_editing = 1;
+                url_edit[0] = 0;
+                kb_show(1);
+                mv_publish();
+                kb_slot = -2;   /* (the rest of this touch is ignored) */
+                continue;
+            }
+            if (k == OV_DOWN) kb_slot = BAR_H + webh < mv_h && y >= BAR_H + webh ? slot : -1;   /* on the keyboard */
+            if (kb_slot == -2) { if (k == OV_UP) kb_slot = -1; continue; }
+            if (kb_slot >= 0 && slot == kb_slot) { kb_touch(k, x, y - BAR_H - webh); if (k == OV_UP) kb_slot = -1; continue; }
             if (k == OV_UP) mv_focus_at = t + 350;   /* then: did that tap land in a text box? */
             if (k == OV_UP) mv_send("\"method\":\"Input.dispatchTouchEvent\",\"params\":{\"type\":\"touchEnd\",\"touchPoints\":[]}");
             else mv_send("\"method\":\"Input.dispatchTouchEvent\",\"params\":{\"type\":\"%s\",\"touchPoints\":[{\"x\":%d,\"y\":%d}]}",
-                         k == OV_DOWN ? "touchStart" : "touchMove", x, y);
+                         k == OV_DOWN ? "touchStart" : "touchMove", x, y - BAR_H < 0 ? 0 : y - BAR_H);
         }
     } else if (mv_casting) {   /* off screen a few seconds: stop the pictures (saves the processor) */
         if (!mv_hidden_since) mv_hidden_since = t;

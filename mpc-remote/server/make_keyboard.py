@@ -79,4 +79,25 @@ with open(out + "/keyboard.h", "w") as f:
         for i in range(0, len(data), 24):
             f.write("  " + ",".join(str(b) for b in data[i:i + 24]) + ",\n")
         f.write("};\n")
+# a small font for the address bar: ASCII 32..126, one strip of 8-bit coverage, FONT_H tall
+FONT_H = 34
+ff = ImageFont.truetype(sys.argv[1], 22)
+advs, xs, x = [], [], 0
+for c in range(32, 127):
+    advs.append(max(1, round(ff.getlength(chr(c)))))
+    xs.append(x)
+    x += advs[-1]
+atlas = Image.new("L", (x, FONT_H), 0)
+ad = ImageDraw.Draw(atlas)
+for i, c in enumerate(range(32, 127)):
+    ad.text((xs[i], FONT_H // 2), chr(c), font=ff, fill=255, anchor="lm")
+with open(out + "/keyboard.h", "a") as f:
+    f.write(f"#define FONT_H {FONT_H}\n#define FONT_ATLAS_W {x}\n")
+    f.write("static const short FONT_ADV[95] = {" + ",".join(map(str, advs)) + "};\n")
+    f.write("static const int FONT_X[95] = {" + ",".join(map(str, xs)) + "};\n")
+    data = atlas.tobytes()
+    f.write("static const unsigned char FONT_ALPHA[] = {\n")
+    for i in range(0, len(data), 32):
+        f.write("  " + ",".join(str(b) for b in data[i:i + 32]) + ",\n")
+    f.write("};\n")
 print(f"keyboard: {len(keys)} keys, {W}x{KH}")
