@@ -1184,12 +1184,14 @@ static int mv_open(void) {   /* DevTools: the first tab, as a WebSocket */
         "MediaSource.isTypeSupported=function(t){return bad.test(t)?false:s(t)};}"
         "var c=HTMLMediaElement.prototype.canPlayType;HTMLMediaElement.prototype.canPlayType=function(t){return bad.test(t)?'':c.call(this,t)};"
         "if(location.hostname.indexOf('youtube')>=0)setInterval(function(){var p=document.getElementById('movie_player');"
-        "if(p&&p.setPlaybackQualityRange)try{p.setPlaybackQualityRange('tiny','tiny')}catch(e){}},2000);"
-        /* videos wait for a tap: no playing without one (hover previews, autoplay), and a newly opened video waits
-         * for its own tap on play even if the tap that opened it was a moment ago */
-        "var pl=HTMLMediaElement.prototype.play,seen='';HTMLMediaElement.prototype.play=function(){"
-        "var ua=navigator.userActivation;if(!(ua&&ua.isActive)||seen!==location.href){seen=location.href;"
-        "try{this.pause()}catch(e){}return Promise.reject(new DOMException('waiting for a tap on play','NotAllowedError'))}"
+        "if(p&&p.setPlaybackQualityRange&&p.getPlaybackQuality&&p.getPlaybackQuality()!=='tiny')"
+        "try{p.setPlaybackQualityRange('tiny','tiny')}catch(e){}},2000);"   /* (only when it isn't already: no rebuffering) */
+        /* videos wait for a tap: a newly opened address doesn't play until play is tapped (even if the tap that
+         * opened it was a moment ago; hover previews never get one). Once started there, it may play on by itself
+         * (the player restarts playback after buffering or a quality change) until another address is opened */
+        "var pl=HTMLMediaElement.prototype.play,seen='',ok='';HTMLMediaElement.prototype.play=function(){"
+        "var h=location.href,ua=navigator.userActivation;if(ok!==h){if(!(ua&&ua.isActive)||seen!==h){seen=h;"
+        "try{this.pause()}catch(e){}return Promise.reject(new DOMException('waiting for a tap on play','NotAllowedError'))}ok=h}"
         "return pl.apply(this,arguments)};})()";
     mv_send("\"method\":\"Page.enable\"");   /* (new-page scripts only take effect with the Page domain on) */
     mv_send("\"method\":\"Page.addScriptToEvaluateOnNewDocument\",\"params\":{\"source\":\"%s\"}", light);
