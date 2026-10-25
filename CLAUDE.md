@@ -81,8 +81,11 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   in `/dev/shm/mpc-webin` (`mpc-remote/webin.h`); `preload/webin.c` (in mpc-buttons.so) adds it to the chosen input
   pair inside MPC's `snd_pcm_readi/readn`, resampling with drift control (~0.2 s buffer). Browsers only allow mic/tab
   capture on https pages and the remote is http, so it's files only; the user declined AirPlay (shairport-sync).
-- **MPC browser** (experiment): headless Chromium 150 (Debian 12 armhf) in `/data/mpc-browser`, installed by the page
-  from `MPC-Browser.tar.gz` on a card (cards are mounted noexec; the rootfs has ~80 MB free). mpc-remote starts it
+- **MPC browser** (experiment): headless Chromium 150 (Debian 12 armhf) in `/data/mpc-browser`. Too big for the rootfs
+  (~80 MB free; its partition size is unknown, so don't grow it) and cards are mounted noexec, so the firmware carries
+  an installer instead: the page's Start (first time) runs `browser-install.sh`, which downloads the packages in
+  `packages.txt` from deb.debian.org with `debfetch` (libcurl/libcrypto, SHA-256 checked) and arranges them exactly
+  like `build_bundle.sh` (or unpacks `MPC-Browser.tar.gz` if one is on a card). mpc-remote starts it
   (`run.sh`, nice 10) and tunnels its DevTools at `/cdp/` (DevTools only accepts Host 127.0.0.1, ignores HTTP/1.0);
   the page shows a screencast and sends input. Its ALSA default is a `file` device piping to `webin-feed` (Web In).
   Not tested on the device yet: memory (~1.2 GB free beside MPC) and CPU are the open questions. No zram in the kernel.

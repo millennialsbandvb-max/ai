@@ -896,6 +896,7 @@ static int screen_ready = 0, have_prev = 0;
  * (DevTools only listens on the MPC itself and only accepts "Host: 127.0.0.1"). Its sound goes to Web In. */
 #define BROWSER_DIR "/data/mpc-browser"
 static pid_t browser_pid = -1, install_pid = -1;
+static int start_after_install;   /* Start pressed before it was installed: install, then start */
 static uint64_t browser_stop_at;
 static char browser_note[320];   /* the last thing worth telling the page */
 
@@ -935,6 +936,13 @@ static void browser_status(void) {   /* to every viewer: state, memory, processo
         fclose(f);
     }
     char card[256];
+    if (install_pid > 0) {
+        FILE *pf = fopen("/tmp/mpc-browser-install", "r");
+        if (pf) {
+            if (fgets(browser_note, sizeof browser_note, pf)) browser_note[strcspn(browser_note, "\n\"\\")] = 0;
+            fclose(pf);
+        }
+    }
     const char *state = install_pid > 0 ? "installing" : browser_pid > 0 ? "running" :
                         access(BROWSER_DIR "/run.sh", R_OK) ? "not installed" : "stopped";
     char m[1024];
@@ -943,9 +951,11 @@ static void browser_status(void) {   /* to every viewer: state, memory, processo
     broadcast_text(m);
 }
 
+static void browser_install(void);
+
 static void browser_start(void) {
     if (browser_pid > 0 || install_pid > 0) return;
-    if (access(BROWSER_DIR "/run.sh", R_OK)) { snprintf(browser_note, sizeof browser_note, "not installed yet"); return; }
+    if (access(BROWSER_DIR "/run.sh", R_OK)) { start_after_install = 1; browser_install(); return; }
     const pid_t p = fork();
     if (p == 0) {
         setsid();
@@ -965,24 +975,24 @@ static void browser_stop(void) {
     LOG("browser: stopping");
 }
 
+/* browser-install.sh downloads Chromium from Debian onto the MPC (or unpacks MPC-Browser.tar.gz from a card) */
 static void browser_install(void) {
-    char file[256], cmd[1024];
     if (browser_pid > 0 || install_pid > 0) return;
-    if (!browser_card_file(file, sizeof file)) { snprintf(browser_note, sizeof browser_note, "no MPC-Browser.tar.gz on a card"); return; }
     struct statvfs v;
-    if (!statvfs("/data", &v) && (unsigned long long)v.f_bavail * v.f_frsize < 600ull << 20) {
-        snprintf(browser_note, sizeof browser_note, "not enough room on the MPC's internal storage (needs 600 MB)");
+    if (!statvfs("/data", &v) && (unsigned long long)v.f_bavail * v.f_frsize < 700ull << 20) {
+        snprintf(browser_note, sizeof browser_note, "not enough room on the MPC's internal storage (needs 700 MB)");
         return;
     }
-    snprintf(cmd, sizeof cmd, "rm -rf %s.new && mkdir -p %s.new && tar -xzf '%s' -C %s.new && rm -rf %s && mv %s.new %s && sync",
-             BROWSER_DIR, BROWSER_DIR, file, BROWSER_DIR, BROWSER_DIR, BROWSER_DIR, BROWSER_DIR);
+    unlink("/tmp/mpc-browser-install");
     const pid_t p = fork();
     if (p == 0) {
         setpriority(PRIO_PROCESS, 0, 15);
-        execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+        const int fd = open("/tmp/mpc-browser-install.log", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd >= 0) { dup2(fd, 1); dup2(fd, 2); }
+        execl("/bin/sh", "sh", "/usr/lib/nam-mpc/bin/browser-install.sh", (char *)NULL);
         _exit(127);
     }
-    if (p > 0) { install_pid = p; snprintf(browser_note, sizeof browser_note, "installing from %s", file); LOG("browser: installing from %s", file); }
+    if (p > 0) { install_pid = p; snprintf(browser_note, sizeof browser_note, "installing"); LOG("browser: installing"); }
 }
 
 static void browser_reap(void) {   /* children that finished */
@@ -998,8 +1008,13 @@ static void browser_reap(void) {   /* children that finished */
         } else if (p == install_pid) {
             install_pid = -1;
             const int ok = WIFEXITED(st) && !WEXITSTATUS(st);
-            snprintf(browser_note, sizeof browser_note, ok ? "installed" : "install failed (is the card's file complete?)");
+            char last[256] = "";
+            FILE *pf = fopen("/tmp/mpc-browser-install", "r");
+            if (pf) { if (fgets(last, sizeof last, pf)) last[strcspn(last, "\n\"\\")] = 0; fclose(pf); }
+            snprintf(browser_note, sizeof browser_note, "%s", ok ? "installed: press Start" : last[0] ? last : "install failed (details: /log)");
             LOG("browser: %s", browser_note);
+            if (ok && start_after_install) browser_start();
+            start_after_install = 0;
             browser_status();
         }
     }

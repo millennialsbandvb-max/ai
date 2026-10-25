@@ -23,6 +23,14 @@ arm-linux-gnueabihf-strip "$B/bundle/bin/mpc-remote"
 arm-linux-gnueabihf-gcc -O2 -Wall -Wextra -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard \
   -o "$B/bundle/bin/webin-feed" "$HERE/webin-feed.c"
 arm-linux-gnueabihf-strip "$B/bundle/bin/webin-feed"
+# the MPC browser's installer (it downloads Chromium onto the MPC: too big for the firmware itself)
+arm-linux-gnueabihf-gcc -O2 -Wall -Wextra -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard \
+  -o "$B/bundle/bin/debfetch" "$HERE/../browser/debfetch.c" -ldl
+arm-linux-gnueabihf-strip "$B/bundle/bin/debfetch"
+cp "$HERE/../browser/install.sh" "$B/bundle/bin/browser-install.sh"
+cp "$HERE/../browser/run.sh" "$B/bundle/bin/browser-run.sh"
+cp "$HERE/../browser/asoundrc" "$B/bundle/bin/browser-asoundrc"
+cp "$HERE/../browser/packages.txt" "$B/bundle/bin/browser-packages.txt"
 cp "$HERE/mpc-remote.service" "$HERE/mpc-cleanup.service" "$B/bundle/services/"
 cp "$HERE/mpc-cleanup.sh" "$B/bundle/bin/"
 # MPC's buttons: mpc-buttons.so (loaded into MPC), mpc-launch (starts MPC with it) and acvs.service's drop-in

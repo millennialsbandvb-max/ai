@@ -88,7 +88,7 @@
 <div id="bbar" hidden>
   <button id="bstart" type="button">Start</button>
   <button id="bstop" type="button">Stop</button>
-  <button id="binstall" type="button" hidden>Install from card</button>
+  <button id="binstall" type="button" hidden>Install browser</button>
   <button id="bback" type="button" title="back">&#9664;</button>
   <button id="bfwd" type="button" title="forward">&#9654;</button>
   <button id="breload" type="button" title="reload">&#10227;</button>
@@ -589,7 +589,7 @@ B("bstop").onclick = () => { send("browser stop"); if (cdp) cdp.close(); };
 B("binstall").onclick = () => send("browser install");
 function onBrowser(m) {   // status from the remote, every few seconds while it runs
   bState = m.state;
-  B("binstall").hidden = !(m.card && (m.state === "not installed" || m.state === "stopped"));
+  B("binstall").hidden = m.state !== "not installed";
   bStat.textContent = m.state + (m.state === "running" ? " · MPC processor " + m.cpu + "% · free memory " + m.free + " MB" : "") +
                       (m.note ? " · " + m.note : "");
   if (m.state === "running" && browserMode && !cdp) cdpOpen();
