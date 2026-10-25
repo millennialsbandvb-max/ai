@@ -50,6 +50,12 @@
   #apos { width: 220px; }
   #audio select { background: #222; color: var(--fg); border: 1px solid #444; border-radius: 6px; padding: 4px; font: inherit; }
   #astat { color: var(--dim); }
+  #bbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 0 12px 8px; flex: none; }
+  #bbar[hidden], #bmain[hidden], #mpcmain[hidden], #pad[hidden], #binstall[hidden] { display: none; }
+  #burl { flex: 1; min-width: 160px; background: #1a1a1a; color: var(--fg); border: 1px solid #444; border-radius: 6px;
+          padding: 6px 8px; font: inherit; }
+  #bstat { color: var(--dim); font-size: 13px; }
+  #bview { cursor: default; }
   #lrn .small { margin-top: 18px; font-size: 13px; color: var(--dim); }
 </style>
 </head>
@@ -62,6 +68,7 @@
          autocapitalize="off" spellcheck="false" enterkeyhint="done">
   <button id="keysbtn" type="button"></button>
   <button id="audiobtn" type="button">Audio</button>
+  <button id="browserbtn" type="button">Browser</button>
   <button id="lrnbtn" type="button">Learn buttons</button>
   <button id="calbtn" type="button">Calibrate touch</button>
 </header>
@@ -77,7 +84,18 @@
   <label>to <select id="apair"></select></label>
   <span id="astat"></span>
 </div>
-<main><canvas id="screen" width="1280" height="800"></canvas></main>
+<main id="mpcmain"><canvas id="screen" width="1280" height="800"></canvas></main>
+<div id="bbar" hidden>
+  <button id="bstart" type="button">Start</button>
+  <button id="bstop" type="button">Stop</button>
+  <button id="binstall" type="button" hidden>Install from card</button>
+  <button id="bback" type="button" title="back">&#9664;</button>
+  <button id="bfwd" type="button" title="forward">&#9654;</button>
+  <button id="breload" type="button" title="reload">&#10227;</button>
+  <input id="burl" type="text" placeholder="address or search" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <span id="bstat"></span>
+</div>
+<main id="bmain" hidden><canvas id="bview" width="960" height="540"></canvas></main>
 <div id="pad">
   <div class="grp">
     <button type="button" data-b="menu">MENU</button><button type="button" data-b="shift+menu">BROWSE</button>
@@ -154,6 +172,7 @@ function onText(m) {
     if (m.name) { lrnText.innerHTML = "On the MPC, press and release <b>" + LABEL[m.name] + "</b>."; return; }
     if (m.done) { learned.add(m.done); showPad(); return learnNext(); }
     if (m.error) { lrnEl.classList.remove("on"); learning = -1; setStatus("learn buttons: " + m.error); }
+  } else if (m.type === "browser") { onBrowser(m);
   } else if (m.type === "btn") {
     if (m.error) setStatus(m.error);
   } else if (m.type === "cal") {
@@ -333,8 +352,9 @@ typeBox.addEventListener("input", () => {
   const v = typeBox.value;
   let p = 0;
   while (p < v.length && p < prevTyped.length && v[p] === prevTyped[p]) p++;
-  for (let i = p; i < prevTyped.length; i++) tap(SPECIAL.Backspace);
-  typeText(v.slice(p).replaceAll(SENT, ""));
+  for (let i = p; i < prevTyped.length; i++) browserMode ? bKey("Backspace") : tap(SPECIAL.Backspace);
+  if (browserMode) { const t = v.slice(p).replaceAll(SENT, ""); if (t) cdpCall("Input.insertText", {text: t}); }
+  else typeText(v.slice(p).replaceAll(SENT, ""));
   if (!v.startsWith(SENT) || v.length > 40) typeBox.value = SENT + (v.length > 40 ? "" : v.replaceAll(SENT, ""));
   prevTyped = typeBox.value;
   typeBox.setSelectionRange(typeBox.value.length, typeBox.value.length);
@@ -344,11 +364,16 @@ typeBox.addEventListener("blur", () => { typeBox.value = ""; prevTyped = SENT; }
 typeBox.addEventListener("keydown", (e) => {   // keys that don't type: straight to the MPC
   if (e.isComposing || !(e.key in SPECIAL) || e.key === "Backspace") return;
   e.preventDefault(); e.stopPropagation();
-  tap(SPECIAL[e.key]);
+  if (browserMode) bKey(e.key); else tap(SPECIAL[e.key]);
   if (e.key === "Enter") typeBox.value = prevTyped = SENT;   // a name is done: start fresh
 });
 
 document.addEventListener("keydown", (e) => {
+  if (browserMode) {   // the browser view: keys go to the page in it (not the address bar's own typing)
+    if (e.target === bUrl || e.target === typeBox || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key.length === 1 || BKEYS[e.key]) { e.preventDefault(); bKey(e.key); }
+    return;
+  }
   if (e.target === typeBox || e.ctrlKey && e.key !== "z" && e.key !== "Z" && e.key !== "y" || e.metaKey || e.altKey) return;
   if (keyMode === "typing") {
     if (e.ctrlKey) return;
@@ -370,81 +395,6 @@ document.addEventListener("keydown", (e) => {
     document.addEventListener("keyup", up);
   }
 });
-
-// ---- Web In, live: what a Chrome tab (or, on Windows, the whole computer) plays, captured and streamed as it plays.
-// Browsers only allow this on secure pages; the remote is plain http, so Chrome has to be told to trust it once:
-// chrome://flags/#unsafely-treat-insecure-origin-as-secure with this page's address.
-let live = null;   // {stream, ctx, node}
-const aLive = A("alive");
-const canLive = () => !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
-function liveStop() {
-  if (!live) return;
-  live.stream.getTracks().forEach((t) => t.stop());
-  live.ctx.close();
-  live = null;
-  send("audio stop");
-  aLive.innerHTML = "&#9673; Share live audio";
-  if (aStat.textContent.startsWith("live")) aStat.textContent = "";
-}
-aLive.onclick = async () => {
-  if (live) return liveStop();
-  if (!canLive()) {
-    aStat.innerHTML = "Live audio needs Chrome to trust this page: open <b>chrome://flags/#unsafely-treat-insecure-origin-as-secure</b>, " +
-      "add <b>" + location.origin + "</b>, set it to Enabled and relaunch Chrome.";
-    return;
-  }
-  aStopSend();
-  let stream;
-  try {
-    stream = await navigator.mediaDevices.getDisplayMedia({
-      video: true, systemAudio: "include", selfBrowserSurface: "exclude",
-      audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false}});
-  } catch (e) { aStat.textContent = "live audio: not shared"; return; }
-  const tracks = stream.getAudioTracks();
-  if (!tracks.length) {
-    stream.getTracks().forEach((t) => t.stop());
-    aStat.textContent = "no audio in what was shared: pick a tab and tick \"Share tab audio\"";
-    return;
-  }
-  stream.getVideoTracks().forEach((t) => t.stop());   // only the sound is wanted
-  const ctx = new AudioContext();
-  // collect the audio in 2048-frame blocks on the audio thread and hand them over
-  const code = `class Grab extends AudioWorkletProcessor {
-    constructor() { super(); this.l = new Float32Array(2048); this.r = new Float32Array(2048); this.n = 0; }
-    process(inputs) {
-      const ch = inputs[0];
-      if (!ch || !ch.length) return true;
-      const L = ch[0], R = ch[1] || ch[0];
-      for (let i = 0; i < L.length; i++) {
-        this.l[this.n] = L[i]; this.r[this.n] = R[i];
-        if (++this.n === 2048) { this.port.postMessage([this.l, this.r]); this.l = new Float32Array(2048); this.r = new Float32Array(2048); this.n = 0; }
-      }
-      return true;
-    }
-  }
-  registerProcessor("grab", Grab);`;
-  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], {type: "text/javascript"})));
-  const node = new AudioWorkletNode(ctx, "grab", {numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2]});
-  const mute = ctx.createGain();
-  mute.gain.value = 0;   // the tab still plays on this computer as usual; this path only feeds the MPC
-  ctx.createMediaStreamSource(new MediaStream(tracks)).connect(node);
-  node.connect(mute).connect(ctx.destination);
-  node.port.onmessage = (e) => {
-    if (!ws || ws.readyState !== 1 || ws.bufferedAmount > 512 * 1024) return;
-    const [L, R] = e.data, v = aVol.value / 100, out = new Int16Array(2 * L.length);
-    for (let i = 0; i < L.length; i++) {
-      out[2 * i] = Math.max(-1, Math.min(1, L[i] * v)) * 32767;
-      out[2 * i + 1] = Math.max(-1, Math.min(1, R[i] * v)) * 32767;
-    }
-    ws.send(out.buffer);
-  };
-  tracks[0].addEventListener("ended", liveStop);   // Chrome's own "Stop sharing" button
-  send("audio pair " + aPair.value);
-  send("audio start " + ctx.sampleRate);
-  live = {stream, ctx, node};
-  aLive.innerHTML = "&#9632; Stop live audio";
-  aStat.textContent = "live: sending to inputs " + aPair.options[aPair.selectedIndex].textContent.slice(7);
-};
 
 // ---- Web In: an audio file from this device, streamed in real time into one of MPC's inputs. Set an audio track's
 // input to that pair, arm it and record. 16-bit stereo over the WebSocket, paced by this page's clock; the MPC keeps
@@ -538,6 +488,193 @@ aPos.addEventListener("change", () => {
   aSeeking = false;
   if (aSending) aStartSend(aPos.value / 1000 * aBuf.length);   // jump: a fresh stream from there
 });
+
+// ---- Web In, live: what a Chrome tab (or, on Windows, the whole computer) plays, captured and streamed as it plays.
+// Browsers only allow this on secure pages; the remote is plain http, so Chrome has to be told to trust it once:
+// chrome://flags/#unsafely-treat-insecure-origin-as-secure with this page's address.
+let live = null;   // {stream, ctx, node}
+const aLive = A("alive");
+const canLive = () => !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia);
+function liveStop() {
+  if (!live) return;
+  live.stream.getTracks().forEach((t) => t.stop());
+  live.ctx.close();
+  live = null;
+  send("audio stop");
+  aLive.innerHTML = "&#9673; Share live audio";
+  if (aStat.textContent.startsWith("live")) aStat.textContent = "";
+}
+aLive.onclick = async () => {
+  if (live) return liveStop();
+  if (!canLive()) {
+    aStat.innerHTML = "Live audio needs Chrome to trust this page: open <b>chrome://flags/#unsafely-treat-insecure-origin-as-secure</b>, " +
+      "add <b>" + location.origin + "</b>, set it to Enabled and relaunch Chrome.";
+    return;
+  }
+  aStopSend();
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: true, systemAudio: "include", selfBrowserSurface: "exclude",
+      audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false}});
+  } catch (e) { aStat.textContent = "live audio: not shared"; return; }
+  const tracks = stream.getAudioTracks();
+  if (!tracks.length) {
+    stream.getTracks().forEach((t) => t.stop());
+    aStat.textContent = "no audio in what was shared: pick a tab and tick \"Share tab audio\"";
+    return;
+  }
+  stream.getVideoTracks().forEach((t) => t.stop());   // only the sound is wanted
+  const ctx = new AudioContext();
+  // collect the audio in 2048-frame blocks on the audio thread and hand them over
+  const code = `class Grab extends AudioWorkletProcessor {
+    constructor() { super(); this.l = new Float32Array(2048); this.r = new Float32Array(2048); this.n = 0; }
+    process(inputs) {
+      const ch = inputs[0];
+      if (!ch || !ch.length) return true;
+      const L = ch[0], R = ch[1] || ch[0];
+      for (let i = 0; i < L.length; i++) {
+        this.l[this.n] = L[i]; this.r[this.n] = R[i];
+        if (++this.n === 2048) { this.port.postMessage([this.l, this.r]); this.l = new Float32Array(2048); this.r = new Float32Array(2048); this.n = 0; }
+      }
+      return true;
+    }
+  }
+  registerProcessor("grab", Grab);`;
+  await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([code], {type: "text/javascript"})));
+  const node = new AudioWorkletNode(ctx, "grab", {numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2]});
+  const mute = ctx.createGain();
+  mute.gain.value = 0;   // the tab still plays on this computer as usual; this path only feeds the MPC
+  ctx.createMediaStreamSource(new MediaStream(tracks)).connect(node);
+  node.connect(mute).connect(ctx.destination);
+  node.port.onmessage = (e) => {
+    if (!ws || ws.readyState !== 1 || ws.bufferedAmount > 512 * 1024) return;
+    const [L, R] = e.data, v = aVol.value / 100, out = new Int16Array(2 * L.length);
+    for (let i = 0; i < L.length; i++) {
+      out[2 * i] = Math.max(-1, Math.min(1, L[i] * v)) * 32767;
+      out[2 * i + 1] = Math.max(-1, Math.min(1, R[i] * v)) * 32767;
+    }
+    ws.send(out.buffer);
+  };
+  tracks[0].addEventListener("ended", liveStop);   // Chrome's own "Stop sharing" button
+  send("audio pair " + aPair.value);
+  send("audio start " + ctx.sampleRate);
+  live = {stream, ctx, node};
+  aLive.innerHTML = "&#9632; Stop live audio";
+  aStat.textContent = "live: sending to inputs " + aPair.options[aPair.selectedIndex].textContent.slice(7);
+};
+
+// ---- the MPC browser: Chromium running on the MPC itself (installed from MPC-Browser.tar.gz on a card), shown here
+// through its DevTools (tunnelled by the remote at /cdp/): a picture of the page as it changes, our clicks, scrolls
+// and typing sent back. Its sound goes into Web In, to the input pair chosen under Audio.
+const B = (id) => document.getElementById(id);
+const bView = B("bview"), bctx = bView.getContext("2d"), bUrl = B("burl"), bStat = B("bstat");
+let browserMode = false, cdp = null, cdpSeq = 0, bMeta = {deviceWidth: 960, deviceHeight: 540}, bState = "";
+const cdpCalls = {};
+function cdpCall(method, params = {}) {
+  if (!cdp || cdp.readyState !== 1) return Promise.resolve(null);
+  const id = ++cdpSeq;
+  cdp.send(JSON.stringify({id, method, params}));
+  return new Promise((ok) => { cdpCalls[id] = ok; });
+}
+B("browserbtn").onclick = () => {
+  browserMode = !browserMode;
+  B("mpcmain").hidden = B("pad").hidden = browserMode;
+  B("bbar").hidden = B("bmain").hidden = !browserMode;
+  B("browserbtn").textContent = browserMode ? "MPC screen" : "Browser";
+  if (browserMode) { send("browser status"); cdpOpen(); }
+};
+B("bstart").onclick = () => { send("audio pair " + aPair.value); send("browser start"); bStat.textContent = "starting… (can take 20 s)"; setTimeout(cdpOpen, 4000); };
+B("bstop").onclick = () => { send("browser stop"); if (cdp) cdp.close(); };
+B("binstall").onclick = () => send("browser install");
+function onBrowser(m) {   // status from the remote, every few seconds while it runs
+  bState = m.state;
+  B("binstall").hidden = !(m.card && (m.state === "not installed" || m.state === "stopped"));
+  bStat.textContent = m.state + (m.state === "running" ? " · MPC processor " + m.cpu + "% · free memory " + m.free + " MB" : "") +
+                      (m.note ? " · " + m.note : "");
+  if (m.state === "running" && browserMode && !cdp) cdpOpen();
+}
+async function cdpOpen() {
+  if (!browserMode || cdp) return;
+  let tabs;
+  try { tabs = await (await fetch("/cdp/json")).json(); } catch (e) { if (bState === "running") setTimeout(cdpOpen, 2000); return; }
+  const tab = tabs.find((t) => t.type === "page");
+  if (!tab) { setTimeout(cdpOpen, 2000); return; }
+  cdp = new WebSocket("ws://" + location.host + "/cdp/devtools/page/" + tab.id);
+  cdp.onopen = async () => {
+    bUrl.value = tab.url === "about:blank" ? "" : tab.url;
+    await cdpCall("Page.enable");
+    await cdpCall("Page.startScreencast", {format: "jpeg", quality: 60, maxWidth: 960, maxHeight: 540});
+  };
+  cdp.onclose = () => { cdp = null; if (browserMode && bState === "running") setTimeout(cdpOpen, 2000); };
+  cdp.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.id && cdpCalls[m.id]) { cdpCalls[m.id](m.result); delete cdpCalls[m.id]; return; }
+    if (m.method === "Page.screencastFrame") {
+      cdpCall("Page.screencastFrameAck", {sessionId: m.params.sessionId});
+      bMeta = m.params.metadata;
+      const img = new Image();
+      img.onload = () => {
+        if (bView.width !== img.width || bView.height !== img.height) { bView.width = img.width; bView.height = img.height; }
+        bctx.drawImage(img, 0, 0);
+      };
+      img.src = "data:image/jpeg;base64," + m.params.data;
+    } else if (m.method === "Page.frameNavigated" && !m.params.frame.parentId) {
+      if (document.activeElement !== bUrl) bUrl.value = m.params.frame.url;
+    }
+  };
+}
+// the page's own coordinates (CSS pixels) for a pointer position on our picture of it
+function bPoint(e) {
+  const r = bView.getBoundingClientRect();
+  return {x: (e.clientX - r.left) / r.width * bMeta.deviceWidth, y: (e.clientY - r.top) / r.height * bMeta.deviceHeight};
+}
+let bDown = false;
+bView.addEventListener("pointerdown", (e) => {
+  bView.setPointerCapture(e.pointerId); bDown = true; e.preventDefault();
+  const p = bPoint(e);
+  cdpCall("Input.dispatchMouseEvent", {type: "mouseMoved", x: p.x, y: p.y});
+  cdpCall("Input.dispatchMouseEvent", {type: "mousePressed", x: p.x, y: p.y, button: "left", buttons: 1, clickCount: 1});
+});
+bView.addEventListener("pointermove", (e) => {
+  const p = bPoint(e);
+  cdpCall("Input.dispatchMouseEvent", {type: "mouseMoved", x: p.x, y: p.y, button: bDown ? "left" : "none", buttons: bDown ? 1 : 0});
+});
+const bUp = (e) => {
+  if (!bDown) return;
+  bDown = false;
+  const p = bPoint(e);
+  cdpCall("Input.dispatchMouseEvent", {type: "mouseReleased", x: p.x, y: p.y, button: "left", buttons: 0, clickCount: 1});
+};
+bView.addEventListener("pointerup", bUp);
+bView.addEventListener("pointercancel", bUp);
+bView.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const p = bPoint(e);
+  cdpCall("Input.dispatchMouseEvent", {type: "mouseWheel", x: p.x, y: p.y, deltaX: e.deltaX, deltaY: e.deltaY});
+}, {passive: false});
+// keys that don't type, as the browser knows them
+const BKEYS = {Enter: 13, Backspace: 8, Tab: 9, Escape: 27, Delete: 46, Home: 36, End: 35, PageUp: 33, PageDown: 34,
+               ArrowLeft: 37, ArrowUp: 38, ArrowRight: 39, ArrowDown: 40, " ": 32};
+function bKey(key) {
+  if (key.length === 1 && key !== " ") { cdpCall("Input.insertText", {text: key}); return; }
+  const code = BKEYS[key];
+  if (!code) return;
+  const k = {key, code: key === " " ? "Space" : key, windowsVirtualKeyCode: code, nativeVirtualKeyCode: code};
+  cdpCall("Input.dispatchKeyEvent", Object.assign({type: "keyDown", text: key === "Enter" ? "\r" : key === " " ? " " : undefined}, k));
+  cdpCall("Input.dispatchKeyEvent", Object.assign({type: "keyUp"}, k));
+}
+function bGo() {
+  let u = bUrl.value.trim();
+  if (!u) return;
+  if (!/^([a-z]+:\/\/|about:|data:)/i.test(u)) u = /\s/.test(u) || !/\./.test(u) ? "https://www.google.com/search?q=" + encodeURIComponent(u) : "https://" + u;
+  cdpCall("Page.navigate", {url: u});
+  bUrl.blur();
+}
+bUrl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); bGo(); } });
+B("bback").onclick = () => cdpCall("Runtime.evaluate", {expression: "history.back()"});
+B("bfwd").onclick = () => cdpCall("Runtime.evaluate", {expression: "history.forward()"});
+B("breload").onclick = () => cdpCall("Page.reload");
 
 document.getElementById("calbtn").onclick = () => send("cal");
 document.getElementById("calcancel").onclick = () => { send("calcancel"); calEl.classList.remove("on"); };

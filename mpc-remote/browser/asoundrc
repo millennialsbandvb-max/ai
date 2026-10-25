@@ -1,0 +1,11 @@
+# The MPC browser's sound: to Web In (mpc-remote's webin-feed), not to the MPC's audio device, which MPC owns.
+pcm.!default {
+    type plug
+    slave { pcm "webin"; format S16_LE; channels 2; rate 48000 }
+}
+pcm.webin {
+    type file
+    slave.pcm "null"
+    file "|exec /usr/lib/nam-mpc/bin/webin-feed 48000"
+    format "raw"
+}

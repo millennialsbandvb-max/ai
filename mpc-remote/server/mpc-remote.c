@@ -40,6 +40,9 @@
 #include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
+#include <sys/wait.h>
+#include <glob.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -476,6 +479,7 @@ typedef struct {
     size_t outlen, outcap, outpos;
     uint8_t *dirty;   /* tiles this client hasn't been sent since they changed */
     int ndirty;
+    int up;           /* ws == 3: a tunnel to the browser's DevTools; this is its socket */
 } Client;
 static Client clients[MAX_CLIENTS];
 
@@ -813,6 +817,7 @@ static void webin_write(const uint8_t *b, size_t n) {
 
 static void client_close(Client *c) {
     if (c->fd >= 0) close(c->fd);
+    if (c->ws == 3 && c->up >= 0) close(c->up);
     free(c->out);
     free(c->dirty);
     memset(c, 0, sizeof *c);
@@ -886,6 +891,171 @@ static void http_reply(Client *c, const char *status, const char *type, const ch
 
 static int screen_ready = 0, have_prev = 0;
 
+/* ---- the browser: Chromium on the MPC (installed in /data from MPC-Browser.tar.gz on a card), seen and used through
+ * the page. It runs headless; the page talks to it with the Chrome DevTools protocol, tunnelled through /cdp/ here
+ * (DevTools only listens on the MPC itself and only accepts "Host: 127.0.0.1"). Its sound goes to Web In. */
+#define BROWSER_DIR "/data/mpc-browser"
+static pid_t browser_pid = -1, install_pid = -1;
+static uint64_t browser_stop_at;
+static char browser_note[320];   /* the last thing worth telling the page */
+
+static int cdp_connect(void) {
+    const int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    struct sockaddr_in a = {.sin_family = AF_INET, .sin_port = htons(9222), .sin_addr.s_addr = htonl(INADDR_LOOPBACK)};
+    if (fd < 0) return -1;
+    if (connect(fd, (struct sockaddr *)&a, sizeof a)) { close(fd); return -1; }
+    return fd;
+}
+
+static int browser_card_file(char *out, size_t n) {   /* MPC-Browser.tar.gz on a card or drive */
+    glob_t g;
+    int found = 0;
+    if (!glob("/media/*/MPC-Browser.tar.gz", 0, NULL, &g) && g.gl_pathc) { snprintf(out, n, "%s", g.gl_pathv[0]); found = 1; }
+    globfree(&g);
+    if (!found && !access("/sdcard/MPC-Browser.tar.gz", R_OK)) { snprintf(out, n, "/sdcard/MPC-Browser.tar.gz"); found = 1; }
+    return found;
+}
+
+static void browser_status(void) {   /* to every viewer: state, memory, processor */
+    static unsigned long long pt, pi;
+    unsigned long long u, ni, sy, id, io, irq, sirq, t = 0, idle = 0;
+    FILE *f = fopen("/proc/stat", "r");
+    if (f) {
+        if (fscanf(f, "cpu %llu %llu %llu %llu %llu %llu %llu", &u, &ni, &sy, &id, &io, &irq, &sirq) == 7) {
+            t = u + ni + sy + id + io + irq + sirq; idle = id + io;
+        }
+        fclose(f);
+    }
+    const int cpu = t > pt ? (int)(100 - 100 * (idle - pi) / (t - pt)) : 0;
+    pt = t; pi = idle;
+    long avail_mb = 0;
+    char line[128];
+    if ((f = fopen("/proc/meminfo", "r"))) {
+        while (fgets(line, sizeof line, f)) if (sscanf(line, "MemAvailable: %ld", &avail_mb) == 1) { avail_mb /= 1024; break; }
+        fclose(f);
+    }
+    char card[256];
+    const char *state = install_pid > 0 ? "installing" : browser_pid > 0 ? "running" :
+                        access(BROWSER_DIR "/run.sh", R_OK) ? "not installed" : "stopped";
+    char m[1024];
+    snprintf(m, sizeof m, "{\"type\":\"browser\",\"state\":\"%s\",\"cpu\":%d,\"free\":%ld,\"card\":%s,\"note\":\"%s\"}",
+             state, cpu, avail_mb, browser_card_file(card, sizeof card) ? "true" : "false", browser_note);
+    broadcast_text(m);
+}
+
+static void browser_start(void) {
+    if (browser_pid > 0 || install_pid > 0) return;
+    if (access(BROWSER_DIR "/run.sh", R_OK)) { snprintf(browser_note, sizeof browser_note, "not installed yet"); return; }
+    const pid_t p = fork();
+    if (p == 0) {
+        setsid();
+        const int fd = open("/tmp/mpc-browser.log", O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (fd >= 0) { dup2(fd, 1); dup2(fd, 2); }
+        setpriority(PRIO_PROCESS, 0, 10);   /* MPC's audio always comes first */
+        execl("/bin/sh", "sh", BROWSER_DIR "/run.sh", (char *)NULL);
+        _exit(127);
+    }
+    if (p > 0) { browser_pid = p; browser_note[0] = 0; LOG("browser: started (pid %d)", (int)p); }
+}
+
+static void browser_stop(void) {
+    if (browser_pid <= 0) return;
+    kill(-browser_pid, SIGTERM);
+    browser_stop_at = now_ms() + 4000;   /* then SIGKILL if it's still there */
+    LOG("browser: stopping");
+}
+
+static void browser_install(void) {
+    char file[256], cmd[1024];
+    if (browser_pid > 0 || install_pid > 0) return;
+    if (!browser_card_file(file, sizeof file)) { snprintf(browser_note, sizeof browser_note, "no MPC-Browser.tar.gz on a card"); return; }
+    struct statvfs v;
+    if (!statvfs("/data", &v) && (unsigned long long)v.f_bavail * v.f_frsize < 600ull << 20) {
+        snprintf(browser_note, sizeof browser_note, "not enough room on the MPC's internal storage (needs 600 MB)");
+        return;
+    }
+    snprintf(cmd, sizeof cmd, "rm -rf %s.new && mkdir -p %s.new && tar -xzf '%s' -C %s.new && rm -rf %s && mv %s.new %s && sync",
+             BROWSER_DIR, BROWSER_DIR, file, BROWSER_DIR, BROWSER_DIR, BROWSER_DIR, BROWSER_DIR);
+    const pid_t p = fork();
+    if (p == 0) {
+        setpriority(PRIO_PROCESS, 0, 15);
+        execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+        _exit(127);
+    }
+    if (p > 0) { install_pid = p; snprintf(browser_note, sizeof browser_note, "installing from %s", file); LOG("browser: installing from %s", file); }
+}
+
+static void browser_reap(void) {   /* children that finished */
+    int st;
+    pid_t p;
+    while ((p = waitpid(-1, &st, WNOHANG)) > 0) {
+        if (p == browser_pid) {
+            browser_pid = -1;
+            snprintf(browser_note, sizeof browser_note, "browser stopped (%s %d; details: /log)",
+                     WIFEXITED(st) ? "exit" : "signal", WIFEXITED(st) ? WEXITSTATUS(st) : WTERMSIG(st));
+            LOG("browser: %s", browser_note);
+            browser_status();
+        } else if (p == install_pid) {
+            install_pid = -1;
+            const int ok = WIFEXITED(st) && !WEXITSTATUS(st);
+            snprintf(browser_note, sizeof browser_note, ok ? "installed" : "install failed (is the card's file complete?)");
+            LOG("browser: %s", browser_note);
+            browser_status();
+        }
+    }
+    if (browser_pid > 0 && browser_stop_at && now_ms() > browser_stop_at) { kill(-browser_pid, SIGKILL); browser_stop_at = 0; }
+}
+
+static void cdp_json(Client *c) {   /* the browser's tabs (DevTools' /json/list) */
+    const int fd = cdp_connect();
+    if (fd < 0) { http_reply(c, "503 Service Unavailable", "text/plain", "browser not running\n", 20); return; }
+    struct timeval tv = {3, 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    /* (DevTools doesn't answer HTTP/1.0, and may keep the connection open: read by Content-Length) */
+    const char *rq = "GET /json/list HTTP/1.1\r\nHost: 127.0.0.1:9222\r\nConnection: close\r\n\r\n";
+    if (write(fd, rq, strlen(rq)) < 0) { close(fd); return; }
+    static char buf[65536];
+    size_t n = 0;
+    ssize_t r;
+    const char *body = NULL;
+    long len = -1;
+    while (n < sizeof buf - 1 && (r = read(fd, buf + n, sizeof buf - 1 - n)) > 0) {
+        n += (size_t)r;
+        buf[n] = 0;
+        if (!body && (body = strstr(buf, "\r\n\r\n"))) {
+            body += 4;
+            const char *cl = strcasestr(buf, "Content-Length:");
+            if (cl && cl < body) len = atol(cl + 15);
+        }
+        if (body && len >= 0 && (long)(n - (size_t)(body - buf)) >= len) break;
+    }
+    close(fd);
+    if (!body) { http_reply(c, "502 Bad Gateway", "text/plain", "no answer\n", 10); return; }
+    http_reply(c, "200 OK", "application/json", body, n - (size_t)(body - buf));
+}
+
+static void cdp_tunnel(Client *c) {   /* GET /cdp/devtools/... (WebSocket upgrade) -> the browser's DevTools */
+    const int fd = cdp_connect();
+    if (fd < 0) { http_reply(c, "503 Service Unavailable", "text/plain", "browser not running\n", 20); return; }
+    const char *path = c->in + 8;   /* after "GET /cdp" */
+    const size_t pl = strcspn(path, " ");
+    char rq[4096];
+    size_t n = (size_t)snprintf(rq, sizeof rq, "GET %.*s HTTP/1.1\r\nHost: 127.0.0.1:9222\r\n", (int)pl, path);
+    for (const char *l = strstr(c->in, "\r\n") + 2; l && *l && strncmp(l, "\r\n", 2); ) {
+        const char *e = strstr(l, "\r\n");
+        if (!e) break;
+        if (strncasecmp(l, "Host:", 5) && strncasecmp(l, "Origin:", 7) && n + (size_t)(e - l) + 4 < sizeof rq) {
+            memcpy(rq + n, l, (size_t)(e - l) + 2);
+            n += (size_t)(e - l) + 2;
+        }
+        l = e + 2;
+    }
+    n += (size_t)snprintf(rq + n, sizeof rq - n, "\r\n");
+    if (write(fd, rq, n) != (ssize_t)n) { close(fd); client_close(c); return; }
+    c->up = fd;
+    c->ws = 3;
+}
+
 static void send_hello(Client *c) {   /* screen size, and the whole screen to come */
     free(c->dirty);
     c->dirty = malloc((size_t)TW * TH);
@@ -900,7 +1070,9 @@ static void send_hello(Client *c) {   /* screen size, and the whole screen to co
 }
 
 static void handle_http(Client *c) {   /* a complete request is in c->in */
-    if (!strncmp(c->in, "GET /ws ", 8) && header(c->in, "Sec-WebSocket-Key")) {
+    if (!strncmp(c->in, "GET /cdp/json ", 14)) cdp_json(c);
+    else if (!strncmp(c->in, "GET /cdp/", 9) && header(c->in, "Sec-WebSocket-Key")) { cdp_tunnel(c); if (c->ws == 3) { c->inlen = 0; return; } }
+    else if (!strncmp(c->in, "GET /ws ", 8) && header(c->in, "Sec-WebSocket-Key")) {
         const char *k = header(c->in, "Sec-WebSocket-Key");
         char key[128];
         size_t kl = strcspn(k, "\r\n");
@@ -976,6 +1148,10 @@ static void handle_command(Client *c, char *s) {   /* a text message from the pa
         webin_map();
         if (wring && x >= 0 && x < 16) wring->pair = (uint32_t)x;
     } else if (!strcmp(s, "audio stop")) LOG("web in: stream stopped");
+    else if (!strcmp(s, "browser start")) { browser_start(); browser_status(); }
+    else if (!strcmp(s, "browser stop")) { browser_stop(); browser_status(); }
+    else if (!strcmp(s, "browser install")) { browser_install(); browser_status(); }
+    else if (!strcmp(s, "browser status")) browser_status();
     else if (sscanf(s, "kd %d", &x) == 1) kbd_key(x, 1);
     else if (sscanf(s, "ku %d", &x) == 1) kbd_key(x, 0);
     else if (!strncmp(s, "bd ", 3)) btn_press(s + 3, 1);
@@ -1256,7 +1432,7 @@ int main(int argc, char **argv) {
     zlib_load();
     mdns_open();
     for (;;) {
-        struct pollfd pf[MAX_CLIENTS + 4];
+        struct pollfd pf[2 * MAX_CLIENTS + 4];
         int np = 0, viewers = 0;
         pf[np++] = (struct pollfd){.fd = ls, .events = POLLIN};
         for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -1271,6 +1447,9 @@ int main(int argc, char **argv) {
         if (mdns_fd >= 0) pf[np++] = (struct pollfd){.fd = mdns_fd, .events = POLLIN};
         const int seqidx = np;
         if (seq_fd >= 0) pf[np++] = (struct pollfd){.fd = seq_fd, .events = POLLIN};
+        const int upidx = np;   /* browser DevTools tunnels: their browser side */
+        for (int i = 0; i < MAX_CLIENTS; i++)
+            if (clients[i].fd >= 0 && clients[i].ws == 3) pf[np++] = (struct pollfd){.fd = clients[i].up, .events = POLLIN};
         const uint64_t t = now_ms();
         int wait = learn.idx >= 0 ? 200 : !viewers ? 1000 : !screen_ready ? 500 : (int)(next_frame > t ? next_frame - t : 0);
         poll(pf, (nfds_t)np, wait);
@@ -1294,7 +1473,10 @@ int main(int argc, char **argv) {
                 if (r <= 0) { if (c->ws) { LOG("viewer left"); kbd_release_all(); } client_close(c); continue; }
                 c->inlen += (size_t)r;
                 c->in[c->inlen] = 0;
-                if (c->ws) handle_ws(c);
+                if (c->ws == 3) {   /* tunnel: straight on to the browser */
+                    if (write(c->up, c->in, c->inlen) != (ssize_t)c->inlen) { client_close(c); continue; }
+                    c->inlen = 0;
+                } else if (c->ws) handle_ws(c);
                 else if (strstr(c->in, "\r\n\r\n")) handle_http(c);
                 else if (c->inlen >= sizeof c->in - 1) { client_close(c); continue; }
                 if (c->fd < 0) continue;
@@ -1312,6 +1494,19 @@ int main(int argc, char **argv) {
 
         if (mdns_fd >= 0 && np > mdnsidx && (pf[mdnsidx].revents & POLLIN)) mdns_handle();
         if (seq_fd >= 0 && np > seqidx && (pf[seqidx].revents & POLLIN)) seq_read();
+        for (int k = upidx; k < np; k++) {   /* from the browser, back through its tunnel */
+            if (!(pf[k].revents & (POLLIN | POLLERR | POLLHUP))) continue;
+            Client *c = NULL;
+            for (int i = 0; i < MAX_CLIENTS; i++) if (clients[i].fd >= 0 && clients[i].ws == 3 && clients[i].up == pf[k].fd) c = &clients[i];
+            if (!c) continue;
+            static uint8_t ub[65536];
+            const ssize_t r = read(c->up, ub, sizeof ub);
+            if (r <= 0) { client_close(c); continue; }
+            out_add(c, ub, (size_t)r);
+        }
+        browser_reap();
+        static uint64_t next_bstat;
+        if ((browser_pid > 0 || install_pid > 0) && now_ms() >= next_bstat) { next_bstat = now_ms() + 3000; browser_status(); }
         learn_tick();
         static uint64_t next_launch_check;
         if (now_ms() >= next_launch_check) { next_launch_check = now_ms() + 10000; launch_ok(); }

@@ -14,11 +14,15 @@ with open(sys.argv[2], "w") as f:
         f.write("  " + ",".join(str(b) for b in data[i:i + 24]) + ",\n")
     f.write("  0};\n")
 PY
+if command -v node >/dev/null; then node "$HERE/test_page.js"; else echo "page check skipped (no Node)"; fi
 gcc -O2 -Wall -Wextra -DMPC_REMOTE_FAKE -I"$B" -o "$B/mpc-remote-test" "$HERE/mpc-remote.c"
 rm -rf "$B/bundle" && mkdir -p "$B/bundle/bin" "$B/bundle/services"
 arm-linux-gnueabihf-gcc -O2 -Wall -Wextra -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -mtune=cortex-a17 \
   -I"$B" -o "$B/bundle/bin/mpc-remote" "$HERE/mpc-remote.c"
 arm-linux-gnueabihf-strip "$B/bundle/bin/mpc-remote"
+arm-linux-gnueabihf-gcc -O2 -Wall -Wextra -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard \
+  -o "$B/bundle/bin/webin-feed" "$HERE/webin-feed.c"
+arm-linux-gnueabihf-strip "$B/bundle/bin/webin-feed"
 cp "$HERE/mpc-remote.service" "$HERE/mpc-cleanup.service" "$B/bundle/services/"
 cp "$HERE/mpc-cleanup.sh" "$B/bundle/bin/"
 # MPC's buttons: mpc-buttons.so (loaded into MPC), mpc-launch (starts MPC with it) and acvs.service's drop-in
