@@ -46,6 +46,7 @@ else
     rm -rf "$R" "$N/list"
 fi
 [ -x "$N/chromium/chromium" ] || fail "chromium missing after unpacking"
+cp "$B/browser-packages.txt" "$N/packages.txt"   # what this install is, so a newer firmware can tell it's out of date
 rm -rf "$D" && mv "$N" "$D" || fail "couldn't move it into place"
 rm -rf "$C"
 sync

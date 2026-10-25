@@ -2,5 +2,6 @@ nam-mpc/build/
 dragonfly-mpc/build/
 sfizz-mpc/build/
 airwindows-mpc/build/
+browser-mpc/build/
 mpc-remote/probe/build/
 mpc-remote/server/build/

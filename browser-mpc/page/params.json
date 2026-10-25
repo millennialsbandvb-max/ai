@@ -1,0 +1,9 @@
+{
+  "name": "MPC Browser",
+  "params": [
+    {"key": "back", "name": "Back", "options": ["Off", "On"], "momentary": true},
+    {"key": "forward", "name": "Forward", "options": ["Off", "On"], "momentary": true},
+    {"key": "reload", "name": "Reload", "options": ["Off", "On"], "momentary": true},
+    {"key": "home", "name": "Home", "options": ["Off", "On"], "momentary": true}
+  ]
+}

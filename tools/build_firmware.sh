@@ -40,12 +40,15 @@ echo "== SFZ (sax player)"
 (cd "$REPO/sfizz-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
 echo "== Airwindows"
 (cd "$REPO/airwindows-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
+echo "== MPC Browser (the browser's page on the MPC's screen)"
+(cd "$REPO/browser-mpc" && ./build.sh bundle >/dev/null 2>&1)
 echo "== browser remote"
 (cd "$REPO/mpc-remote/server" && ./build.sh >/dev/null)
 
 echo "== one bundle of everything"
 rm -rf "$W/extra" && mkdir -p "$W/extra"
-for b in dragonfly-mpc/build/bundle sfizz-mpc/build/bundle airwindows-mpc/build/bundle mpc-remote/server/build/bundle; do
+for b in dragonfly-mpc/build/bundle sfizz-mpc/build/bundle airwindows-mpc/build/bundle browser-mpc/build/bundle \
+         mpc-remote/server/build/bundle; do
   cp -a "$REPO/$b/." "$W/extra/"
 done
 echo "plugins: $(ls "$W/extra/plugins" | tr '\n' ' ')"

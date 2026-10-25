@@ -31,6 +31,7 @@
 #include <sched.h>
 #include <signal.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,7 +55,8 @@
 #include <sound/asequencer.h>
 
 #include "index_html.h"
-#include "../webin.h"   /* generated from index.html: static const char INDEX_HTML[] */
+#include "../webin.h"
+#include "../overlay.h"   /* generated from index.html: static const char INDEX_HTML[] */
 
 #define TILE 32
 #if defined(__arm__)
@@ -953,9 +955,24 @@ static void browser_status(void) {   /* to every viewer: state, memory, processo
 
 static void browser_install(void);
 
+/* is the installed browser the one this firmware lists (its packages.txt)? A card bundle has no list: keep it */
+static int browser_current(void) {
+    FILE *a = fopen(BROWSER_DIR "/packages.txt", "r"), *b = fopen("/usr/lib/nam-mpc/bin/browser-packages.txt", "r");
+    int same = 1;
+    if (a && b) {
+        int ca, cb;
+        do { ca = fgetc(a); cb = fgetc(b); } while (ca == cb && ca != EOF);
+        same = ca == cb;
+    }
+    if (!a && access(BROWSER_DIR "/lib/libturbojpeg.so.0", R_OK)) same = 0;   /* an early install, before the MPC-screen view */
+    if (a) fclose(a);
+    if (b) fclose(b);
+    return same;
+}
+
 static void browser_start(void) {
     if (browser_pid > 0 || install_pid > 0) return;
-    if (access(BROWSER_DIR "/run.sh", R_OK)) { start_after_install = 1; browser_install(); return; }
+    if (access(BROWSER_DIR "/run.sh", R_OK) || !browser_current()) { start_after_install = 1; browser_install(); return; }
     const pid_t p = fork();
     if (p == 0) {
         setsid();
@@ -1047,6 +1064,252 @@ static void cdp_json(Client *c) {   /* the browser's tabs (DevTools' /json/list)
     close(fd);
     if (!body) { http_reply(c, "502 Bad Gateway", "text/plain", "no answer\n", 10); return; }
     http_reply(c, "200 OK", "application/json", body, n - (size_t)(body - buf));
+}
+
+/* ---- the browser on the MPC's own screen (the MPC Browser plugin's page; see ../overlay.h) ---------------------
+ * While that page is on screen: the browser is started if it isn't running, sized to the page's area, and its
+ * picture (a DevTools screencast, JPEG) decoded, turned for the panel and handed to mpc-buttons.so in MPC, which
+ * shows it. Touches on the area and the page's buttons come back the same way and go to the browser. */
+static struct overlay_shm *ovs;
+static int mv_fd = -1;                    /* our own DevTools connection, for the MPC's screen */
+static uint8_t *mv_in;                    /* what it has sent, not yet handled */
+static size_t mv_len, mv_cap;
+static int mv_w, mv_h, mv_casting, mv_id;
+static uint32_t mv_touch_rd, mv_cmd_seen;
+static uint64_t mv_hidden_since, mv_next_try;
+static void *tj, *tjh;                    /* libjpeg-turbo, from the installed browser */
+static int (*tj_header)(void *, const unsigned char *, unsigned long, int *, int *, int *, int *);
+static int (*tj_decode)(void *, const unsigned char *, unsigned long, unsigned char *, int, int, int, int, int);
+static uint32_t *mv_rgb;
+
+static void ovs_map(void) {
+    if (ovs) return;
+    const int fd = open(OVERLAY_PATH, O_RDWR | O_CREAT | O_CLOEXEC, 0644);
+    if (fd < 0) return;
+    if (!ftruncate(fd, sizeof(struct overlay_shm))) {
+        void *m = mmap(NULL, sizeof(struct overlay_shm), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+        if (m != MAP_FAILED) ovs = m;
+    }
+    close(fd);
+    if (ovs && ovs->magic != OVERLAY_MAGIC) { memset(ovs, 0, offsetof(struct overlay_shm, frame)); ovs->magic = OVERLAY_MAGIC; }
+}
+
+static void mv_send(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static void mv_send(const char *fmt, ...) {   /* one DevTools command (a masked WebSocket text frame) */
+    if (mv_fd < 0) return;
+    char body[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    char inner[900];
+    vsnprintf(inner, sizeof inner, fmt, ap);
+    va_end(ap);
+    const int n = snprintf(body, sizeof body, "{\"id\":%d,%s}", ++mv_id, inner);
+    uint8_t f[1100];
+    size_t hl = 2;
+    f[0] = 0x81;
+    if (n < 126) f[1] = (uint8_t)(0x80 | n);
+    else { f[1] = 0x80 | 126; f[2] = (uint8_t)(n >> 8); f[3] = (uint8_t)n; hl = 4; }
+    const uint8_t mask[4] = {0x5a, 0xa5, 0x3c, 0xc3};
+    memcpy(f + hl, mask, 4);
+    for (int i = 0; i < n; i++) f[hl + 4 + i] = (uint8_t)body[i] ^ mask[i & 3];
+    const size_t total = hl + 4 + (size_t)n;
+    if (write(mv_fd, f, total) != (ssize_t)total) { close(mv_fd); mv_fd = -1; }
+}
+
+static void mv_close(void) {
+    if (mv_fd >= 0) close(mv_fd);
+    mv_fd = -1;
+    mv_len = 0;
+    mv_casting = 0;
+}
+
+static int mv_open(void) {   /* DevTools: the first tab, as a WebSocket */
+    char page_id[128] = "";
+    int fd = cdp_connect();
+    if (fd < 0) return -1;
+    struct timeval tv = {2, 0};
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    const char *rq = "GET /json/list HTTP/1.1\r\nHost: 127.0.0.1:9222\r\nConnection: close\r\n\r\n";
+    static char buf[65536];
+    size_t n = 0;
+    ssize_t r;
+    if (write(fd, rq, strlen(rq)) < 0) { close(fd); return -1; }
+    while (n < sizeof buf - 1 && (r = read(fd, buf + n, sizeof buf - 1 - n)) > 0) { n += (size_t)r; buf[n] = 0; if (strstr(buf, "\"type\": \"page\"")) break; }
+    close(fd);
+    buf[n] = 0;
+    for (char *p = buf; (p = strstr(p, "\"id\": \"")); p++) {   /* the first page's id */
+        char *q = p + 7, *e = strchr(q, '"');
+        char *t = strstr(p, "\"type\": \"");
+        if (!e || !t) break;
+        if (!strncmp(t + 9, "page\"", 5)) { snprintf(page_id, sizeof page_id, "%.*s", (int)(e - q), q); break; }
+    }
+    if (!page_id[0]) return -1;
+    if ((fd = cdp_connect()) < 0) return -1;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    char up[512];
+    const int ul = snprintf(up, sizeof up, "GET /devtools/page/%s HTTP/1.1\r\nHost: 127.0.0.1:9222\r\nUpgrade: websocket\r\n"
+                            "Connection: Upgrade\r\nSec-WebSocket-Key: bXBjLXJlbW90ZS1rZXk9PQ==\r\nSec-WebSocket-Version: 13\r\n\r\n", page_id);
+    if (write(fd, up, (size_t)ul) != ul) { close(fd); return -1; }
+    n = 0;
+    while (n < sizeof buf - 1 && (r = read(fd, buf + n, 1)) > 0) { n++; buf[n] = 0; if (n >= 4 && !memcmp(buf + n - 4, "\r\n\r\n", 4)) break; }
+    if (strncmp(buf, "HTTP/1.1 101", 12)) { close(fd); return -1; }
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK);
+    mv_fd = fd;
+    mv_len = 0;
+    LOG("browser on the MPC: connected to its tab");
+    return 0;
+}
+
+static int b64val(int c) {
+    return c >= 'A' && c <= 'Z' ? c - 'A' : c >= 'a' && c <= 'z' ? c - 'a' + 26 : c >= '0' && c <= '9' ? c - '0' + 52 :
+           c == '+' ? 62 : c == '/' ? 63 : -1;
+}
+
+static void mv_frame(const char *msg) {   /* a screencast frame: acknowledge, decode, turn, hand over */
+    const char *sid = strstr(msg, "\"sessionId\":");
+    if (sid) mv_send("\"method\":\"Page.screencastFrameAck\",\"params\":{\"sessionId\":%d}", atoi(sid + 12));
+    const char *d = strstr(msg, "\"data\":\"");
+    if (!d || !ovs) return;
+    d += 8;
+    const char *e = strchr(d, '"');
+    if (!e) return;
+    static uint8_t *jpg;
+    static size_t jcap;
+    const size_t need = (size_t)(e - d) / 4 * 3 + 3;
+    if (need > jcap) { free(jpg); jpg = malloc(need); jcap = jpg ? need : 0; if (!jpg) return; }
+    size_t jn = 0;
+    uint32_t acc = 0;
+    int bits = 0;
+    for (const char *p = d; p < e; p++) {
+        const int v = b64val((unsigned char)*p);
+        if (v < 0) continue;
+        acc = acc << 6 | (uint32_t)v;
+        bits += 6;
+        if (bits >= 8) { bits -= 8; jpg[jn++] = (uint8_t)(acc >> bits); }
+    }
+    if (!tj) {
+        const char *lib = getenv("MPC_REMOTE_TURBOJPEG");   /* (for testing off the device) */
+        tj = dlopen(lib ? lib : BROWSER_DIR "/lib/libturbojpeg.so.0", RTLD_NOW);
+        if (tj) {
+            void *(*init)(void) = (void *(*)(void))dlsym(tj, "tjInitDecompress");
+            *(void **)&tj_header = dlsym(tj, "tjDecompressHeader3");
+            *(void **)&tj_decode = dlsym(tj, "tjDecompress2");
+            tjh = init ? init() : NULL;
+        }
+        if (!tjh || !tj_header || !tj_decode) { LOG("browser on the MPC: no JPEG decoder (libturbojpeg) in %s", BROWSER_DIR); return; }
+    }
+    int w = 0, h = 0, ss = 0, cs = 0;
+    if (tj_header(tjh, jpg, jn, &w, &h, &ss, &cs) || w <= 0 || h <= 0 || (size_t)w * h > OVERLAY_MAX_PIX ||
+        mv_w <= 0 || mv_h <= 0 || (size_t)mv_w * mv_h > OVERLAY_MAX_PIX) return;
+    static size_t rcap;
+    if ((size_t)w * h > rcap) { free(mv_rgb); mv_rgb = malloc((size_t)w * h * 4); rcap = mv_rgb ? (size_t)w * h : 0; if (!mv_rgb) return; }
+    if (tj_decode(tjh, jpg, jn, (unsigned char *)mv_rgb, w, w * 4, h, 3 /* TJPF_BGRX: XRGB8888 in memory */, 0)) return;
+    /* turn for the panel, at the area's size (W x H, scaled if the picture came another size): as seen (x, y) ->
+     * stored (u = y, v = W - 1 - x) in rows of H */
+    const int W = mv_w, H = mv_h;
+    const uint32_t next = ovs->frame_seq + 1;
+    uint32_t *dst = ovs->frame[next & 1];
+    for (int y = 0; y < H; y++) {
+        const uint32_t *src = mv_rgb + (size_t)(h == H ? y : y * h / H) * w;
+        if (w == W) for (int x = 0; x < W; x++) dst[(size_t)(W - 1 - x) * H + y] = src[x];
+        else for (int x = 0; x < W; x++) dst[(size_t)(W - 1 - x) * H + y] = src[x * w / W];
+    }
+    ovs->fw = (uint32_t)H;
+    ovs->fh = (uint32_t)W;
+    __atomic_store_n(&ovs->frame_seq, next, __ATOMIC_RELEASE);
+}
+
+static void mv_read(void) {   /* DevTools messages (server frames: not masked) */
+    for (;;) {
+        if (mv_cap - mv_len < 65536) {
+            size_t nc = mv_cap ? mv_cap * 2 : 1 << 20;
+            if (nc > 32u << 20) { mv_close(); return; }
+            uint8_t *nb = realloc(mv_in, nc);
+            if (!nb) { mv_close(); return; }
+            mv_in = nb; mv_cap = nc;
+        }
+        const ssize_t r = read(mv_fd, mv_in + mv_len, mv_cap - mv_len - 1);
+        if (r == 0 || (r < 0 && errno != EAGAIN)) { LOG("browser on the MPC: tab connection closed"); mv_close(); return; }
+        if (r < 0) break;
+        mv_len += (size_t)r;
+    }
+    size_t pos = 0;
+    while (mv_len - pos >= 2) {
+        const uint8_t *p = mv_in + pos;
+        uint64_t n = p[1] & 127;
+        size_t hl = 2;
+        if (n == 126) { if (mv_len - pos < 4) break; n = (uint64_t)p[2] << 8 | p[3]; hl = 4; }
+        else if (n == 127) { if (mv_len - pos < 10) break; n = 0; for (int i = 0; i < 8; i++) n = n << 8 | p[2 + i]; hl = 10; }
+        if (mv_len - pos < hl + n) break;
+        if ((p[0] & 15) == 1) {
+            char *m = (char *)mv_in + pos + hl;
+            const char saved = m[n];
+            m[n] = 0;
+            if (strstr(m, "\"method\":\"Page.screencastFrame\"")) mv_frame(m);
+            m[n] = saved;
+        }
+        pos += hl + (size_t)n;
+    }
+    memmove(mv_in, mv_in + pos, mv_len - pos);
+    mv_len -= pos;
+}
+
+static void mpc_view_tick(void) {
+    ovs_map();
+    if (!ovs) return;
+    const int vis = (int)__atomic_load_n(&ovs->visible, __ATOMIC_ACQUIRE);
+    const uint64_t t = now_ms();
+    if (vis) {
+        mv_hidden_since = 0;
+        if (browser_pid <= 0 && mv_fd < 0) {   /* the page is up: get the browser going (unless it already is) */
+            const int fd = cdp_connect();
+            if (fd < 0) {
+                if (install_pid <= 0 && t >= mv_next_try) { mv_next_try = t + 15000; browser_start(); }
+                return;
+            }
+            close(fd);
+        }
+        if (mv_fd < 0) { if (t >= mv_next_try) { mv_next_try = t + 2000; if (mv_open()) return; } else return; }
+        if (!mv_casting || mv_w != ovs->w || mv_h != ovs->h) {
+            mv_w = ovs->w; mv_h = ovs->h;
+            mv_send("\"method\":\"Emulation.setDeviceMetricsOverride\",\"params\":{\"width\":%d,\"height\":%d,"
+                    "\"deviceScaleFactor\":1,\"mobile\":false}", mv_w, mv_h);
+            mv_send("\"method\":\"Emulation.setTouchEmulationEnabled\",\"params\":{\"enabled\":true,\"maxTouchPoints\":1}");
+            mv_send("\"method\":\"Page.startScreencast\",\"params\":{\"format\":\"jpeg\",\"quality\":70,"
+                    "\"maxWidth\":%d,\"maxHeight\":%d}", mv_w, mv_h);
+            mv_casting = 1;
+            mv_touch_rd = ovs->touch_wr;
+            LOG("browser on the MPC: showing it at %dx%d", mv_w, mv_h);
+        }
+        /* touches on the area -> the browser */
+        const uint32_t wr = __atomic_load_n(&ovs->touch_wr, __ATOMIC_ACQUIRE);
+        if (wr - mv_touch_rd > OVERLAY_TOUCHES) mv_touch_rd = wr - OVERLAY_TOUCHES;
+        for (; mv_touch_rd != wr; mv_touch_rd++) {
+            const int k = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].kind;
+            const int x = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].x, y = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].y;
+            if (k == OV_UP) mv_send("\"method\":\"Input.dispatchTouchEvent\",\"params\":{\"type\":\"touchEnd\",\"touchPoints\":[]}");
+            else mv_send("\"method\":\"Input.dispatchTouchEvent\",\"params\":{\"type\":\"%s\",\"touchPoints\":[{\"x\":%d,\"y\":%d}]}",
+                         k == OV_DOWN ? "touchStart" : "touchMove", x, y);
+        }
+    } else if (mv_casting) {   /* off screen a few seconds: stop the pictures (saves the processor) */
+        if (!mv_hidden_since) mv_hidden_since = t;
+        else if (t - mv_hidden_since > 3000) {
+            mv_send("\"method\":\"Page.stopScreencast\"");
+            mv_send("\"method\":\"Emulation.clearDeviceMetricsOverride\"");
+            mv_casting = 0;
+            LOG("browser on the MPC: page closed");
+        }
+    }
+    /* the page's buttons */
+    const uint32_t cs = __atomic_load_n(&ovs->cmd_seq, __ATOMIC_ACQUIRE);
+    if (cs != mv_cmd_seen) {
+        mv_cmd_seen = cs;
+        const uint32_t c = ovs->cmd;
+        if (c == OV_CMD_BACK) mv_send("\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"history.back()\"}");
+        else if (c == OV_CMD_FORWARD) mv_send("\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"history.forward()\"}");
+        else if (c == OV_CMD_RELOAD) mv_send("\"method\":\"Page.reload\"");
+        else if (c == OV_CMD_HOME) mv_send("\"method\":\"Page.navigate\",\"params\":{\"url\":\"https://www.youtube.com\"}");
+    }
 }
 
 static void cdp_tunnel(Client *c) {   /* GET /cdp/devtools/... (WebSocket upgrade) -> the browser's DevTools */
@@ -1447,7 +1710,7 @@ int main(int argc, char **argv) {
     zlib_load();
     mdns_open();
     for (;;) {
-        struct pollfd pf[2 * MAX_CLIENTS + 4];
+        struct pollfd pf[2 * MAX_CLIENTS + 6];
         int np = 0, viewers = 0;
         pf[np++] = (struct pollfd){.fd = ls, .events = POLLIN};
         for (int i = 0; i < MAX_CLIENTS; i++) {
@@ -1462,11 +1725,13 @@ int main(int argc, char **argv) {
         if (mdns_fd >= 0) pf[np++] = (struct pollfd){.fd = mdns_fd, .events = POLLIN};
         const int seqidx = np;
         if (seq_fd >= 0) pf[np++] = (struct pollfd){.fd = seq_fd, .events = POLLIN};
+        const int mvidx = np;
+        if (mv_fd >= 0) pf[np++] = (struct pollfd){.fd = mv_fd, .events = POLLIN};
         const int upidx = np;   /* browser DevTools tunnels: their browser side */
         for (int i = 0; i < MAX_CLIENTS; i++)
             if (clients[i].fd >= 0 && clients[i].ws == 3) pf[np++] = (struct pollfd){.fd = clients[i].up, .events = POLLIN};
         const uint64_t t = now_ms();
-        int wait = learn.idx >= 0 ? 200 : !viewers ? 1000 : !screen_ready ? 500 : (int)(next_frame > t ? next_frame - t : 0);
+        int wait = (ovs && ovs->visible) ? 30 : learn.idx >= 0 ? 200 : !viewers ? 1000 : !screen_ready ? 500 : (int)(next_frame > t ? next_frame - t : 0);
         poll(pf, (nfds_t)np, wait);
 
         if (pf[0].revents & POLLIN) {
@@ -1520,6 +1785,8 @@ int main(int argc, char **argv) {
             out_add(c, ub, (size_t)r);
         }
         browser_reap();
+        if (mv_fd >= 0 && np > mvidx && pf[mvidx].fd == mv_fd && (pf[mvidx].revents & (POLLIN | POLLERR | POLLHUP))) mv_read();
+        mpc_view_tick();
         static uint64_t next_bstat;
         if ((browser_pid > 0 || install_pid > 0) && now_ms() >= next_bstat) { next_bstat = now_ms() + 3000; browser_status(); }
         learn_tick();

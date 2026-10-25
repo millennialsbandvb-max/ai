@@ -1,0 +1,9 @@
+{
+  "name": "MPC Browser",
+  "vendor": "MPC-Browser",
+  "uid": "MBRW",
+  "version": 1000,
+  "so": "MPC-Browser.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}

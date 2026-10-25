@@ -94,3 +94,4 @@ pool/main/libx/libxrender/libxrender1_0.9.10-1.1_armhf.deb defc108ce36481a35becf
 pool/main/libz/libzstd/libzstd1_1.5.4+dfsg2-5_armhf.deb a2ca48bc43bb51d3cbc6beb07aefd3fe252859868a4ccb9c1edbfc942786e4b1
 pool/main/x/xkeyboard-config/xkb-data_2.35.1-1_all.deb 28a79c61b785f403da93af58c39aed13c022032935e3e54362c6707169cfe982
 pool/main/z/zlib/zlib1g_1.2.13.dfsg-1_armhf.deb b52fcc443085ff9c676648b4d0fc97cd31b8f119bdd4e7534e50b6e9386502ba
+pool/main/libj/libjpeg-turbo/libturbojpeg0_2.1.5-2_armhf.deb 1b6aa0a74b20a5347c110a01ace14eef3dbf5145ac9d9856c3617399d1c71600
