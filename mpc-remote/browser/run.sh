@@ -25,6 +25,8 @@ if [ ! -f chromium/WidevineCdm/manifest.json ] && [ -x "$B/debfetch" ]; then
   fi
 fi
 echo "run.sh: Widevine files: $(ls -l chromium/WidevineCdm/manifest.json chromium/WidevineCdm/_platform_specific/linux_arm/libwidevinecdm.so 2>&1 | tr '\n' ' ')"
+# ChromeOS's Widevine needs one fix-up to load with this glibc (GLIBC_ABI_DT_RELR; see wvfix.c). Does nothing once done.
+[ -f chromium/WidevineCdm/manifest.json ] && [ -x "$B/wvfix" ] && "$B/wvfix" chromium/WidevineCdm/_platform_specific/linux_arm/libwidevinecdm.so
 # Widevine (if installed): tell Chromium where it is, as its component updater would (that's off)
 if [ -f chromium/WidevineCdm/manifest.json ]; then
   mkdir -p profile/WidevineCdm

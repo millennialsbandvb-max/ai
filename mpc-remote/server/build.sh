@@ -31,6 +31,10 @@ arm-linux-gnueabihf-strip "$B/bundle/bin/webin-feed"
 arm-linux-gnueabihf-gcc -O2 -Wall -Wextra -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard \
   -o "$B/bundle/bin/debfetch" "$HERE/../browser/debfetch.c" -ldl
 arm-linux-gnueabihf-strip "$B/bundle/bin/debfetch"
+# Widevine's loader fix-up (run on the MPC by the browser's start script; Widevine itself isn't in the firmware)
+arm-linux-gnueabihf-gcc -O2 -Wall -Wextra -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard \
+  -o "$B/bundle/bin/wvfix" "$HERE/../browser/wvfix.c"
+arm-linux-gnueabihf-strip "$B/bundle/bin/wvfix"
 cp "$HERE/../browser/install.sh" "$B/bundle/bin/browser-install.sh"
 cp "$HERE/../browser/run.sh" "$B/bundle/bin/browser-run.sh"
 cp "$HERE/../browser/asoundrc" "$B/bundle/bin/browser-asoundrc"

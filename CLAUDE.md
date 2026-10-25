@@ -120,6 +120,11 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   Then still "no library found" with the files present: Debian's widevine-locations.patch makes
   DIR_BUNDLED_WIDEVINE_CDM = $HOME/.local/lib/libwidevinecdm.so (a file, not a folder) whenever that exists, which
   breaks the lookup. Never create it (run.sh removes it); chromium/WidevineCdm alone registers (qemu-confirmed).
+  Next: "DT_RELR without GLIBC_ABI_DT_RELR dependency" (ChromeOS's CDM vs glibc >= 2.36). `browser/wvfix.c` (ours,
+  built into bin/) copies .dynstr + .gnu.version_r into a new PT_LOAD (the PT_NOTE slot) with a libc.so.6
+  GLIBC_ABI_DT_RELR vernaux, and repoints DT_STRTAB/STRSZ/VERNEED; run.sh runs it each start (idempotent). Checked
+  with the MPC's ld.so under qemu in --list mode (LD_BIND_NOW, LD_WARN): the original fails exactly like the device,
+  the patched one links with no missing symbols. Widevine's own code was never run here.
   Top bar is Chrome-like (dark theme colours): back/forward/reload/home icons (drawn by make_keyboard.py, ICON_ALPHA),
   address pill with the bookmark star at its right end, a Go button; bookmarks bar (BM_H) under it, in
   /data/mpc-browser-bookmarks. The remote page's browser bar has a Go button too.
