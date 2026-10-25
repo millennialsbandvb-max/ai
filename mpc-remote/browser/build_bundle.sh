@@ -39,7 +39,7 @@ if [ -f "$W/root/opt/WidevineCdm/manifest.json" ]; then
   mkdir -p "$B/chromium/WidevineCdm/_platform_specific/linux_arm" "$B/home/.local/lib"
   cp "$W/root/opt/WidevineCdm/manifest.json" "$B/chromium/WidevineCdm/"
   cp "$W/root/opt/WidevineCdm/gmp-widevinecdm/latest/libwidevinecdm.so" "$B/chromium/WidevineCdm/_platform_specific/linux_arm/"
-  ln -sf ../../chromium/WidevineCdm/_platform_specific/linux_arm/libwidevinecdm.so "$B/home/.local/lib/libwidevinecdm.so"
+  ln -sf ../../../chromium/WidevineCdm/_platform_specific/linux_arm/libwidevinecdm.so "$B/home/.local/lib/libwidevinecdm.so"
 fi
 cp "$HERE/run.sh" "$B/run.sh"
 cp "$HERE/asoundrc" "$B/home/.asoundrc"

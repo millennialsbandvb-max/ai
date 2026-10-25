@@ -1091,10 +1091,153 @@ static uint32_t *kb_px[2];                /* its pictures (lower, upper case), K
 static int mv_focus_id;                   /* the "did that tap land in a text box?" question we asked */
 /* the address bar along the top: the page's address, or (tapped) what's being typed for a new one */
 #define BAR_H 48
+#define BM_H 40                           /* the bookmarks bar under it */
+#define TOP_H (BAR_H + BM_H)              /* the web page starts here */
+#define BM_BTN_W 130                      /* the address bar's Bookmark button (right end) */
 static char url_cur[512], url_edit[512];
 static int url_editing;
 static uint64_t mv_focus_at;
+static char bar_note[160];                /* a short message shown in the address bar for a moment */
+static uint64_t bar_note_until;
 static void mv_publish(void);
+
+/* files kept on the MPC's internal storage (outside the browser's folder, so reinstalling it keeps them) */
+static const char *data_file(const char *name) {
+    static char p[4][256];
+    static int i;
+    const char *d = getenv("MPC_REMOTE_DATA");   /* (for testing off the device) */
+    i = (i + 1) & 3;
+    snprintf(p[i], sizeof p[i], "%s/%s", d ? d : "/data", name);
+    return p[i];
+}
+
+/* bookmarks: address + what the bar shows (the site's name), one per line in mpc-browser-bookmarks */
+#define BM_MAX 40
+static struct { char url[512], name[40]; } bm[BM_MAX];
+static int bm_n, bm_loaded;
+
+static void bm_name(const char *url, char *out, size_t cap) {   /* "https://www.netflix.com/browse" -> "netflix.com" */
+    const char *h = strstr(url, "://");
+    h = h ? h + 3 : url;
+    if (!strncmp(h, "www.", 4)) h += 4;
+    size_t n = strcspn(h, "/?#:");
+    if (n >= cap) n = cap - 1;
+    memcpy(out, h, n);
+    out[n] = 0;
+}
+
+static void bm_load(void) {
+    if (bm_loaded) return;
+    bm_loaded = 1;
+    FILE *f = fopen(data_file("mpc-browser-bookmarks"), "r");
+    if (!f) return;
+    char line[600];
+    while (bm_n < BM_MAX && fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (!line[0]) continue;
+        snprintf(bm[bm_n].url, sizeof bm[0].url, "%.511s", line);
+        bm_name(line, bm[bm_n].name, sizeof bm[0].name);
+        bm_n++;
+    }
+    fclose(f);
+}
+
+static void bm_save(void) {
+    const char *path = data_file("mpc-browser-bookmarks");
+    char tmp[300];
+    snprintf(tmp, sizeof tmp, "%s.new", path);
+    FILE *f = fopen(tmp, "w");
+    if (!f) { LOG("can't save bookmarks: %s", strerror(errno)); return; }
+    for (int i = 0; i < bm_n; i++) fprintf(f, "%s\n", bm[i].url);
+    if (fclose(f) || rename(tmp, path)) LOG("can't save bookmarks: %s", strerror(errno));
+}
+
+static int bm_find(const char *url) {
+    for (int i = 0; i < bm_n; i++) if (!strcmp(bm[i].url, url)) return i;
+    return -1;
+}
+
+static void bm_toggle(void) {   /* the Bookmark button: add the page, or (already there) take it off */
+    bm_load();
+    if (!url_cur[0] || !strcmp(url_cur, "about:blank")) return;
+    const int i = bm_find(url_cur);
+    if (i >= 0) { memmove(&bm[i], &bm[i + 1], sizeof bm[0] * (size_t)(bm_n - i - 1)); bm_n--; }
+    else if (bm_n < BM_MAX) {
+        snprintf(bm[bm_n].url, sizeof bm[0].url, "%s", url_cur);
+        bm_name(url_cur, bm[bm_n].name, sizeof bm[0].name);
+        bm_n++;
+    }
+    bm_save();
+}
+
+/* where bookmark i's button is along the bookmarks bar (x, width); 0 if it doesn't fit */
+static int text_width(const char *t);
+static int bm_rect(int i, int W, int *x, int *w) {
+    int px = 8;
+    for (int j = 0; j <= i; j++) {
+        int tw = text_width(bm[j].name) + 24;
+        if (tw > 220) tw = 220;
+        if (px + tw > W - 8) return 0;
+        if (j == i) { *x = px; *w = tw; return 1; }
+        px += tw + 6;
+    }
+    return 0;
+}
+
+/* saved passwords: "origin user password" per line in mpc-browser-passwords (user and password URL-encoded),
+ * readable only by root. The page's script (pw_capture) hands them over when a login form is sent; when a page of
+ * that site opens, pw_fill puts the latest one into its login boxes. */
+static void pw_store(const char *payload) {   /* "origin user password" from the page (user "-": none seen) */
+    char o[256], u[512], pw[512];
+    if (sscanf(payload, "%255s %511s %511s", o, u, pw) != 3) return;
+    if (strncmp(o, "https://", 8) && strncmp(o, "http://", 7)) return;
+    for (const char *q = o; *q; q++) if (*q == '\'' || *q == '"' || *q == '\\') return;
+    const char *path = data_file("mpc-browser-passwords");
+    char tmp[300];
+    snprintf(tmp, sizeof tmp, "%s.new", path);
+    FILE *in = fopen(path, "r");
+    const int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    FILE *out = fd >= 0 ? fdopen(fd, "w") : NULL;
+    if (!out) { if (in) fclose(in); LOG("can't save the password: %s", strerror(errno)); return; }
+    char line[1400], lo[256], lu[512];
+    int same = 0;
+    while (in && fgets(line, sizeof line, in)) {   /* keep the others; the same site and user gets the new password */
+        if (sscanf(line, "%255s %511s", lo, lu) == 2 && !strcmp(lo, o) && !strcmp(lu, u)) {
+            char lp[512];
+            if (sscanf(line, "%*s %*s %511s", lp) == 1 && !strcmp(lp, pw)) same = 1;
+            continue;
+        }
+        fputs(line, out);
+    }
+    if (in) fclose(in);
+    fprintf(out, "%s %s %s\n", o, u, pw);
+    if (fclose(out) || rename(tmp, path)) { LOG("can't save the password: %s", strerror(errno)); return; }
+    if (!same) {
+        char site[40];
+        bm_name(o, site, sizeof site);
+        snprintf(bar_note, sizeof bar_note, "password saved for %s", site);
+        bar_note_until = now_ms() + 3000;
+        LOG("browser: password saved for %s", site);
+        mv_publish();
+    }
+}
+
+static int pw_lookup(const char *url, char *o, char *u, char *pw) {   /* the latest saved login for url's site */
+    const char *h = strstr(url, "://");
+    if (!h || (strncmp(url, "https://", 8) && strncmp(url, "http://", 7))) return 0;
+    char want[256];
+    snprintf(want, sizeof want, "%.*s", (int)(h + 3 - url + (long)strcspn(h + 3, "/?#")), url);
+    FILE *f = fopen(data_file("mpc-browser-passwords"), "r");
+    if (!f) return 0;
+    char line[1400], lo[256], lu[512], lp[512];
+    int found = 0;
+    while (fgets(line, sizeof line, f))
+        if (sscanf(line, "%255s %511s %511s", lo, lu, lp) == 3 && !strcmp(lo, want)) {
+            strcpy(o, lo); strcpy(u, lu); strcpy(pw, lp); found = 1;
+        }
+    fclose(f);
+    return found;
+}
 
 static void ovs_map(void) {
     if (ovs) return;
@@ -1137,6 +1280,8 @@ static void mv_close(void) {
     mv_casting = 0;
 }
 
+static void pw_fill(const char *url);
+static void wv_check(void);
 #define CROS_UA "Mozilla/5.0 (X11; CrOS armv7l 15633.69.0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
 static int mv_open(void) {   /* DevTools: the first tab, as a WebSocket */
     char page_id[128] = "";
@@ -1194,7 +1339,24 @@ static int mv_open(void) {   /* DevTools: the first tab, as a WebSocket */
         "var h=location.href,ua=navigator.userActivation;if(ok!==h){if(!(ua&&ua.isActive)||seen!==h){seen=h;"
         "try{this.pause()}catch(e){}return Promise.reject(new DOMException('waiting for a tap on play','NotAllowedError'))}ok=h}"
         "return pl.apply(this,arguments)};})()";
+    /* the password saver: when a login form is sent, its site, user name and password go to us (Runtime.bindingCalled
+     * "mpcPw"); a user name typed on a page before the password page (as Google does) is remembered for the tab */
+    static const char pwcap[] =
+        "(function(){var last='',E=function(v){return encodeURIComponent(v).replace(/'/g,'%27')};"
+        "function grab(){var ins=[].slice.call(document.querySelectorAll('input')),p=null,u='';"
+        "for(var i=0;i<ins.length;i++)if((ins[i].type||'').toLowerCase()==='password'&&ins[i].value){p=ins[i];break}"
+        "if(!p){ins.forEach(function(e){var t=(e.type||'text').toLowerCase();if(e.value&&(t==='email'||/user|email|login/i.test(e.name+' '+e.id+' '+e.autocomplete)))"
+        "try{sessionStorage.setItem('mpcU',e.value)}catch(x){}});return}"
+        "for(var j=ins.indexOf(p)-1;j>=0;j--){var t=(ins[j].type||'text').toLowerCase();if(/^(text|email|tel)$/.test(t)&&ins[j].value){u=ins[j].value;break}}"
+        "if(!u)try{u=sessionStorage.getItem('mpcU')||''}catch(x){}"
+        "var m=location.origin+' '+(u?E(u):'-')+' '+E(p.value);if(m!==last&&window.mpcPw){last=m;window.mpcPw(m)}}"
+        "document.addEventListener('submit',grab,true);document.addEventListener('click',grab,true);"
+        "document.addEventListener('keydown',function(e){if(e.key==='Enter')grab()},true);})()";
+    mv_send("\"method\":\"Runtime.addBinding\",\"params\":{\"name\":\"mpcPw\"}");
+    mv_send("\"method\":\"Runtime.enable\"");   /* (its calls only come back with the Runtime domain on) */
     mv_send("\"method\":\"Page.enable\"");   /* (new-page scripts only take effect with the Page domain on) */
+    mv_send("\"method\":\"Page.addScriptToEvaluateOnNewDocument\",\"params\":{\"source\":\"%s\"}", pwcap);
+    mv_send("\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"%s\"}", pwcap);
     /* look like a Chromebook (ARM), as Netflix and other Widevine sites expect on ARM (run.sh sets the plain
      * user agent; this adds the client hints) */
     mv_send("\"method\":\"Emulation.setUserAgentOverride\",\"params\":{\"userAgent\":\"%s\",\"platform\":\"Linux armv7l\","
@@ -1203,6 +1365,8 @@ static int mv_open(void) {   /* DevTools: the first tab, as a WebSocket */
             "\"platformVersion\":\"15633.69.0\",\"architecture\":\"arm\",\"model\":\"\",\"mobile\":false}}", CROS_UA);
     mv_send("\"method\":\"Page.addScriptToEvaluateOnNewDocument\",\"params\":{\"source\":\"%s\"}", light);
     mv_send("\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"%s\"}", light);
+    pw_fill(url_cur);
+    wv_check();
     return 0;
 }
 
@@ -1281,8 +1445,13 @@ static int text_width(const char *t) {
     return w;
 }
 
-static void bar_draw(uint32_t *dst, int W, int H) {   /* the address bar: rows 0..BAR_H of the area */
-    const int fx0 = 8, fx1 = W - 8, fy0 = 6, fy1 = BAR_H - 6;
+static void rect_fill(uint32_t *dst, int W, int H, int x0, int y0, int x1, int y1, uint32_t c) {   /* as seen */
+    for (int x = x0 < 0 ? 0 : x0; x < x1 && x < W; x++)
+        for (int y = y0 < 0 ? 0 : y0; y < y1 && y < H; y++) dst[(size_t)(W - 1 - x) * H + y] = c;
+}
+
+static void bar_draw(uint32_t *dst, int W, int H) {   /* the address bar and the bookmarks bar: rows 0..TOP_H */
+    const int fx0 = 8, fx1 = W - 8 - BM_BTN_W - 8, fy0 = 6, fy1 = BAR_H - 6;
     for (int x = 0; x < W; x++)
         for (int y = 0; y < BAR_H; y++) {
             uint32_t c = 0x1e1e20;
@@ -1292,9 +1461,24 @@ static void bar_draw(uint32_t *dst, int W, int H) {   /* the address bar: rows 0
             }
             dst[(size_t)(W - 1 - x) * H + y] = c;
         }
+    /* the Bookmark button: lit when this page is bookmarked */
+    bm_load();
+    const int saved = url_cur[0] && bm_find(url_cur) >= 0, bx0 = W - 8 - BM_BTN_W;
+    rect_fill(dst, W, H, bx0, fy0, W - 8, fy1, saved ? 0xe5742b : 0x3a3a3e);
+    const char *bl = saved ? "Saved" : "Bookmark";
+    text_draw(dst, W, H, bx0 + (BM_BTN_W - text_width(bl)) / 2, (BAR_H - FONT_H) / 2, bl, 0xf0f0f0, bx0, W - 8);
+    /* the bookmarks bar */
+    rect_fill(dst, W, H, 0, BAR_H, W, TOP_H, 0x18181a);
+    if (!bm_n) text_draw(dst, W, H, 16, BAR_H + (BM_H - FONT_H) / 2, "Bookmarks: open a page and tap Bookmark", 0x76767c, 0, W);
+    for (int i = 0, x, w; i < bm_n && bm_rect(i, W, &x, &w); i++) {
+        const int cur = !strcmp(bm[i].url, url_cur);
+        rect_fill(dst, W, H, x, BAR_H + 4, x + w, TOP_H - 4, cur ? 0x4a3a30 : 0x2e2e32);
+        text_draw(dst, W, H, x + 12, BAR_H + (BM_H - FONT_H) / 2, bm[i].name, 0xdcdcdc, x + 6, x + w - 6);
+    }
     char shown[530];
     uint32_t color = 0xe6e6e6;
-    if (url_editing) snprintf(shown, sizeof shown, "%s|", url_edit);
+    if (bar_note[0] && !url_editing) { snprintf(shown, sizeof shown, "%s", bar_note); color = 0x8fd18f; }
+    else if (url_editing) snprintf(shown, sizeof shown, "%s|", url_edit);
     else if (url_cur[0] && strcmp(url_cur, "about:blank")) snprintf(shown, sizeof shown, "%s", url_cur);
     else { snprintf(shown, sizeof shown, "tap here to type an address or search"); color = 0x8a8a90; }
     const int room = fx1 - fx0 - 24, tw = text_width(shown);
@@ -1342,13 +1526,13 @@ static void kb_load(void) {   /* decode the keyboard's two pictures (once the JP
 static void mv_publish(void) {
     if (!ovs || !mv_rgb || mv_w <= 0 || mv_h <= 0) return;
     kb_load();
-    const int W = mv_w, H = mv_h, kbh = kb_on && kb_px[0] ? KB_H : 0, webh = H - BAR_H - kbh;
+    const int W = mv_w, H = mv_h, kbh = kb_on && kb_px[0] ? KB_H : 0, webh = H - TOP_H - kbh;
     const uint32_t next = ovs->frame_seq + 1;
     uint32_t *dst = ovs->frame[next & 1];
     bar_draw(dst, W, H);
     for (int y = 0; y < webh; y++) {
         const uint32_t *src = mv_rgb + (size_t)(mv_rh == webh ? y : y * mv_rh / webh) * mv_rw;
-        uint32_t *col = dst + BAR_H + y;
+        uint32_t *col = dst + TOP_H + y;
         if (mv_rw == W) for (int x = 0; x < W; x++) col[(size_t)(W - 1 - x) * H] = src[x];
         else for (int x = 0; x < W; x++) col[(size_t)(W - 1 - x) * H] = src[x * mv_rw / W];
     }
@@ -1363,7 +1547,7 @@ static void mv_publish(void) {
                     const struct kb_key *k = &KB_KEYS[kb_pressed];
                     if (kx >= k->x && kx < k->x + k->w && y >= k->y && y < k->y + k->h) c ^= 0x00ffffff;   /* lit */
                 }
-                dst[(size_t)(W - 1 - x) * H + BAR_H + webh + y] = c;
+                dst[(size_t)(W - 1 - x) * H + TOP_H + webh + y] = c;
             }
         }
     }
@@ -1373,7 +1557,7 @@ static void mv_publish(void) {
 }
 
 static void mv_resize(void) {   /* the web page's size changed (the keyboard came or went): tell the browser */
-    const int webh = mv_h - BAR_H - (kb_on && kb_px[0] ? KB_H : 0);
+    const int webh = mv_h - TOP_H - (kb_on && kb_px[0] ? KB_H : 0);
     mv_send("\"method\":\"Emulation.setDeviceMetricsOverride\",\"params\":{\"width\":%d,\"height\":%d,"
             "\"deviceScaleFactor\":1,\"mobile\":false}", mv_w, webh);
     mv_send("\"method\":\"Page.stopScreencast\"");
@@ -1440,6 +1624,36 @@ static void kb_touch(int kind, int x, int y) {   /* a touch on the keyboard (y w
     mv_publish();
 }
 
+static void pw_fill(const char *url) {   /* a page opened: if its site has a saved login, fill it in when its boxes show */
+    char o[256], u[512], pw[512];
+    if (!pw_lookup(url, o, u, pw)) return;
+    mv_send("\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\""
+            "(function(){var O='%s',U='%s'==='-'?'':decodeURIComponent('%s'),P=decodeURIComponent('%s'),n=0;"
+            "if(location.origin!==O)return;"
+            "function set(e,v){Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,v);"
+            "e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));e.dataset.mpcf=1}"
+            "var t=setInterval(function(){if(++n>40||location.origin!==O)return clearInterval(t);"
+            "var ins=[].slice.call(document.querySelectorAll('input'));ins.forEach(function(e,k){"
+            "var ty=(e.type||'text').toLowerCase();if(e.value||e.dataset.mpcf)return;"
+            "if(ty==='password'){set(e,P);for(var j=k-1;j>=0;j--){var t2=(ins[j].type||'text').toLowerCase();"
+            "if(/^(text|email|tel)$/.test(t2)){if(!ins[j].value&&U)set(ins[j],U);break}}}"
+            "else if(U&&(ty==='email'||/user|email|login/i.test(e.name+' '+e.id+' '+e.autocomplete)))set(e,U)})},500)})()\"}",
+            o, u, u, pw);
+}
+
+/* Widevine (Netflix's copy protection): once per browser run, on the first secure page, check it loads; for /log */
+static pid_t wv_checked;
+static int wv_id;
+static void wv_check(void) {
+    if (wv_checked == browser_pid || strncmp(url_cur, "https://", 8)) return;
+    wv_checked = browser_pid;
+    mv_send("\"method\":\"Runtime.evaluate\",\"params\":{\"awaitPromise\":true,\"returnByValue\":true,\"expression\":\""
+            "(async function(){try{var a=await navigator.requestMediaKeySystemAccess('com.widevine.alpha',[{initDataTypes:['cenc'],"
+            "videoCapabilities:[{contentType:'video/mp4; codecs=avc1.42E01E'}]}]);await a.createMediaKeys();"
+            "return 'loads fine'}catch(e){return 'not working: '+e.name+': '+e.message}})()\"}");
+    wv_id = mv_id;
+}
+
 static void mv_read(void) {   /* DevTools messages (server frames: not masked) */
     for (;;) {
         if (mv_cap - mv_len < 65536) {
@@ -1477,7 +1691,23 @@ static void mv_read(void) {   /* DevTools messages (server frames: not masked) *
                     memcpy(url_cur, u, n);
                     url_cur[n] = 0;
                     if (!url_editing) mv_publish();
+                    pw_fill(url_cur);
+                    wv_check();
                 }
+            }
+            else if (strstr(m, "\"method\":\"Runtime.bindingCalled\"") && strstr(m, "\"name\":\"mpcPw\"")) {   /* a login was sent */
+                const char *pl = strstr(m, "\"payload\":\"");
+                if (pl) {
+                    char v[1400];
+                    pl += 11;
+                    const size_t n = strcspn(pl, "\"");
+                    if (n < sizeof v) { memcpy(v, pl, n); v[n] = 0; pw_store(v); }
+                }
+            }
+            else if (wv_id && !strncmp(m, "{\"id\":", 6) && atoi(m + 6) == wv_id) {
+                wv_id = 0;
+                const char *v = strstr(m, "\"value\":\"");
+                LOG("browser: Widevine (for Netflix) %.150s", v ? v + 9 : m);
             }
             else if (!strncmp(m, "{\"id\":", 6) && strstr(m, "\"error\":")) LOG("browser on the MPC: the browser said %.160s", m);
             else if (mv_focus_id && !strncmp(m, "{\"id\":", 6) && atoi(m + 6) == mv_focus_id) {
@@ -1497,6 +1727,7 @@ static void mpc_view_tick(void) {
     if (!ovs) return;
     const int vis = (int)__atomic_load_n(&ovs->visible, __ATOMIC_ACQUIRE);
     const uint64_t t = now_ms();
+    if (bar_note_until && t >= bar_note_until) { bar_note_until = 0; bar_note[0] = 0; mv_publish(); }
     /* stay connected to the browser's tab whenever it runs (the lighter-video settings live on that connection) */
     if (!vis && mv_fd < 0 && browser_pid > 0 && t >= mv_next_try) { mv_next_try = t + 3000; mv_open(); }
     if (vis) {
@@ -1521,32 +1752,50 @@ static void mpc_view_tick(void) {
         /* touches on the area -> the browser */
         const uint32_t wr = __atomic_load_n(&ovs->touch_wr, __ATOMIC_ACQUIRE);
         if (wr - mv_touch_rd > OVERLAY_TOUCHES) mv_touch_rd = wr - OVERLAY_TOUCHES;
-        const int webh = mv_h - BAR_H - (kb_on && kb_px[0] ? KB_H : 0);
+        const int webh = mv_h - TOP_H - (kb_on && kb_px[0] ? KB_H : 0);
         for (; mv_touch_rd != wr; mv_touch_rd++) {
             const int k = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].kind, slot = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].slot;
             const int x = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].x, y = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].y;
             if (k == OV_WHEEL) {   /* the mouse wheel (slot = how far: 120 a notch) */
-                const int y = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].y - BAR_H;
+                const int y = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].y - TOP_H;
                 if (y >= 0 && y < webh)
                     mv_send("\"method\":\"Input.dispatchMouseEvent\",\"params\":{\"type\":\"mouseWheel\",\"x\":%d,\"y\":%d,"
                             "\"deltaX\":0,\"deltaY\":%d}", x, y, slot * 100 / 120);
                 continue;
             }
+            if (k == OV_DOWN && y < BAR_H && x >= mv_w - 8 - BM_BTN_W) {   /* the Bookmark button */
+                bm_toggle();
+                mv_publish();
+                kb_slot = -2;
+                continue;
+            }
             if (k == OV_DOWN && y < BAR_H) {   /* the address bar: type a new address */
                 url_editing = 1;
                 url_edit[0] = 0;
+                bar_note[0] = 0;
                 kb_show(1);
                 mv_publish();
                 kb_slot = -2;   /* (the rest of this touch is ignored) */
                 continue;
             }
-            if (k == OV_DOWN) kb_slot = BAR_H + webh < mv_h && y >= BAR_H + webh ? slot : -1;   /* on the keyboard */
+            if (k == OV_DOWN && y < TOP_H) {   /* the bookmarks bar: open one */
+                for (int i = 0, bx, bw; i < bm_n && bm_rect(i, mv_w, &bx, &bw); i++)
+                    if (x >= bx && x < bx + bw) {
+                        if (url_editing) { url_editing = 0; kb_show(0); }
+                        url_go(bm[i].url);
+                        mv_publish();
+                        break;
+                    }
+                kb_slot = -2;
+                continue;
+            }
+            if (k == OV_DOWN) kb_slot = TOP_H + webh < mv_h && y >= TOP_H + webh ? slot : -1;   /* on the keyboard */
             if (kb_slot == -2) { if (k == OV_UP) kb_slot = -1; continue; }
-            if (kb_slot >= 0 && slot == kb_slot) { kb_touch(k, x, y - BAR_H - webh); if (k == OV_UP) kb_slot = -1; continue; }
+            if (kb_slot >= 0 && slot == kb_slot) { kb_touch(k, x, y - TOP_H - webh); if (k == OV_UP) kb_slot = -1; continue; }
             if (k == OV_UP) mv_focus_at = t + 350;   /* then: did that tap land in a text box? */
             if (k == OV_UP) mv_send("\"method\":\"Input.dispatchTouchEvent\",\"params\":{\"type\":\"touchEnd\",\"touchPoints\":[]}");
             else mv_send("\"method\":\"Input.dispatchTouchEvent\",\"params\":{\"type\":\"%s\",\"touchPoints\":[{\"x\":%d,\"y\":%d}]}",
-                         k == OV_DOWN ? "touchStart" : "touchMove", x, y - BAR_H < 0 ? 0 : y - BAR_H);
+                         k == OV_DOWN ? "touchStart" : "touchMove", x, y - TOP_H < 0 ? 0 : y - TOP_H);
         }
     } else if (mv_casting) {   /* off screen a few seconds: stop the pictures (saves the processor) */
         if (!mv_hidden_since) mv_hidden_since = t;
@@ -1654,6 +1903,18 @@ static void handle_http(Client *c) {   /* a complete request is in c->in */
             while (fgets(line, sizeof line, pl) && n < 4096) n += (size_t)snprintf(body + n, 202, "  %s", line);
             fclose(pl);
         }
+        FILE *bl = fopen("/tmp/mpc-browser.log", "r");   /* the browser's own messages about Widevine (last 25) */
+        if (bl) {
+            static char keep[25][202];
+            int kn = 0;
+            char line[400];
+            while (fgets(line, sizeof line, bl))
+                if (strcasestr(line, "widevine") || strcasestr(line, "cdm") || strcasestr(line, "decrypt"))
+                    snprintf(keep[kn++ % 25], sizeof keep[0], "  %.197s", line);
+            fclose(bl);
+            if (kn) n += (size_t)snprintf(body + n, 64, "\nthe browser, about Widevine:\n");
+            for (int i = kn > 25 ? kn - 25 : 0; i < kn; i++) n += (size_t)snprintf(body + n, 202, "%s", keep[i % 25]);
+        }
         n += (size_t)snprintf(body + n, 8, "\n");
         for (int i = 0; i < log_count; i++)
             n += (size_t)snprintf(body + n, 202, "%s\n", log_ring[(log_next - log_count + i + LOG_LINES) % LOG_LINES]);
@@ -1695,6 +1956,11 @@ static void handle_command(Client *c, char *s) {   /* a text message from the pa
     else if (!strcmp(s, "browser stop")) { browser_stop(); browser_status(); }
     else if (!strcmp(s, "browser install")) { browser_install(); browser_status(); }
     else if (!strcmp(s, "browser status")) browser_status();
+    else if (!strcmp(s, "browser forget passwords")) {
+        unlink(data_file("mpc-browser-passwords"));
+        LOG("browser: saved passwords deleted");
+        broadcast_text("{\"type\":\"bnote\",\"note\":\"saved passwords deleted\"}");
+    }
     else if (sscanf(s, "kd %d", &x) == 1) kbd_key(x, 1);
     else if (sscanf(s, "ku %d", &x) == 1) kbd_key(x, 0);
     else if (!strncmp(s, "bd ", 3)) btn_press(s + 3, 1);

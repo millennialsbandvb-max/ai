@@ -111,7 +111,14 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   via Page.frameNavigated / navigatedWithinDocument.
   Netflix (untested): packages.txt's last line (a full URL) is Raspberry Pi's armhf Widevine; the installer puts it in
   chromium/WidevineCdm (+ home/.local/lib link), run.sh writes the profile's hint file and a ChromeOS user agent, and
-  mv_open adds ChromeOS client hints (Emulation.setUserAgentOverride). Videos wait for a tap: the injected script rejects play()
+  mv_open adds ChromeOS client hints (Emulation.setUserAgentOverride). First device try: Netflix error C7702-1003
+  (Widevine registers, per a qemu test with a dummy .so in chromium/WidevineCdm, so it likely fails to load); /log now
+  shows a once-per-run load check (createMediaKeys on the first https page) and the browser's cdm/widevine lines.
+  Bookmarks bar (BM_H row under the address bar; Bookmark/Saved button at its right) in /data/mpc-browser-bookmarks.
+  Password saver: an injected script calls the binding mpcPw (Runtime.addBinding; needs Runtime.enable) with
+  "origin user pass" (URL-encoded) on submit/click/Enter; stored 0600 in /data/mpc-browser-passwords (plain text);
+  pw_fill fills on Page.domContentEventFired. The remote page's "Forget passwords" deletes the file. Every mv_send
+  body must be balanced JSON: an extra brace is dropped silently by Chrome (no reply, nothing logged). Videos wait for a tap: the injected script rejects play()
   without user activation and the first play() for each new address; once one is allowed there, later play() calls
   for that address pass (YouTube restarts playback after buffering; blocking those paused videos mid-play). YouTube
   quality is only set when not already tiny (setting it every time made it rebuffer). run.sh: autoplay needs a gesture.

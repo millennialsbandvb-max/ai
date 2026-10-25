@@ -93,6 +93,7 @@
   <button id="bfwd" type="button" title="forward">&#9654;</button>
   <button id="breload" type="button" title="reload">&#10227;</button>
   <input id="burl" type="text" placeholder="address or search" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <button id="bforget" type="button" title="delete the passwords the MPC browser saved">Forget passwords</button>
   <span id="bstat"></span>
 </div>
 <main id="bmain" hidden><canvas id="bview" width="960" height="540"></canvas></main>
@@ -172,6 +173,7 @@ function onText(m) {
     if (m.name) { lrnText.innerHTML = "On the MPC, press and release <b>" + LABEL[m.name] + "</b>."; return; }
     if (m.done) { learned.add(m.done); showPad(); return learnNext(); }
     if (m.error) { lrnEl.classList.remove("on"); learning = -1; setStatus("learn buttons: " + m.error); }
+  } else if (m.type === "bnote") { bStat.textContent = m.note;
   } else if (m.type === "browser") { onBrowser(m);
   } else if (m.type === "btn") {
     if (m.error) setStatus(m.error);
@@ -587,6 +589,7 @@ B("browserbtn").onclick = () => {
 B("bstart").onclick = () => { send("audio pair " + aPair.value); send("browser start"); bStat.textContent = "starting… (can take 20 s)"; setTimeout(cdpOpen, 4000); };
 B("bstop").onclick = () => { send("browser stop"); if (cdp) cdp.close(); };
 B("binstall").onclick = () => send("browser install");
+B("bforget").onclick = () => { if (confirm("Delete every password the MPC browser saved?")) send("browser forget passwords"); };
 function onBrowser(m) {   // status from the remote, every few seconds while it runs
   bState = m.state;
   B("binstall").hidden = m.state !== "not installed";

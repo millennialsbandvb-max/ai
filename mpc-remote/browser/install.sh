@@ -48,7 +48,7 @@ else
         mkdir -p "$W/_platform_specific/linux_arm" "$N/home/.local/lib"
         cp "$R/opt/WidevineCdm/manifest.json" "$W/" &&
         cp "$R/opt/WidevineCdm/gmp-widevinecdm/latest/libwidevinecdm.so" "$W/_platform_specific/linux_arm/" || fail "arranging Widevine"
-        ln -sf ../../chromium/WidevineCdm/_platform_specific/linux_arm/libwidevinecdm.so "$N/home/.local/lib/libwidevinecdm.so"
+        ln -sf ../../../chromium/WidevineCdm/_platform_specific/linux_arm/libwidevinecdm.so "$N/home/.local/lib/libwidevinecdm.so"
     fi
     cp "$B/browser-run.sh" "$N/run.sh" && cp "$B/browser-asoundrc" "$N/home/.asoundrc" || fail "missing files in the firmware"
     chmod 755 "$N/run.sh"
