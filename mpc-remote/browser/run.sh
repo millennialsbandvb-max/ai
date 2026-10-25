@@ -8,6 +8,23 @@ cat > fonts.conf <<EOC
 <?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd">
 <fontconfig><dir>$D/share/fonts</dir><cachedir>$D/cache</cachedir></fontconfig>
 EOC
+# Widevine (Netflix's copy protection): if this install lacks it (an older install, or one from a card), fetch it now
+# (the firmware's package list has its address and fingerprint; about 4 MB)
+B=/usr/lib/nam-mpc/bin
+if [ ! -f chromium/WidevineCdm/manifest.json ] && [ -x "$B/debfetch" ]; then
+  wv=$(grep -i '^https://.*widevine' "$B/browser-packages.txt" | head -n 1)
+  if [ -n "$wv" ]; then
+    set -- $wv
+    rm -rf wv.tmp && mkdir -p wv.tmp/root &&
+    "$B/debfetch" get "$1" "$2" wv.tmp/wv.deb && "$B/debfetch" data wv.tmp/wv.deb wv.tmp/root &&
+    mkdir -p chromium/WidevineCdm/_platform_specific/linux_arm &&
+    cp wv.tmp/root/opt/WidevineCdm/gmp-widevinecdm/latest/libwidevinecdm.so chromium/WidevineCdm/_platform_specific/linux_arm/ &&
+    cp wv.tmp/root/opt/WidevineCdm/manifest.json chromium/WidevineCdm/ &&
+    echo "run.sh: Widevine installed" || { echo "run.sh: Widevine download failed"; rm -f chromium/WidevineCdm/manifest.json; }
+    rm -rf wv.tmp
+  fi
+fi
+echo "run.sh: Widevine files: $(ls -l chromium/WidevineCdm/manifest.json chromium/WidevineCdm/_platform_specific/linux_arm/libwidevinecdm.so 2>&1 | tr '\n' ' ')"
 # Widevine (if installed): tell Chromium where it is, as its component updater would (that's off)
 if [ -f chromium/WidevineCdm/manifest.json ]; then
   mkdir -p profile/WidevineCdm

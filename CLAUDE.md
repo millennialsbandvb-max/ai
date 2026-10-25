@@ -114,7 +114,12 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   mv_open adds ChromeOS client hints (Emulation.setUserAgentOverride). First device try: Netflix error C7702-1003
   (Widevine registers, per a qemu test with a dummy .so in chromium/WidevineCdm, so it likely fails to load); /log now
   shows a once-per-run load check (createMediaKeys on the first https page) and the browser's cdm/widevine lines.
-  Bookmarks bar (BM_H row under the address bar; Bookmark/Saved button at its right) in /data/mpc-browser-bookmarks.
+  Device log then said "Widevine enabled but no library found": the install had no WidevineCdm (likely from a card
+  bundle), so run.sh now fetches it itself (the https line of browser-packages.txt, via debfetch) when missing, and
+  logs "run.sh: Widevine files: ..."; the load check's result also shows in the MPC's address bar for 8 s.
+  Top bar is Chrome-like (dark theme colours): back/forward/reload/home icons (drawn by make_keyboard.py, ICON_ALPHA),
+  address pill with the bookmark star at its right end, a Go button; bookmarks bar (BM_H) under it, in
+  /data/mpc-browser-bookmarks. The remote page's browser bar has a Go button too.
   Password saver: an injected script calls the binding mpcPw (Runtime.addBinding; needs Runtime.enable) with
   "origin user pass" (URL-encoded) on submit/click/Enter; stored 0600 in /data/mpc-browser-passwords (plain text);
   pw_fill fills on Page.domContentEventFired. The remote page's "Forget passwords" deletes the file. Every mv_send

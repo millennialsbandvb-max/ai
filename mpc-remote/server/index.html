@@ -93,6 +93,7 @@
   <button id="bfwd" type="button" title="forward">&#9654;</button>
   <button id="breload" type="button" title="reload">&#10227;</button>
   <input id="burl" type="text" placeholder="address or search" autocomplete="off" autocapitalize="off" spellcheck="false">
+  <button id="bgo" type="button">Go</button>
   <button id="bforget" type="button" title="delete the passwords the MPC browser saved">Forget passwords</button>
   <span id="bstat"></span>
 </div>
@@ -675,6 +676,7 @@ function bGo() {
   bUrl.blur();
 }
 bUrl.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); bGo(); } });
+B("bgo").onclick = () => bGo();
 B("bback").onclick = () => cdpCall("Runtime.evaluate", {expression: "history.back()"});
 B("bfwd").onclick = () => cdpCall("Runtime.evaluate", {expression: "history.forward()"});
 B("breload").onclick = () => cdpCall("Page.reload");

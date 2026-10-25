@@ -101,3 +101,70 @@ with open(out + "/keyboard.h", "a") as f:
         f.write("  " + ",".join(str(b) for b in data[i:i + 32]) + ",\n")
     f.write("};\n")
 print(f"keyboard: {len(keys)} keys, {W}x{KH}")
+# the browser bar's icons (Chrome-like): back, forward, reload, home, star (outline), star (filled); ICON x ICON coverage
+ICON = 30
+S4 = ICON * 4
+
+
+def icon(draw_fn):
+    im = Image.new("L", (S4, S4), 0)
+    draw_fn(ImageDraw.Draw(im), S4)
+    return im.resize((ICON, ICON), Image.LANCZOS)
+
+
+def arrow(d, s, left):
+    w = s // 11
+    y = s // 2
+    x0, x1 = (s * 0.2, s * 0.8) if left else (s * 0.8, s * 0.2)
+    d.line([(x0, y), (x1, y)], fill=255, width=w)
+    k = s * 0.28 * (1 if left else -1)
+    d.line([(x0, y), (x0 + k, y - abs(k))], fill=255, width=w)
+    d.line([(x0, y), (x0 + k, y + abs(k))], fill=255, width=w)
+    for p in ((x0, y),):
+        d.ellipse([p[0] - w / 2, p[1] - w / 2, p[0] + w / 2, p[1] + w / 2], fill=255)
+
+
+def reload_(d, s):
+    w = s // 11
+    m = s * 0.2
+    d.arc([m, m, s - m, s - m], 40, 330, fill=255, width=w)
+    import math
+    a = math.radians(330)
+    cx = cy = s / 2
+    r = (s - 2 * m) / 2
+    tx, ty = cx + r * math.cos(a), cy + r * math.sin(a)
+    h = s * 0.2
+    d.polygon([(tx - h * 0.2, ty - h), (tx + h, ty - h * 0.1), (tx - h * 0.1, ty + h * 0.55)], fill=255)
+
+
+def home(d, s):
+    w = s // 11
+    d.line([(s * 0.15, s * 0.5), (s * 0.5, s * 0.17), (s * 0.85, s * 0.5)], fill=255, width=w, joint="curve")
+    d.line([(s * 0.27, s * 0.42), (s * 0.27, s * 0.84), (s * 0.73, s * 0.84), (s * 0.73, s * 0.42)], fill=255, width=w, joint="curve")
+
+
+def star(d, s, filled):
+    import math
+    pts = []
+    for i in range(10):
+        r = s * (0.42 if i % 2 == 0 else 0.18)
+        a = math.radians(-90 + i * 36)
+        pts.append((s / 2 + r * math.cos(a), s * 0.53 + r * math.sin(a)))
+    if filled:
+        d.polygon(pts, fill=255)
+    else:
+        d.line(pts + [pts[0]], fill=255, width=s // 14, joint="curve")
+
+
+icons = [icon(lambda d, s: arrow(d, s, True)), icon(lambda d, s: arrow(d, s, False)), icon(reload_), icon(home),
+         icon(lambda d, s: star(d, s, False)), icon(lambda d, s: star(d, s, True))]
+with open(out + "/keyboard.h", "a") as f:
+    f.write(f"#define ICON {ICON}\nenum {{ IC_BACK, IC_FORWARD, IC_RELOAD, IC_HOME, IC_STAR, IC_STAR_ON, IC_N }};\n")
+    f.write("static const unsigned char ICON_ALPHA[IC_N][ICON * ICON] = {\n")
+    for im in icons:
+        f.write("  {" + ",".join(map(str, im.tobytes())) + "},\n")
+    f.write("};\n")
+strip = Image.new("L", (ICON * len(icons), ICON))
+for i, im in enumerate(icons):
+    strip.paste(im, (i * ICON, 0))
+strip.save(out + "/icons.png")

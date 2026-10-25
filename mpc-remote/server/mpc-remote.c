@@ -164,7 +164,13 @@ static int fb_map(uint32_t fb_id) {   /* map the framebuffer the display is show
         if (f.handles[i] && f.handles[i] != f.handles[0]) { struct drm_gem_close c = {.handle = f.handles[i]}; ioctl(drm_fd, DRM_IOCTL_GEM_CLOSE, &c); }
     fbm.fb_id = fb_id; fbm.handle = f.handles[0]; fbm.pitch = f.pitches[0]; fbm.format = f.pixel_format;
     if (f.pixel_format != DRM_FORMAT_XRGB8888 && f.pixel_format != DRM_FORMAT_ARGB8888) { LOG("unexpected pixel format %08x", f.pixel_format); fb_unmap(); return -1; }
-    if ((int)f.width != W || (int)f.height != H) { LOG("screen size changed to %ux%u", f.width, f.height); fb_unmap(); return -1; }
+    if ((int)f.width != W || (int)f.height != H) {   /* (MPC shows other sizes while starting: say so once) */
+        static uint32_t said_w, said_h;
+        if (f.width != said_w || f.height != said_h) LOG("screen size changed to %ux%u", f.width, f.height);
+        said_w = f.width; said_h = f.height;
+        fb_unmap();
+        return -1;
+    }
     struct drm_mode_map_dumb md = {.handle = f.handles[0]};
     if (ioctl(drm_fd, DRM_IOCTL_MODE_MAP_DUMB, &md)) { LOG("MAP_DUMB: %s", strerror(errno)); fb_unmap(); return -1; }
     fbm.len = (size_t)f.pitches[0] * f.height + f.offsets[0];
@@ -1093,12 +1099,20 @@ static int mv_focus_id;                   /* the "did that tap land in a text bo
 #define BAR_H 48
 #define BM_H 40                           /* the bookmarks bar under it */
 #define TOP_H (BAR_H + BM_H)              /* the web page starts here */
-#define BM_BTN_W 130                      /* the address bar's Bookmark button (right end) */
+/* the top bar, laid out like Chrome's: back, forward, reload, home | the address box (star at its right end) | Go */
+#define NB_W 48                           /* each round button */
+#define NB_X0 6                           /* the first one's left edge */
+#define BOX_X0 (NB_X0 + 4 * NB_W + 8)     /* the address box */
+#define GO_W 72                           /* the Go button, at the right */
+#define STAR_W 44                         /* the star, inside the box's right end */
+enum { HOT_NONE, HOT_BACK, HOT_FORWARD, HOT_RELOAD, HOT_HOME, HOT_STAR, HOT_GO };
+static int bar_hot;                       /* the bar button being pressed (drawn lit) */
 static char url_cur[512], url_edit[512];
 static int url_editing;
 static uint64_t mv_focus_at;
 static char bar_note[160];                /* a short message shown in the address bar for a moment */
 static uint64_t bar_note_until;
+static uint32_t bar_note_color = 0x8fd18f;
 static void mv_publish(void);
 
 /* files kept on the MPC's internal storage (outside the browser's folder, so reinstalling it keeps them) */
@@ -1216,6 +1230,7 @@ static void pw_store(const char *payload) {   /* "origin user password" from the
         char site[40];
         bm_name(o, site, sizeof site);
         snprintf(bar_note, sizeof bar_note, "password saved for %s", site);
+        bar_note_color = 0x81c995;
         bar_note_until = now_ms() + 3000;
         LOG("browser: password saved for %s", site);
         mv_publish();
@@ -1450,40 +1465,90 @@ static void rect_fill(uint32_t *dst, int W, int H, int x0, int y0, int x1, int y
         for (int y = y0 < 0 ? 0 : y0; y < y1 && y < H; y++) dst[(size_t)(W - 1 - x) * H + y] = c;
 }
 
-static void bar_draw(uint32_t *dst, int W, int H) {   /* the address bar and the bookmarks bar: rows 0..TOP_H */
-    const int fx0 = 8, fx1 = W - 8 - BM_BTN_W - 8, fy0 = 6, fy1 = BAR_H - 6;
-    for (int x = 0; x < W; x++)
-        for (int y = 0; y < BAR_H; y++) {
-            uint32_t c = 0x1e1e20;
-            if (x >= fx0 && x < fx1 && y >= fy0 && y < fy1) {
-                const int edge = x < fx0 + 2 || x >= fx1 - 2 || y < fy0 + 2 || y >= fy1 - 2;
-                c = edge ? (url_editing ? 0xe5742b : 0x44444a) : 0x2c2c30;
-            }
-            dst[(size_t)(W - 1 - x) * H + y] = c;
+/* Chrome's dark theme */
+#define C_TOOLBAR 0x35363a
+#define C_BOX 0x202124
+#define C_TEXT 0xe8eaed
+#define C_DIM 0x9aa0a6
+#define C_ACCENT 0x8ab4f8
+
+static void round_fill(uint32_t *dst, int W, int H, int x0, int y0, int x1, int y1, int r, uint32_t c) {   /* as seen */
+    for (int x = x0 < 0 ? 0 : x0; x < x1 && x < W; x++)
+        for (int y = y0 < 0 ? 0 : y0; y < y1 && y < H; y++) {
+            const int dx = x < x0 + r ? x0 + r - x : x >= x1 - r ? x - (x1 - r - 1) : 0;
+            const int dy = y < y0 + r ? y0 + r - y : y >= y1 - r ? y - (y1 - r - 1) : 0;
+            if (dx * dx + dy * dy <= r * r) dst[(size_t)(W - 1 - x) * H + y] = c;
         }
-    /* the Bookmark button: lit when this page is bookmarked */
+}
+
+static void icon_draw(uint32_t *dst, int W, int H, int x, int y, int ic, uint32_t color) {   /* x, y: its top-left */
+    for (int gx = 0; gx < ICON; gx++)
+        for (int gy = 0; gy < ICON; gy++) {
+            const unsigned a = ICON_ALPHA[ic][gy * ICON + gx];
+            if (!a || x + gx < 0 || x + gx >= W || y + gy >= H) continue;
+            uint32_t *d = dst + (size_t)(W - 1 - x - gx) * H + y + gy, o = 0;
+            for (int sh = 0; sh < 24; sh += 8)
+                o |= ((((*d >> sh) & 255) * (255 - a) + ((color >> sh) & 255) * a) / 255) << sh;
+            *d = o;
+        }
+}
+
+static void bar_draw(uint32_t *dst, int W, int H) {   /* the top bar and the bookmarks bar: rows 0..TOP_H */
     bm_load();
-    const int saved = url_cur[0] && bm_find(url_cur) >= 0, bx0 = W - 8 - BM_BTN_W;
-    rect_fill(dst, W, H, bx0, fy0, W - 8, fy1, saved ? 0xe5742b : 0x3a3a3e);
-    const char *bl = saved ? "Saved" : "Bookmark";
-    text_draw(dst, W, H, bx0 + (BM_BTN_W - text_width(bl)) / 2, (BAR_H - FONT_H) / 2, bl, 0xf0f0f0, bx0, W - 8);
+    rect_fill(dst, W, H, 0, 0, W, TOP_H, C_TOOLBAR);
+    const int iy = (BAR_H - ICON) / 2;
+    static const int nav[4] = {IC_BACK, IC_FORWARD, IC_RELOAD, IC_HOME};
+    for (int i = 0; i < 4; i++) {
+        const int bx = NB_X0 + i * NB_W;
+        if (bar_hot == HOT_BACK + i) round_fill(dst, W, H, bx + 2, 2, bx + NB_W - 2, BAR_H - 2, (BAR_H - 4) / 2, 0x4a4b50);
+        icon_draw(dst, W, H, bx + (NB_W - ICON) / 2, iy, nav[i], C_TEXT);
+    }
+    /* the address box: a pill, outlined blue while typing */
+    const int bx0 = BOX_X0, bx1 = W - 8 - GO_W - 8, by0 = 6, by1 = BAR_H - 6, r = (by1 - by0) / 2;
+    if (url_editing) round_fill(dst, W, H, bx0 - 2, by0 - 2, bx1 + 2, by1 + 2, r + 2, C_ACCENT);
+    round_fill(dst, W, H, bx0, by0, bx1, by1, r, C_BOX);
+    const int saved = url_cur[0] && bm_find(url_cur) >= 0, sx = bx1 - STAR_W;
+    if (bar_hot == HOT_STAR) round_fill(dst, W, H, sx + 4, by0 + 2, bx1 - 4, by1 - 2, (by1 - by0 - 4) / 2, 0x3c4043);
+    icon_draw(dst, W, H, sx + (STAR_W - ICON) / 2 - 4, iy, saved ? IC_STAR_ON : IC_STAR, saved ? C_ACCENT : C_TEXT);
+    char shown[530];
+    uint32_t color = C_TEXT;
+    if (bar_note[0] && !url_editing) { snprintf(shown, sizeof shown, "%s", bar_note); color = bar_note_color; }
+    else if (url_editing) snprintf(shown, sizeof shown, "%s|", url_edit);
+    else if (url_cur[0] && strcmp(url_cur, "about:blank")) {   /* like Chrome: the address without https://www. */
+        const char *u = url_cur;
+        if (!strncmp(u, "https://", 8)) u += 8;
+        if (!strncmp(u, "www.", 4)) u += 4;
+        snprintf(shown, sizeof shown, "%s", u);
+    } else { snprintf(shown, sizeof shown, "Search Google or type a URL"); color = C_DIM; }
+    const int tx0 = bx0 + r, tx1 = sx - 4, room = tx1 - tx0, tw = text_width(shown);
+    const int tx = tx0 - (url_editing && tw > room ? tw - room : 0);   /* while typing, keep the end in view */
+    text_draw(dst, W, H, tx, (BAR_H - FONT_H) / 2, shown, color, tx0, tx1);
+    /* Go */
+    const int gx0 = W - 8 - GO_W;
+    round_fill(dst, W, H, gx0, by0, W - 8, by1, r, bar_hot == HOT_GO ? 0xaecbfa : C_ACCENT);
+    text_draw(dst, W, H, gx0 + (GO_W - text_width("Go")) / 2, (BAR_H - FONT_H) / 2, "Go", C_BOX, gx0, W - 8);
     /* the bookmarks bar */
-    rect_fill(dst, W, H, 0, BAR_H, W, TOP_H, 0x18181a);
-    if (!bm_n) text_draw(dst, W, H, 16, BAR_H + (BM_H - FONT_H) / 2, "Bookmarks: open a page and tap Bookmark", 0x76767c, 0, W);
+    rect_fill(dst, W, H, 0, BAR_H, W, BAR_H + 1, 0x494c50);
+    if (!bm_n) text_draw(dst, W, H, 16, BAR_H + (BM_H - FONT_H) / 2, "Bookmarks: tap the star to add this page", C_DIM, 0, W);
     for (int i = 0, x, w; i < bm_n && bm_rect(i, W, &x, &w); i++) {
         const int cur = !strcmp(bm[i].url, url_cur);
-        rect_fill(dst, W, H, x, BAR_H + 4, x + w, TOP_H - 4, cur ? 0x4a3a30 : 0x2e2e32);
-        text_draw(dst, W, H, x + 12, BAR_H + (BM_H - FONT_H) / 2, bm[i].name, 0xdcdcdc, x + 6, x + w - 6);
+        round_fill(dst, W, H, x, BAR_H + 5, x + w, TOP_H - 4, 15, cur ? 0x4a4d52 : 0x3c3d41);
+        text_draw(dst, W, H, x + 12, BAR_H + (BM_H - FONT_H) / 2, bm[i].name, C_TEXT, x + 6, x + w - 6);
     }
-    char shown[530];
-    uint32_t color = 0xe6e6e6;
-    if (bar_note[0] && !url_editing) { snprintf(shown, sizeof shown, "%s", bar_note); color = 0x8fd18f; }
-    else if (url_editing) snprintf(shown, sizeof shown, "%s|", url_edit);
-    else if (url_cur[0] && strcmp(url_cur, "about:blank")) snprintf(shown, sizeof shown, "%s", url_cur);
-    else { snprintf(shown, sizeof shown, "tap here to type an address or search"); color = 0x8a8a90; }
-    const int room = fx1 - fx0 - 24, tw = text_width(shown);
-    const int tx = fx0 + 12 - (url_editing && tw > room ? tw - room : 0);   /* while typing, keep the end in view */
-    text_draw(dst, W, H, tx, (BAR_H - FONT_H) / 2, shown, color, fx0 + 6, fx1 - 6);
+}
+
+static int bar_hit(int x, int W) {   /* which top-bar button is at x (0: the address box) */
+    if (x >= NB_X0 && x < NB_X0 + 4 * NB_W) return HOT_BACK + (x - NB_X0) / NB_W;
+    if (x >= W - 8 - GO_W - 4) return HOT_GO;
+    if (x >= W - 8 - GO_W - 8 - STAR_W) return HOT_STAR;
+    return HOT_NONE;
+}
+
+static void nav_cmd(int c) {   /* back, forward, reload, home: from the bar or the plugin's buttons */
+    if (c == OV_CMD_BACK) mv_send("\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"history.back()\"}");
+    else if (c == OV_CMD_FORWARD) mv_send("\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"history.forward()\"}");
+    else if (c == OV_CMD_RELOAD) mv_send("\"method\":\"Page.reload\"");
+    else if (c == OV_CMD_HOME) mv_send("\"method\":\"Page.navigate\",\"params\":{\"url\":\"https://www.youtube.com\"}");
 }
 
 static void url_go(const char *in) {   /* an address, or words to search for */
@@ -1708,6 +1773,12 @@ static void mv_read(void) {   /* DevTools messages (server frames: not masked) *
                 wv_id = 0;
                 const char *v = strstr(m, "\"value\":\"");
                 LOG("browser: Widevine (for Netflix) %.150s", v ? v + 9 : m);
+                const int fine = v && !strncmp(v + 9, "loads fine", 10);
+                snprintf(bar_note, sizeof bar_note, "%s", fine ? "Widevine (Netflix) is working" :
+                         "Widevine (Netflix) isn't working: details at mpc.local:8080/log");
+                bar_note_color = fine ? 0x81c995 : 0xf28b82;
+                bar_note_until = now_ms() + 8000;
+                mv_publish();
             }
             else if (!strncmp(m, "{\"id\":", 6) && strstr(m, "\"error\":")) LOG("browser on the MPC: the browser said %.160s", m);
             else if (mv_focus_id && !strncmp(m, "{\"id\":", 6) && atoi(m + 6) == mv_focus_id) {
@@ -1763,8 +1834,17 @@ static void mpc_view_tick(void) {
                             "\"deltaX\":0,\"deltaY\":%d}", x, y, slot * 100 / 120);
                 continue;
             }
-            if (k == OV_DOWN && y < BAR_H && x >= mv_w - 8 - BM_BTN_W) {   /* the Bookmark button */
-                bm_toggle();
+            const int hot = k == OV_DOWN && y < BAR_H ? bar_hit(x, mv_w) : HOT_NONE;
+            if (hot != HOT_NONE) {   /* a top-bar button: lit while pressed */
+                bar_hot = hot;
+                if (hot >= HOT_BACK && hot <= HOT_HOME) {
+                    if (url_editing) { url_editing = 0; kb_show(0); }
+                    nav_cmd(OV_CMD_BACK + hot - HOT_BACK);
+                } else if (hot == HOT_STAR) bm_toggle();
+                else if (hot == HOT_GO) {   /* go to what's typed (or, if nothing is, start typing) */
+                    if (url_editing && url_edit[0]) { url_editing = 0; url_go(url_edit); kb_show(0); }
+                    else if (!url_editing) { url_editing = 1; url_edit[0] = 0; bar_note[0] = 0; kb_show(1); }
+                }
                 mv_publish();
                 kb_slot = -2;
                 continue;
@@ -1790,7 +1870,7 @@ static void mpc_view_tick(void) {
                 continue;
             }
             if (k == OV_DOWN) kb_slot = TOP_H + webh < mv_h && y >= TOP_H + webh ? slot : -1;   /* on the keyboard */
-            if (kb_slot == -2) { if (k == OV_UP) kb_slot = -1; continue; }
+            if (kb_slot == -2) { if (k == OV_UP) { kb_slot = -1; if (bar_hot) { bar_hot = 0; mv_publish(); } } continue; }
             if (kb_slot >= 0 && slot == kb_slot) { kb_touch(k, x, y - TOP_H - webh); if (k == OV_UP) kb_slot = -1; continue; }
             if (k == OV_UP) mv_focus_at = t + 350;   /* then: did that tap land in a text box? */
             if (k == OV_UP) mv_send("\"method\":\"Input.dispatchTouchEvent\",\"params\":{\"type\":\"touchEnd\",\"touchPoints\":[]}");
@@ -1818,11 +1898,8 @@ static void mpc_view_tick(void) {
     if (cs != mv_cmd_seen) {
         mv_cmd_seen = cs;
         const uint32_t c = ovs->cmd;
-        if (c == OV_CMD_BACK) mv_send("\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"history.back()\"}");
-        else if (c == OV_CMD_FORWARD) mv_send("\"method\":\"Runtime.evaluate\",\"params\":{\"expression\":\"history.forward()\"}");
-        else if (c == OV_CMD_RELOAD) mv_send("\"method\":\"Page.reload\"");
-        else if (c == OV_CMD_KEYBOARD) kb_show(!kb_on);
-        else if (c == OV_CMD_HOME) mv_send("\"method\":\"Page.navigate\",\"params\":{\"url\":\"https://www.youtube.com\"}");
+        if (c == OV_CMD_KEYBOARD) kb_show(!kb_on);
+        else nav_cmd((int)c);
     }
 }
 
