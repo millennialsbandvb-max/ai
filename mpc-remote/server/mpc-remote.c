@@ -980,7 +980,9 @@ static void browser_start(void) {
         const int fd = open("/tmp/mpc-browser.log", O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd >= 0) { dup2(fd, 1); dup2(fd, 2); }
         setpriority(PRIO_PROCESS, 0, 10);   /* MPC's audio always comes first */
-        execl("/bin/sh", "sh", BROWSER_DIR "/run.sh", (char *)NULL);
+        /* the firmware's own start script (an older install's copy may predate its settings) */
+        execl("/bin/sh", "sh", access("/usr/lib/nam-mpc/bin/browser-run.sh", R_OK) ? BROWSER_DIR "/run.sh" :
+              "/usr/lib/nam-mpc/bin/browser-run.sh", (char *)NULL);
         _exit(127);
     }
     if (p > 0) { browser_pid = p; browser_note[0] = 0; LOG("browser: started (pid %d)", (int)p); }
@@ -1411,8 +1413,7 @@ static void mpc_view_tick(void) {
     } else if (mv_casting) {   /* off screen a few seconds: stop the pictures (saves the processor) */
         if (!mv_hidden_since) mv_hidden_since = t;
         else if (t - mv_hidden_since > 3000) {
-            mv_send("\"method\":\"Page.stopScreencast\"");
-            mv_send("\"method\":\"Emulation.clearDeviceMetricsOverride\"");
+            mv_send("\"method\":\"Page.stopScreencast\"");   /* (the page keeps the MPC screen's size: no re-layout) */
             mv_casting = 0;
             LOG("browser on the MPC: page closed");
         }

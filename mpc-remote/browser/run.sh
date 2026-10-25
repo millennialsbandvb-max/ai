@@ -11,7 +11,7 @@ EOC
 export HOME="$D/home" FONTCONFIG_FILE="$D/fonts.conf" LD_LIBRARY_PATH="$D/lib:$D/lib/pulseaudio:$D/chromium"
 export PULSE_SERVER=none   # no PulseAudio here: straight to ALSA
 exec "$D/chromium/chromium" --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage \
-  --remote-debugging-port=9222 --remote-allow-origins='*' --user-data-dir="$D/profile" --window-size=960,540 \
+  --remote-debugging-port=9222 --remote-allow-origins='*' --user-data-dir="$D/profile" --window-size=1240,544 \
   --autoplay-policy=no-user-gesture-required --renderer-process-limit=2 --disable-extensions --no-first-run \
   --disable-component-update --disable-background-networking --disable-features=Translate,MediaRouter \
   --js-flags=--max-old-space-size=256 about:blank
