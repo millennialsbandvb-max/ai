@@ -43,7 +43,7 @@ static void olog(const char *fmt, ...) {
     fclose(f);
 }
 
-enum { DRM_PLANE_TYPE_OVERLAY = 0, DRM_PLANE_TYPE_PRIMARY = 1 };   /* (libdrm's values; not in the kernel headers) */
+enum { DRM_PLANE_TYPE_OVERLAY = 0, DRM_PLANE_TYPE_PRIMARY = 1, DRM_PLANE_TYPE_CURSOR = 2 };   /* (libdrm's values; not in the kernel headers) */
 #define PW 800    /* the panel, as it scans (portrait) */
 #define PH 1280
 
@@ -56,6 +56,9 @@ static uint32_t prim_fb_prop;
 static uint32_t p_zpos;         /* the layer's stacking order, if it can be set: put it in front of MPC's */
 static uint64_t zpos_front;
 static uint64_t mpc_fb;         /* the picture MPC is showing (its primary plane's FB_ID) */
+/* the mouse pointer: Hakai's mpc_cursor.so draws it on the cursor plane; where it puts that plane is where it is */
+static uint32_t cursor_plane, c_x, c_y, c_w, c_h;
+static volatile int64_t cur_x = -1, cur_y = -1, cur_w = 32, cur_h = 32;
 static int shown;               /* our layer is on */
 static volatile int vis;        /* the page is on screen (for the touch hook) */
 static int rx0, ry0, rw, rh;    /* where (landscape) */
@@ -170,6 +173,14 @@ static int setup(int fd) {
         if (xrgb && (int)gp.count_format_types > best_formats) { layer = planes[i]; best_formats = (int)gp.count_format_types; }
     }
     if (!layer) return -1;
+    for (uint32_t i = 0; i < pr.count_planes && i < 32 && !cursor_plane; i++) {
+        uint64_t type = 0;
+        if (prop_id(fd, planes[i], "type", &type) && type == DRM_PLANE_TYPE_CURSOR) {
+            cursor_plane = planes[i];
+            c_x = prop_id(fd, planes[i], "CRTC_X", NULL); c_y = prop_id(fd, planes[i], "CRTC_Y", NULL);
+            c_w = prop_id(fd, planes[i], "CRTC_W", NULL); c_h = prop_id(fd, planes[i], "CRTC_H", NULL);
+        }
+    }
     prim_fb_prop = prop_id(fd, primary, "FB_ID", NULL);
     p_fb = prop_id(fd, layer, "FB_ID", NULL); p_crtc = prop_id(fd, layer, "CRTC_ID", NULL);
     p_sx = prop_id(fd, layer, "SRC_X", NULL); p_sy = prop_id(fd, layer, "SRC_Y", NULL);
@@ -253,6 +264,12 @@ int drmModeAtomicAddProperty(void *req, uint32_t obj, uint32_t prop, uint64_t va
     if (!real) real = (int (*)(void *, uint32_t, uint32_t, uint64_t))dlsym(RTLD_NEXT, "drmModeAtomicAddProperty");
     if (!real) return -38;
     if (ready && obj == primary && prop == prim_fb_prop) mpc_fb = value;
+    else if (ready && cursor_plane && obj == cursor_plane) {
+        if (prop == c_x) cur_x = (int32_t)value;
+        else if (prop == c_y) cur_y = (int32_t)value;
+        else if (prop == c_w) cur_w = (int64_t)value;
+        else if (prop == c_h) cur_h = (int64_t)value;
+    }
     else if (!ready) {
         unsigned k = 0;
         while (k < nrecent && !(recent[k].obj == obj && recent[k].prop == prop)) k++;
@@ -343,6 +360,9 @@ struct libinput_event *libinput_get_event(struct libinput *li) {
     static double (*xt)(void *, uint32_t), (*yt)(void *, uint32_t);
     static void (*destroy)(struct libinput_event *);
     static uint8_t mine[16];
+    static void *(*pointer)(struct libinput_event *);
+    static int (*has_axis)(void *, int);
+    static double (*v120)(void *, int);
     if (!real) {
         real = (struct libinput_event * (*)(struct libinput *))dlsym(RTLD_NEXT, "libinput_get_event");
         type = (int (*)(struct libinput_event *))dlsym(RTLD_DEFAULT, "libinput_event_get_type");
@@ -351,12 +371,37 @@ struct libinput_event *libinput_get_event(struct libinput *li) {
         xt = (double (*)(void *, uint32_t))dlsym(RTLD_DEFAULT, "libinput_event_touch_get_x_transformed");
         yt = (double (*)(void *, uint32_t))dlsym(RTLD_DEFAULT, "libinput_event_touch_get_y_transformed");
         destroy = (void (*)(struct libinput_event *))dlsym(RTLD_DEFAULT, "libinput_event_destroy");
+        pointer = (void *(*)(struct libinput_event *))dlsym(RTLD_DEFAULT, "libinput_event_get_pointer_event");
+        has_axis = (int (*)(void *, int))dlsym(RTLD_DEFAULT, "libinput_event_pointer_has_axis");
+        v120 = (double (*)(void *, int))dlsym(RTLD_DEFAULT, "libinput_event_pointer_get_scroll_value_v120");
     }
     if (!real) return NULL;
     for (;;) {
         struct libinput_event *e = real(li);
         if (!e || !ov || !type || !touch || !slotf || !xt || !yt || !destroy) return e;
         const int t = type(e);
+        /* the mouse wheel over the browser: scroll the browser, not MPC */
+        enum { AXIS = 403, SCROLL_WHEEL = 404, SCROLL_CONTINUOUS = 406 };
+        if (t >= AXIS && t <= SCROLL_CONTINUOUS && vis && cur_x >= 0 && pointer && has_axis && v120) {
+            /* the pointer's tip, as seen: the cursor picture's top-left corner (the panel is turned) */
+            const int lx = PH - (int)cur_y - (int)cur_h, ly = (int)cur_x;
+            if (lx >= rx0 && lx < rx0 + rw && ly >= ry0 && ly < ry0 + rh) {
+                if (t == SCROLL_WHEEL) {   /* (the older AXIS and touchpad events are just kept from MPC) */
+                    void *pe = pointer(e);
+                    const int d = has_axis(pe, 0) ? (int)v120(pe, 0) : 0;
+                    if (d) {
+                        const uint32_t i = ov->touch_wr % OVERLAY_TOUCHES;
+                        ov->touch[i].kind = OV_WHEEL;
+                        ov->touch[i].x = (int16_t)(lx - rx0);
+                        ov->touch[i].y = (int16_t)(ly - ry0);
+                        ov->touch[i].slot = (int16_t)(d > 32000 ? 32000 : d < -32000 ? -32000 : d);
+                        __atomic_store_n(&ov->touch_wr, ov->touch_wr + 1, __ATOMIC_RELEASE);
+                    }
+                }
+                destroy(e);
+                continue;
+            }
+        }
         enum { DOWN = 500, UP = 501, MOTION = 502, CANCEL = 503 };
         if (t < DOWN || t > CANCEL) return e;
         void *te = touch(e);

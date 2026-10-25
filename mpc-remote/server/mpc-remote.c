@@ -1403,6 +1403,12 @@ static void mpc_view_tick(void) {
         for (; mv_touch_rd != wr; mv_touch_rd++) {
             const int k = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].kind, slot = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].slot;
             const int x = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].x, y = ovs->touch[mv_touch_rd % OVERLAY_TOUCHES].y;
+            if (k == OV_WHEEL) {   /* the mouse wheel (slot = how far: 120 a notch) */
+                if (y < webh)
+                    mv_send("\"method\":\"Input.dispatchMouseEvent\",\"params\":{\"type\":\"mouseWheel\",\"x\":%d,\"y\":%d,"
+                            "\"deltaX\":0,\"deltaY\":%d}", x, y, slot * 100 / 120);
+                continue;
+            }
             if (k == OV_DOWN) kb_slot = webh < mv_h && y >= webh ? slot : -1;   /* this touch is on the keyboard */
             if (kb_slot >= 0 && slot == kb_slot) { kb_touch(k, x, y - webh); if (k == OV_UP) kb_slot = -1; continue; }
             if (k == OV_UP) mv_focus_at = t + 350;   /* then: did that tap land in a text box? */

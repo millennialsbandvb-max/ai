@@ -14,7 +14,7 @@
 #define OVERLAY_MAX_PIX (1280u * 800u)
 #define OVERLAY_TOUCHES 64u
 
-enum { OV_DOWN = 1, OV_MOVE = 2, OV_UP = 3 };
+enum { OV_DOWN = 1, OV_MOVE = 2, OV_UP = 3, OV_WHEEL = 4 };   /* OV_WHEEL: slot holds the scroll (120 = one notch) */
 enum { OV_CMD_BACK = 1, OV_CMD_FORWARD = 2, OV_CMD_RELOAD = 3, OV_CMD_HOME = 4, OV_CMD_KEYBOARD = 5 };
 
 struct overlay_shm {
