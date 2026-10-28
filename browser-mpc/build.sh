@@ -8,7 +8,7 @@ REPO="$(dirname "$HERE")"
 MODE="${1:-arm}"
 B="$HERE/build"
 SYSROOT="${ARM_SYSROOT:-/usr/arm-linux-gnueabihf}"
-PAGE="MPC-Browser - VST - MPC Browser"
+PAGE="Other Things - VST - MPC Browser"
 mkdir -p "$B"
 case "$MODE" in
 arm)

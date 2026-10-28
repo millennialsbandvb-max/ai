@@ -10,7 +10,7 @@ REPO="$(dirname "$HERE")"
 MODE="${1:-arm}"
 B="$HERE/build"
 SYSROOT="${ARM_SYSROOT:-/usr/arm-linux-gnueabihf}"
-PAGE="Duo-FX - VST - Duo FX"
+PAGE="Other Things - VST - Duo FX"
 ARMF=(-march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard -mtune=cortex-a17)
 mkdir -p "$B"
 case "$MODE" in

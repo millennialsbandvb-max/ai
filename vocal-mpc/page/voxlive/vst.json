@@ -1,0 +1,9 @@
+{
+  "name": "VoxLive 3X",
+  "vendor": "Other Things",
+  "uid": "VLX3",
+  "version": 1000,
+  "so": "VoxLive-3X.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}

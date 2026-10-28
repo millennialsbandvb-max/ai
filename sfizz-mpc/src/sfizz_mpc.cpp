@@ -35,7 +35,7 @@
 namespace fs = std::filesystem;
 
 #define PLUG_NAME "SFZ MPC"
-#define PLUG_VENDOR "SFZ-MPC"
+#define PLUG_VENDOR "Other Things"
 #define PLUG_UID 0x53465a4d /* 'SFZM' */
 #define PLUG_VERSION 1000
 

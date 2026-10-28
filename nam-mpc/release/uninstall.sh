@@ -4,7 +4,7 @@
 # Your models and IRs in /sdcard/vst/NAM are kept; delete that folder yourself if you want them gone.
 set -e
 cd "$(dirname "$0")"
-SO_DIR=/sdcard/vst; SO=NAM-MPC.so; SKIN='NAM-MPC - VST - NAM MPC'
+SO_DIR=/sdcard/vst; SO=NAM-MPC.so; SKIN='Other Things - VST - NAM MPC'
 YES=0; [ "$1" = "-y" ] && YES=1
 die() { echo "error: $*" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || die "run as root"

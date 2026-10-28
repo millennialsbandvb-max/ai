@@ -60,6 +60,6 @@ bundle)
   qemu-arm -L "$SYSROOT" "$B/vst-probe-arm" "$B/bundle/plugins/SFZ-MPC.so" /usr/lib/nam-mpc/plugins/SFZ-MPC.so \
     > "$B/bundle/entries/SFZ-MPC.xml"
   cat "$B/bundle/entries/SFZ-MPC.xml"
-  [ -d "$B/bundle/skins/SFZ-MPC - VST - SFZ MPC" ] || { echo "no page folder for SFZ MPC" >&2; exit 1; } ;;
+  [ -d "$B/bundle/skins/Other Things - VST - SFZ MPC" ] || { echo "no page folder for SFZ MPC" >&2; exit 1; } ;;
 *) echo "usage: $0 [host|arm|test|skin|bundle]" >&2; exit 2 ;;
 esac

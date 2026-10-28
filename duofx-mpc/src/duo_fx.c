@@ -1758,7 +1758,7 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
     case effCanBeAutomated: return idx >= 0 && idx < kNumParams && !(idx < kRouting && idx % P_SLOT >= P_NAME);
     case effGetPlugCategory: return kPlugCategEffect;
     case effGetEffectName: case effGetProductString: copy_str(p, "Duo FX", 32); return 1;
-    case effGetVendorString: copy_str(p, "Duo-FX", 32); return 1;
+    case effGetVendorString: copy_str(p, "Other Things", 32); return 1;
     case effGetVendorVersion: return 2000;
     case effGetVstVersion: return 2400;
     case effSetSampleRate: if (opt > 1000 && fabsf(opt - s->fs) > 0.5f) setup(s, opt); return 1;

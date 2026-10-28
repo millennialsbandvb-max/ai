@@ -11,14 +11,14 @@
 #      (systemd drop-ins for the image's own units, e.g. mpc-remote's for acvs.service, which runs MPC).
 # Nothing in the official image is changed except what NAM MPC adds:
 #   /usr/lib/nam-mpc/{NAM-MPC.so, nam-mpc-boot.sh, plugin_list.awk, entries/*.xml, plugins/*.so (EXTRA)}
-#   /usr/share/Akai/Content/Synths/NAM-MPC - VST - NAM MPC/   (its touchscreen page, and EXTRA's pages)
+#   /usr/share/Akai/Content/Synths/Other Things - VST - NAM MPC/   (its touchscreen page, and EXTRA's pages)
 #   /etc/systemd/system/nam-mpc.service (+ its multi-user.target.wants link)
 # Needs: python3, xz, e2fsprogs (debugfs, e2fsck), binutils (readelf, strings), and upx when MPC is UPX-packed.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 BUILD="${BUILD:-$(dirname "$HERE")/build}"
 SO="$BUILD/NAM-MPC.so"
-SKIN_NAME="NAM-MPC - VST - NAM MPC"
+SKIN_NAME="Other Things - VST - NAM MPC"
 SKIN="$BUILD/skin/$SKIN_NAME"
 die() { echo "error: $*" >&2; exit 1; }
 dbg() { debugfs -R "$1" "$ROOTFS" 2>/dev/null; }

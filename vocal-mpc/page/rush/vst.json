@@ -1,0 +1,9 @@
+{
+  "name": "HedRush Harmony",
+  "vendor": "Other Things",
+  "uid": "HRHC",
+  "version": 1000,
+  "so": "HedRush-Harmony.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}

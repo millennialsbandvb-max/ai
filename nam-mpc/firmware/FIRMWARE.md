@@ -8,7 +8,7 @@ Only four things are added. A file-by-file comparison with the original Hakai im
 | Added | What it is |
 |---|---|
 | `/usr/lib/nam-mpc/` | the plugin, plus the small script and files that add it to MPC's plugin list |
-| `/usr/share/Akai/Content/Synths/NAM-MPC - VST - NAM MPC/` | its touchscreen page, next to Akai's own |
+| `/usr/share/Akai/Content/Synths/Other Things - VST - NAM MPC/` | its touchscreen page, next to Akai's own |
 | `/etc/systemd/system/nam-mpc.service` (+ enable link) | runs that script at start-up |
 
 The start-up script only acts when NAM MPC is missing from `MPC.settings`, which is normally just the first boot. It

@@ -44,6 +44,8 @@ echo "== Duo FX (H90-style dual effect)"
 (cd "$REPO/duofx-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
 echo "== Tri Chorus"
 (cd "$REPO/trichorus-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
+echo "== vocal plugins (VoxLive 3X, HedRush Harmony, Vocal Rack)"
+(cd "$REPO/vocal-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
 echo "== MPC Browser (the browser's page on the MPC's screen)"
 (cd "$REPO/browser-mpc" && ./build.sh bundle >/dev/null 2>&1)
 echo "== browser remote"
@@ -52,7 +54,7 @@ echo "== browser remote"
 echo "== one bundle of everything"
 rm -rf "$W/extra" && mkdir -p "$W/extra"
 for b in dragonfly-mpc/build/bundle sfizz-mpc/build/bundle airwindows-mpc/build/bundle duofx-mpc/build/bundle \
-         trichorus-mpc/build/bundle \
+         trichorus-mpc/build/bundle vocal-mpc/build/bundle \
          browser-mpc/build/bundle \
          mpc-remote/server/build/bundle; do
   cp -a "$REPO/$b/." "$W/extra/"

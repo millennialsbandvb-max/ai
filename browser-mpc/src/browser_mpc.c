@@ -78,7 +78,7 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
     case effCanBeAutomated: return 0;
     case effGetPlugCategory: return kPlugCategEffect;
     case effGetEffectName: case effGetProductString: copy_str(p, "MPC Browser", 32); return 1;
-    case effGetVendorString: copy_str(p, "MPC-Browser", 32); return 1;
+    case effGetVendorString: copy_str(p, "Other Things", 32); return 1;
     case effGetVendorVersion: return 1000;
     case effGetVstVersion: return 2400;
     case effOpen: case effSetSampleRate: case effSetBlockSize: case effMainsChanged: return 1;

@@ -47,7 +47,7 @@ namespace iplug { static constexpr double PI = 3.14159265358979323846; }
 namespace fs = std::filesystem;
 
 #define PLUG_NAME "NAM MPC"
-#define PLUG_VENDOR "NAM-MPC"
+#define PLUG_VENDOR "Other Things"
 #define PLUG_UID 0x4e414d50 /* 'NAMP' */
 #define PLUG_VERSION 1000
 

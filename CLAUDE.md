@@ -42,6 +42,7 @@ Tools needed: arm-linux-gnueabihf-gcc/g++, cmake, ninja, qemu-arm, python3 + PIL
 | `mpc-remote/` | `server/` browser remote (port 8080, `mpc.local`); `browser/` the MPC browser bundle (`build_bundle.sh` -> `MPC-Browser.tar.gz`, Debian 12 armhf Chromium pinned in `packages.txt`); `preload/` its MPC buttons (`mpc-buttons.so` preloaded into MPC by `mpc-launch`, via an `acvs.service` drop-in); `probe/` the one-time hardware probe (not in firmware) | ours |
 | `duofx-mpc/` | **Duo FX**, an H90-style dual multi-effect (our own DSP, `src/duo_fx.c`): slots A and B, each one of 55 algorithms in 6 groups (delay, distortion, pitch, modulation, reverb, granular; table `ALGOS[]`), series/parallel; page in `page/` (PROGRAM, A, B tabs, Eventide-Control-like dark theme); `test/duo_test.c` | ours |
 | `trichorus-mpc/` | **Tri Chorus**: a three-voice bucket-brigade chorus in the spirit of the classic tri-chorus (our own DSP, `src/tri_chorus.c`; no Eventide name/art): voices 120 degrees apart panned L/C/R, slow LFO + ensemble wobble, Chorus/Vibrato, pitch-shifted Shimmer layer; page in `page/`; `test/tri_test.c` | ours |
+| `vocal-mpc/` | **Vocal plugins** (our own DSP; shared `src/vocal_core.h`: param table + params.json, biquads, FDN reverb, YIN tracker, scales/chords, held MIDI, TD-PSOLA voice): **VoxLive 3X** (`voxlive.c`, VoiceLive-3-Extreme-like: 4 voices, Scale / MIDI Chord / MIDI Notes, lead tune, double, humanize, gender, 21 styles), **HedRush Harmony** (`rush_harmony.c`, HeadRush-style 2-voice key/scale harmonizer), **Vocal Rack** (`vocal_rack.c`: gate, EQ, de-ess, comp, tune, FX, double, delay, reverb, 17 presets); pages in `page/<voxlive|rush|rack>/`; `test/vocal_test.c` | ours |
 | `browser-mpc/` | **MPC Browser** plugin: its page's lower area is painted `OVERLAY_MARKER`; the browser shows there on the MPC's own screen (see `mpc-remote/overlay.h`) | ours |
 | `tools/` | `build_firmware.sh`, `build_pages.sh` (shared page style: 1.35x text), `vst_test.c` (generic plugin test) | |
 | repo root zips | source the user provided (NAM, AudioDSPTools, Eigen, DPF, Dragonfly, sfizz, mpc-vst-plugins page tools) | |
@@ -178,6 +179,16 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   exist for `readout`s), and CPU (Quad Harmony, the heaviest, was 2.3% of one PC core).
   This container's /usr/local python3 needs its own Pillow (`pip install --ignore-installed pillow`) for pages; custom
   knob images need the kit's html renderer (Python Playwright), so the page uses theme colours instead.
+- **Maker "Other Things"**: every plugin we wrote (NAM MPC, SFZ MPC, Duo FX, Tri Chorus, MPC Browser, the vocal ones)
+  reports vendor "Other Things", so MPC lists them in one folder; Airwindows and Dragonfly keep their own. Page
+  folders are "Other Things - VST - <name>". nam-mpc-boot.sh replaces an MPC.settings entry whose manufacturer=
+  differs from ours (reads the whole <PLUGIN/>, JUCE may wrap it over lines), so existing devices move too.
+- **Vocal plugins**: TD-PSOLA (grains 2 source periods, Hann tabulated, centred at their exact fractional time:
+  whole-sample placement brightened some ratios) keeps formants (test: centroid of a 3rd up ~ the same vowel sung
+  at that pitch); latency ~30 ms (80 Hz lowest period x2, room for Gender x1.45). Dry lead has no latency unless
+  Lead Tune is on. Harmony targets are worked out only when the tracker updates. vocal_test's pitch estimate takes
+  the shortest period within 3% of the best (a periodic sound repeats at 2T; a strong 2nd harmonic fools 0.9).
+  Untested on the device: CPU (about 1% of a PC core each at defaults) and real voices.
 - `server/test_page.js` (run by build.sh) loads the page and fails on script errors: a top-level error once shipped
   and stopped the whole page from connecting.
 - The remote's typing is a virtual USB keyboard (uinput, "MPC Remote Keyboard"), made the first time the page types;

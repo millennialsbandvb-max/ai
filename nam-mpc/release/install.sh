@@ -5,7 +5,7 @@
 # If MPC.settings isn't found, pass its path: SETTINGS=/path/to/MPC.settings sh install.sh
 set -e
 cd "$(dirname "$0")"
-SO_DIR=/sdcard/vst; SO=NAM-MPC.so; SKIN='NAM-MPC - VST - NAM MPC'; NEEDS_GLIBC=@GLIBC@
+SO_DIR=/sdcard/vst; SO=NAM-MPC.so; SKIN='Other Things - VST - NAM MPC'; NEEDS_GLIBC=@GLIBC@
 YES=0; [ "$1" = "-y" ] && YES=1
 die() { echo "error: $*" >&2; exit 1; }
 

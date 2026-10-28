@@ -1,0 +1,9 @@
+{
+  "name": "Vocal Rack",
+  "vendor": "Other Things",
+  "uid": "VRK1",
+  "version": 1000,
+  "so": "Vocal-Rack.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}
