@@ -1,0 +1,161 @@
+{
+  "name": "Duo FX",
+  "params": [
+    {
+      "key": "a_algo",
+      "name": "A Algorithm",
+      "options": [
+        "Off",
+        "Delay",
+        "Echo",
+        "Reverse",
+        "Detune",
+        "Pitch",
+        "Chorus",
+        "Phaser",
+        "Tremolo",
+        "Room",
+        "Shimmer",
+        "Abyss"
+      ],
+      "default": 1
+    },
+    {
+      "key": "a_mix",
+      "name": "A Mix",
+      "min": 0,
+      "max": 100,
+      "default": 40,
+      "unit": "%"
+    },
+    {
+      "key": "a_time",
+      "name": "A Time",
+      "min": 0,
+      "max": 100,
+      "default": 50
+    },
+    {
+      "key": "a_feedback",
+      "name": "A Feedback",
+      "min": 0,
+      "max": 100,
+      "default": 40
+    },
+    {
+      "key": "a_tone",
+      "name": "A Tone",
+      "min": 0,
+      "max": 100,
+      "default": 50
+    },
+    {
+      "key": "a_mod",
+      "name": "A Mod",
+      "min": 0,
+      "max": 100,
+      "default": 25
+    },
+    {
+      "key": "a_rate",
+      "name": "A Rate",
+      "min": 0,
+      "max": 100,
+      "default": 30
+    },
+    {
+      "key": "a_pitch",
+      "name": "A Pitch",
+      "min": -24,
+      "max": 24,
+      "default": 12,
+      "unit": "st"
+    },
+    {
+      "key": "b_algo",
+      "name": "B Algorithm",
+      "options": [
+        "Off",
+        "Delay",
+        "Echo",
+        "Reverse",
+        "Detune",
+        "Pitch",
+        "Chorus",
+        "Phaser",
+        "Tremolo",
+        "Room",
+        "Shimmer",
+        "Abyss"
+      ],
+      "default": 9
+    },
+    {
+      "key": "b_mix",
+      "name": "B Mix",
+      "min": 0,
+      "max": 100,
+      "default": 40,
+      "unit": "%"
+    },
+    {
+      "key": "b_time",
+      "name": "B Time",
+      "min": 0,
+      "max": 100,
+      "default": 50
+    },
+    {
+      "key": "b_feedback",
+      "name": "B Feedback",
+      "min": 0,
+      "max": 100,
+      "default": 55
+    },
+    {
+      "key": "b_tone",
+      "name": "B Tone",
+      "min": 0,
+      "max": 100,
+      "default": 50
+    },
+    {
+      "key": "b_mod",
+      "name": "B Mod",
+      "min": 0,
+      "max": 100,
+      "default": 25
+    },
+    {
+      "key": "b_rate",
+      "name": "B Rate",
+      "min": 0,
+      "max": 100,
+      "default": 30
+    },
+    {
+      "key": "b_pitch",
+      "name": "B Pitch",
+      "min": -24,
+      "max": 24,
+      "default": 12,
+      "unit": "st"
+    },
+    {
+      "key": "routing",
+      "name": "Routing",
+      "options": [
+        "Series",
+        "Parallel"
+      ]
+    },
+    {
+      "key": "output",
+      "name": "Output",
+      "min": -24,
+      "max": 12,
+      "default": 0,
+      "unit": "dB"
+    }
+  ]
+}

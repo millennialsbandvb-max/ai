@@ -1,0 +1,9 @@
+{
+  "name": "Duo FX",
+  "vendor": "Duo-FX",
+  "uid": "DUOF",
+  "version": 1000,
+  "so": "Duo-FX.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}
