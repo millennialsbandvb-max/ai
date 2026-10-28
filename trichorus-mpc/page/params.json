@@ -1,0 +1,16 @@
+{
+  "name": "Tri Chorus",
+  "params": [
+    {"key": "mix", "name": "Mix", "min": 0, "max": 100, "default": 50},
+    {"key": "rate", "name": "Rate", "min": 0, "max": 100, "default": 35},
+    {"key": "depth", "name": "Depth", "min": 0, "max": 100, "default": 50},
+    {"key": "ensemble", "name": "Ensemble", "min": 0, "max": 100, "default": 35},
+    {"key": "width", "name": "Width", "min": 0, "max": 100, "default": 80},
+    {"key": "tone", "name": "Tone", "min": 0, "max": 100, "default": 55},
+    {"key": "delay", "name": "Delay", "min": 0, "max": 100, "default": 35},
+    {"key": "shimmer", "name": "Shimmer", "min": 0, "max": 100, "default": 0},
+    {"key": "shim_pitch", "name": "Shimmer Pitch", "options": ["-12 st", "-5 st", "+7 st", "+12 st", "+19 st", "+24 st"], "default": 3},
+    {"key": "mode", "name": "Mode", "options": ["Chorus", "Vibrato"]},
+    {"key": "output", "name": "Output", "min": -24, "max": 12, "default": 0, "unit": "dB"}
+  ]
+}

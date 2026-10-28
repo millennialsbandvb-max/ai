@@ -41,6 +41,7 @@ Tools needed: arm-linux-gnueabihf-gcc/g++, cmake, ninja, qemu-arm, python3 + PIL
 | `airwindows-mpc/` | 9 **Airwindows** effects (sources in `airwindows/`), `shim/` replaces Steinberg's AudioEffectX; pages by `pages.py` | MIT |
 | `mpc-remote/` | `server/` browser remote (port 8080, `mpc.local`); `browser/` the MPC browser bundle (`build_bundle.sh` -> `MPC-Browser.tar.gz`, Debian 12 armhf Chromium pinned in `packages.txt`); `preload/` its MPC buttons (`mpc-buttons.so` preloaded into MPC by `mpc-launch`, via an `acvs.service` drop-in); `probe/` the one-time hardware probe (not in firmware) | ours |
 | `duofx-mpc/` | **Duo FX**, an H90-style dual multi-effect (our own DSP, `src/duo_fx.c`): slots A and B, each one of 54 algorithms in 6 groups (delay, distortion, pitch, modulation, reverb, granular; table `ALGOS[]`), series/parallel; page in `page/` (PROGRAM, A, B tabs, Eventide-Control-like dark theme); `test/duo_test.c` | ours |
+| `trichorus-mpc/` | **Tri Chorus**: a three-voice bucket-brigade chorus in the spirit of the classic tri-chorus (our own DSP, `src/tri_chorus.c`; no Eventide name/art): voices 120 degrees apart panned L/C/R, slow LFO + ensemble wobble, Chorus/Vibrato, pitch-shifted Shimmer layer; page in `page/`; `test/tri_test.c` | ours |
 | `browser-mpc/` | **MPC Browser** plugin: its page's lower area is painted `OVERLAY_MARKER`; the browser shows there on the MPC's own screen (see `mpc-remote/overlay.h`) | ours |
 | `tools/` | `build_firmware.sh`, `build_pages.sh` (shared page style: 1.35x text), `vst_test.c` (generic plugin test) | |
 | repo root zips | source the user provided (NAM, AudioDSPTools, Eigen, DPF, Dragonfly, sfizz, mpc-vst-plugins page tools) | |
@@ -147,7 +148,8 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   search (without it a steady note cancels into sidebands); a YIN tracker (4x decimated, every 512 samples) drives
   Diatonic/Quad Harmony, Pitch Arp, Vocal Shift, Pitch Correct, Pitch Synth. Every feedback loop saturates
   (tanh) and stays under unity until the top of Feedback; reverb Low boost is capped by the loop gain; Shimmer's
-  pitched feedback shrinks as Decay grows. `test/duo_test.c` runs every algorithm at defaults/min/max/80%/random in
+  Shimmer / Warp Verb pitch-shift four FDN lines inside the loop (c[16..18]): an outside pitched feedback path
+  ran away at small Size (found by random settings under qemu), whereas inside the loop its gain stays under one. `test/duo_test.c` runs every algorithm at defaults/min/max/80%/random in
   both slots and routings, checks echo timing, harmonies/tuner/shifter notes (within 15 cents) and CPU. Untested on
   the device: whether MPC refreshes the live knob names on an algorithm change (if not, the n1..n8 Name params
   exist for `readout`s), and CPU (Quad Harmony, the heaviest, was 2.3% of one PC core).

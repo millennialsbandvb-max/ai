@@ -1,0 +1,9 @@
+{
+  "name": "Tri Chorus",
+  "vendor": "Tri-Chorus",
+  "uid": "TRIC",
+  "version": 1000,
+  "so": "Tri-Chorus.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}

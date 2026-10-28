@@ -206,6 +206,18 @@ int main(int argc, char **argv) {
             CHECK(fabs(cents) < 15, "%s doesn't land on %.1f Hz", P[i].algo, P[i].want);
             e->dispatcher(e, effClose, 0, 0, NULL, 0);
         }
+        {   /* Shimmer climbs: an octave above a held note builds up in the tail */
+            AEffect *e = one("Shimmer", 1);
+            set_by_text(e, 0, "Shimmer", "100%");
+            settle(e);
+            hz_in = 220;
+            float p;
+            render(e, 6, g_sine, &p);
+            const double o = tone_level(buf, 3 * FS, 6 * FS, 440), f = tone_level(buf, 3 * FS, 6 * FS, 220);
+            printf("  Shimmer: 440 Hz %.4f, 220 Hz %.4f\n", o, f);
+            CHECK(o > 0.1 * f, "Shimmer's octave is too faint");
+            e->dispatcher(e, effClose, 0, 0, NULL, 0);
+        }
         {   /* the reverbs leave a tail */
             const char *R[] = {"Hall", "Room", "Plate", "Spring", "Shimmer", "Abyss", "Classic Verb", "Crushed Verb", "Tremolo Verb", "Warp Verb"};
             for (size_t i = 0; i < sizeof R / sizeof *R; i++) {

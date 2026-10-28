@@ -517,6 +517,7 @@ static void verb_control(Slot *s, const VerbCfg *v) {   /* uses c[0..15] */
             s->ap[c][k].d = d < 2 ? 2 : d > s->ap[c][k].l.mask - 2 ? s->ap[c][k].l.mask - 2 : d;
         }
     s->c[13] = v->diff_g;
+    s->c[18] = 0;   /* (no pitch shifting in the loop unless the algorithm sets it after this) */
     float gmax = 0;   /* extra low-frequency gain in the loop, kept below what would make it ring on */
     for (int k = 0; k < NFDN; k++) gmax = fmaxf(gmax, s->c[k] / 0.35355339f);
     s->c[14] = fminf(db(v->low_db), 0.995f / fmaxf(gmax, 1e-6f)) - 1;
@@ -542,6 +543,9 @@ static void verb_run(Slot *s, float inl, float inr, float *ol, float *or_, float
     for (int k = 0; k < NFDN; k++) {
         float y = lp(&s->damp[k], v[k] * s->c[k], s->c[8]);
         y += lp(&s->lowsh[k], y, s->c[15]) * s->c[14];
+        /* Shimmer / Warp: four of the lines are pitch-shifted on their way round (c[16], c[17]: the two ratios,
+         * c[18]: how much). Inside the loop its gain stays under one, so it can't run away whatever the knobs */
+        if (k < 4 && s->c[18] > 0.001f) y += (shift_s(&s->sh[k >> 1][k & 1], y, s->c[16 + (k & 1)], 0.06f * s->fs, 1) - y) * s->c[18];
         line_push(&s->fdn[k], clampf(y, -20, 20) + ((k & 1) ? x[1] : x[0]) * 0.5f);
     }
 }
@@ -623,8 +627,7 @@ static void slot_control(Slot *s) {
     }
     case A_SHIMMER:
         vc = (VerbCfg){lerp(0.8f, 2.6f, PC(0)), V(1), lerp(2500, 16000, PC(5)), 0, lerp(0, 0.003f, PC(6)), 0.3f, 4, 1.3f, 0.65f};
-        verb_control(s, &vc); c[20] = powf(2, V(2) / 12); c[21] = powf(2, V(3) / 12); c[22] = lp_coef(9000, fs);
-        c[23] = PC(4) * 0.22f * (1 - 0.6f * clampf((V(1) - 1) / 19, 0, 1));   /* pitched sound back in: less as Decay grows */
+        verb_control(s, &vc); c[16] = powf(2, V(2) / 12); c[17] = powf(2, V(3) / 12); c[18] = PC(4) * 0.7f;
         break;
     case A_ABYSS: {
         const int frozen = V(1) >= 99.5f;
@@ -643,8 +646,8 @@ static void slot_control(Slot *s) {
         verb_control(s, &vc); c[21] = 1 + PC(5) * 15; c[22] = tanh_fast(c[21]); break;
     case A_WARP:
         vc = (VerbCfg){lerp(1.2f, 3.2f, PC(0)), V(1), 16000, 0, lerp(0.002f, 0.012f, PC(2)), V(3), 6, 2.0f, 0.7f};
-        verb_control(s, &vc); c[20] = powf(2, V(4) / 12); c[22] = lp_coef(8000, fs); c[24] = lp_coef(tone_cut(V(5)), fs);
-        c[23] = (V(4) != 0 ? 0.12f : 0) * (1 - 0.6f * clampf((V(1) - 1) / 29, 0, 1));
+        verb_control(s, &vc); c[24] = lp_coef(tone_cut(V(5)), fs);
+        c[16] = powf(2, V(4) / 12); c[17] = powf(2, -V(4) / 24); c[18] = V(4) != 0 ? 0.35f : 0;
         break;
     case A_GRAINWEB: c[20] = lp_coef(tone_cut(V(7)), fs); break;
     case A_GRAINMOD: c[20] = lp_coef(tone_cut(60), fs); break;
@@ -1230,17 +1233,7 @@ static void run_algo(Slot *s, const float in[2], float out[2]) {
         }
         break;
     }
-    case A_SHIMMER: {
-        float l, r;
-        verb_run(s, in[0], in[1], &l, &r, s->st[0][0]);
-        const float mono = (l + r) * 0.5f;
-        const float a = shift_s(&s->sh[0][0], mono, c[20], 0.06f * fs, 1), b = shift_s(&s->sh[0][1], mono, c[21], 0.06f * fs, 1);
-        const float y = lp(&s->op[0][0], (a + b) * 0.5f, c[22]);
-        s->st[0][0] = tanh_fast(y * c[23]);
-        out[0] = l + y * PC(4) * 0.8f;
-        out[1] = r + y * PC(4) * 0.8f;
-        break;
-    }
+    case A_SHIMMER: verb_run(s, in[0], in[1], &out[0], &out[1], 0); break;   /* (the shifting is inside the loop) */
     case A_ABYSS: {
         float x[2] = {in[0], in[1]};
         if (c[20] > 0.01f) {   /* Swell: the reverb hears less of you while you play, so it blooms after */
@@ -1256,9 +1249,7 @@ static void run_algo(Slot *s, const float in[2], float out[2]) {
     }
     case A_WARP: {
         float l, r;
-        verb_run(s, in[0], in[1], &l, &r, s->st[0][0]);
-        if (c[23] > 0) s->st[0][0] = tanh_fast(lp(&s->op[0][0], shift_s(&s->sh[0][0], (l + r) * 0.5f, c[20], 0.07f * fs, 1), c[22]) * c[23]);
-        else s->st[0][0] = 0;
+        verb_run(s, in[0], in[1], &l, &r, 0);
         const float mid = (l + r) * 0.5f;
         out[0] = lp(&s->op[0][1], lerp(mid, l, PC(6)), c[24]);
         out[1] = lp(&s->op[1][1], lerp(mid, r, PC(6)), c[24]);
