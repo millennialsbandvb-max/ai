@@ -28,7 +28,9 @@ arm)
 test)
   "$B/duo-test-host" "$B/Duo-FX-host.so"
   qemu-arm -L "$SYSROOT" "$B/duo-test-arm" "$B/Duo-FX.so" ;;
-skin)
+skin)   # the parameter list comes from the plugin's own tables, so the page can't drift from it
+  gcc -O2 -DDUO_FX_PARAMS -I"$REPO/nam-mpc/src" "$HERE/src/duo_fx.c" -lm -o "$B/gen-params"
+  "$B/gen-params" > "$HERE/page/params.json"
   "$REPO/tools/build_pages.sh" "$B" "$B/skin" "$HERE/page/" ;;
 bundle)
   [ -f "$B/Duo-FX.so" ] && [ -d "$B/skin" ] || { echo "run ./build.sh arm and ./build.sh skin first" >&2; exit 1; }

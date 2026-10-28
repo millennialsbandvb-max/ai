@@ -1,9 +1,10 @@
-/* Duo FX: an H90-style dual effect for MPC OS (VST2, stereo). Two slots, A and B, each running one of 11
- * algorithms (delays, reverse, pitch, modulation, reverbs), in series (A then B) or in parallel. Every algorithm
- * reads the same seven knobs (Mix, Time, Feedback, Tone, Mod, Rate, Pitch); what each one does depends on the
- * algorithm, and the knob's value text says so. The algorithms are our own, written for this plugin.
- * Safety, as in every plugin here: input cleaned, a slot whose output goes bad or past +36 dB is reset, the output
- * is capped at +12 dB (one NaN reaching MPC's mixer silences it until restart). */
+/* Duo FX: an H90-style dual multi-effect for MPC OS (VST2, stereo). Two slots, A and B, in series (A then B) or
+ * in parallel, each running one of 54 algorithms in six groups (delay, distortion, pitch, modulation, reverb,
+ * granular). Each algorithm has up to 8 knobs of its own (names, ranges, defaults in ALGOS[]); the slot's eight
+ * knob parameters take those meanings, and eight read-only "name" parameters tell the page what each knob is.
+ * Choosing an algorithm loads its defaults. All of the sound processing is our own.
+ * Safety, as in every plugin here: input cleaned, everything reset if the output goes bad or past +36 dB, the
+ * output capped at +12 dB (one NaN reaching MPC's mixer silences it until restart). */
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -13,25 +14,258 @@
 #include "vst2.h"
 
 #define PI 3.14159265358979f
+#define NK 8                        /* knobs per slot */
 
-/* ---- parameters (the order is the VST index: saved projects and Q-Links refer to them by it) ---------------- */
-enum { P_ALGO, P_MIX, P_TIME, P_FEEDBACK, P_TONE, P_MOD, P_RATE, P_PITCH, P_SLOT };   /* per slot */
+/* ==== knob meanings ========================================================================================== */
+enum { M_LIN, M_EXP, M_INT, M_CHOICE };
+typedef struct { const char *name; int map; float lo, hi, def; const char *unit; const char *const *choices; } Knob;
+#define LIN(n, lo, hi, d, u) {n, M_LIN, lo, hi, d, u, NULL}
+#define EXPK(n, lo, hi, d, u) {n, M_EXP, lo, hi, d, u, NULL}
+#define INT(n, lo, hi, d, u) {n, M_INT, lo, hi, d, u, NULL}
+#define CHO(n, list, d) {n, M_CHOICE, 0, (float)(sizeof list / sizeof *list - 1), d, "", list}
+#define PCT(n, d) LIN(n, 0, 100, d, "%")
+#define MS(n, lo, hi, d) EXPK(n, lo, hi, d, "ms")
+#define HZ(n, lo, hi, d) EXPK(n, lo, hi, d, "Hz")
+#define ST(n, d) INT(n, -24, 24, d, "st")
+#define NONE {NULL, 0, 0, 0, 0, NULL, NULL}
+
+static const char *const KEYS[] = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
+static const char *const SCALES[] = {"Major", "Minor", "Dorian", "Mixolydian", "Harm Minor", "Penta Maj", "Penta Min", "Blues"};
+static const int SCALE_STEPS[8][8] = {   /* the count, then each degree's semitones */
+    {7, 0, 2, 4, 5, 7, 9, 11}, {7, 0, 2, 3, 5, 7, 8, 10}, {7, 0, 2, 3, 5, 7, 9, 10}, {7, 0, 2, 4, 5, 7, 9, 10},
+    {7, 0, 2, 3, 5, 7, 8, 11}, {5, 0, 2, 4, 7, 9}, {5, 0, 3, 5, 7, 10}, {6, 0, 3, 5, 6, 7, 10}};
+static const char *const DEGREES[] = {"Oct Down", "7th Down", "6th Down", "5th Down", "4th Down", "3rd Down", "2nd Down",
+                                      "Unison", "2nd Up", "3rd Up", "4th Up", "5th Up", "6th Up", "7th Up", "Oct Up"};
+static const char *const ONOFF[] = {"Off", "On"};
+static const char *const FTYPES[] = {"Lowpass", "Bandpass", "Highpass"};
+static const char *const HEADS[] = {"1", "2", "3", "1+2", "1+3", "2+3", "1+2+3"};
+static const char *const SHAPES[] = {"Sine", "Triangle", "Square", "Random"};
+static const char *const STAGES[] = {"4", "6", "8", "12"};
+static const char *const VIBE_MODES[] = {"Chorus", "Vibrato"};
+static const char *const PHASE_MODES[] = {"Phaser", "Vibrato"};
+static const char *const FLANGE_MODES[] = {"Classic", "Thru-Zero"};
+static const char *const CHORDS[] = {"Unison", "Octaves", "Fifths", "Major", "Minor", "Sus4", "Maj7", "Min7"};
+static const int CHORD_ST[8][4] = {{0, 0, 0, 0}, {0, 12, 24, -12}, {0, 7, 12, 19}, {0, 4, 7, 12}, {0, 3, 7, 12},
+                                   {0, 5, 7, 12}, {0, 4, 7, 11}, {0, 3, 7, 10}};
+static const char *const WAVES[] = {"Saw", "Square", "Sub", "Saw+Sub"};
+static const char *const PATTERNS[] = {"Up", "Down", "Up-Down", "Random"};
+static const char *const ARP_SETS[] = {"1-3-5", "1-3-5-8", "1-5-8", "1-4-5", "1-2-3-5", "1-5-8-10"};
+static const int ARP_DEG[6][5] = {{3, 0, 2, 4}, {4, 0, 2, 4, 7}, {3, 0, 4, 7}, {3, 0, 3, 4}, {4, 0, 1, 2, 4}, {4, 0, 4, 7, 9}};
+static const char *const SPRINGS[] = {"1", "2", "3"};
+static const char *const PREPOST[] = {"Pre", "Post"};
+static const char *const LATENCY[] = {"Low", "Normal"};
+static const char *const VOICE_N[] = {"Single", "Dual"};
+
+/* ==== the algorithms ========================================================================================= */
+enum {   /* in the pop-up's order */
+    /* delay */ A_BAND, A_BBD, A_DIGITAL, A_DUCKED, A_FPONG, A_HEADS, A_MODDLY, A_MULTITAP, A_REVDLY, A_TAPE, A_TAPCLOUD,
+    A_VINTAGE,
+    /* distortion */ A_FUZZOCT, A_CRUSH, A_FUZZDLY, A_BANDDRIVE, A_MIDDRIVE,
+    /* pitch */ A_REVSHIFT, A_DIATONIC, A_VSHIFTER, A_PMODHARM, A_ARP, A_MICRO, A_OCTAVER, A_BEND, A_POLYBEND, A_POLYSHIFT,
+    A_SYNTH, A_STEPSHIFT, A_QUAD, A_RESONATOR, A_VOCAL, A_CORRECT,
+    /* modulation */ A_CHORUS, A_FLANGER, A_TREMOLO, A_PHASER, A_VIBE, A_SFLANGER, A_SPHASER,
+    /* reverb */ A_HALL, A_ROOM, A_PLATE, A_SPRING, A_SHIMMER, A_ABYSS, A_CLASSIC, A_CRUSHVERB, A_TREMVERB, A_WARP,
+    /* granular */ A_GRAINWEB, A_GLITCH, A_GRAINMOD, A_STUTTER,
+    A_OFF, kNumAlgos
+};
+enum { G_DELAY, G_DIST, G_PITCH, G_MOD, G_REVERB, G_GRAIN, G_NONE };
+static const char *const GROUP_NAMES[] = {"Delay", "Distortion", "Pitch", "Modulation", "Reverb", "Granular", ""};
+
+typedef struct { const char *name; int group; float mix; const char *about; Knob k[NK]; } Algo;
+static const Algo ALGOS[kNumAlgos] = {
+    [A_BAND] = {"Band Delay", G_DELAY, 40, "Repeats through a swept resonant band, can be pitched",
+        {MS("Time", 20, 2000, 400), PCT("Feedback", 50), HZ("Band", 150, 6000, 900), PCT("Resonance", 50),
+         PCT("Sweep", 40), HZ("Rate", 0.05f, 8, 0.4f), ST("Pitch", 0), PCT("Tone", 50)}},
+    [A_BBD] = {"BBD Delay", G_DELAY, 40, "Bucket-brigade: dark, chorused, saturating repeats",
+        {MS("Time", 20, 600, 300), PCT("Feedback", 45), PCT("Mod", 30), HZ("Rate", 0.05f, 8, 0.6f), HZ("Tone", 1200, 7000, 3000),
+         PCT("Age", 30), NONE, NONE}},
+    [A_DIGITAL] = {"Digital Delay", G_DELAY, 35, "Clean, exact repeats",
+        {MS("Time", 10, 2000, 375), PCT("Feedback", 35), HZ("Low Cut", 20, 2000, 20), HZ("High Cut", 1000, 20000, 20000),
+         PCT("Mod", 0), HZ("Rate", 0.05f, 8, 0.5f), MS("Spread", 0.5f, 100, 0.5f), CHO("Ping-Pong", ONOFF, 0)}},
+    [A_DUCKED] = {"Ducked Delay", G_DELAY, 45, "Repeats duck while you play, swell up in the gaps",
+        {MS("Time", 20, 2000, 450), PCT("Feedback", 45), LIN("Threshold", -60, 0, -30, "dB"), LIN("Duck", 0, 40, 18, "dB"),
+         MS("Release", 20, 2000, 300), PCT("Tone", 50), PCT("Mod", 10), MS("Spread", 0.5f, 100, 10)}},
+    [A_FPONG] = {"Filter Ping-Pong", G_DELAY, 45, "Repeats bounce L-R through sweeping resonant filters",
+        {MS("Time", 20, 2000, 350), PCT("Feedback", 55), HZ("Filter", 150, 8000, 1200), PCT("Resonance", 55),
+         PCT("Sweep", 60), HZ("Rate", 0.05f, 8, 0.3f), CHO("Type", FTYPES, 1), PCT("Width", 100)}},
+    [A_HEADS] = {"Multi-Head Echo", G_DELAY, 40, "Tape echo with three playback heads",
+        {MS("Spacing", 40, 600, 180), CHO("Heads", HEADS, 6), PCT("Feedback", 45), PCT("Wow", 25), PCT("Flutter", 20),
+         PCT("Saturate", 35), HZ("Tone", 1000, 10000, 3500), PCT("Spread", 40)}},
+    [A_MODDLY] = {"Mod Delay", G_DELAY, 40, "Delay with a modulated, chorusing line",
+        {MS("Time", 20, 2000, 400), PCT("Feedback", 40), PCT("Depth", 40), HZ("Rate", 0.05f, 8, 0.8f), CHO("Shape", SHAPES, 0),
+         PCT("Tone", 50), MS("Spread", 0.5f, 100, 12), NONE}},
+    [A_MULTITAP] = {"Multi-Tap", G_DELAY, 40, "Up to 10 taps: even, speeding up or slowing down",
+        {MS("Span", 50, 2500, 800), INT("Taps", 2, 10, 6, ""), LIN("Spacing", -100, 100, 0, ""), LIN("Taper", -100, 100, -40, ""),
+         PCT("Feedback", 20), PCT("Tone", 50), PCT("Width", 70), PCT("Diffuse", 0)}},
+    [A_REVDLY] = {"Reverse Delay", G_DELAY, 45, "The input played backwards, then repeated",
+        {MS("Time", 150, 2000, 600), PCT("Feedback", 35), PCT("Tone", 50), PCT("Mod", 10), HZ("Rate", 0.05f, 8, 0.5f), NONE, NONE, NONE}},
+    [A_TAPE] = {"Tape Echo", G_DELAY, 40, "Saturating tape loop with wow, flutter and hiss",
+        {MS("Time", 40, 1500, 350), PCT("Feedback", 45), PCT("Wow", 30), PCT("Flutter", 25), PCT("Saturate", 40),
+         HZ("Tone", 1000, 10000, 4000), PCT("Age", 25), PCT("Spread", 30)}},
+    [A_TAPCLOUD] = {"Tap Cloud", G_DELAY, 45, "Up to 32 taps: rhythms, smears, reverbs, textures",
+        {MS("Length", 20, 2000, 500), INT("Taps", 1, 32, 12, ""), MS("Predelay", 1, 1000, 1), LIN("Spread", -100, 100, 0, ""),
+         LIN("Taper", -100, 100, 0, ""), PCT("Smear", 30), HZ("Chop", 0.1f, 20, 0.1f), PCT("Tone", 50)}},
+    [A_VINTAGE] = {"Vintage Delay", G_DELAY, 40, "Early digital delay: fewer bits, lower sample rate",
+        {MS("Time", 20, 2000, 420), PCT("Feedback", 40), INT("Bits", 6, 16, 12, ""), INT("Rate Div", 1, 8, 2, "x"),
+         PCT("Tone", 45), PCT("Mod", 10), HZ("Mod Rate", 0.05f, 8, 0.6f), MS("Spread", 0.5f, 100, 0.5f)}},
+
+    [A_FUZZOCT] = {"Fuzz Octave", G_DIST, 100, "Fuzz with an octave up, tremolo and envelope filter",
+        {PCT("Drive", 60), PCT("Octave", 50), PCT("Tone", 55), LIN("Level", -24, 6, -6, "dB"), PCT("Trem", 0),
+         HZ("Trem Rate", 0.5f, 15, 5), PCT("Envelope", 0), PCT("Env Q", 50)}},
+    [A_CRUSH] = {"Crush Drive", G_DIST, 100, "Drive into compression, with power-supply sag",
+        {PCT("Drive", 55), PCT("Sag", 30), PCT("Comp", 40), PCT("Tone", 55), LIN("Bass", -12, 12, 0, "dB"),
+         LIN("Level", -24, 6, -6, "dB"), LIN("Gate", -90, -30, -90, "dB"), NONE}},
+    [A_FUZZDLY] = {"Fuzz Delay", G_DIST, 100, "Fuzz feeding two detuned delays",
+        {PCT("Fuzz", 60), PCT("Tone", 50), LIN("Level", -24, 6, -6, "dB"), MS("Delay A", 20, 1000, 180),
+         MS("Delay B", 20, 1000, 300), PCT("Feedback", 35), INT("Detune", 0, 50, 12, "c"), PCT("Delay Mix", 40)}},
+    [A_BANDDRIVE] = {"Band Drive", G_DIST, 100, "Lows and highs driven separately, then blended",
+        {HZ("Split", 100, 2000, 400), PCT("Low Drive", 30), PCT("High Drive", 60), LIN("Low Level", -24, 6, 0, "dB"),
+         LIN("High Level", -24, 6, -3, "dB"), HZ("Filter", 1000, 16000, 7000), PCT("Comp", 30), NONE}},
+    [A_MIDDRIVE] = {"Mid Drive", G_DIST, 100, "Mid-hump overdrive in the classic green-pedal style",
+        {PCT("Drive", 45), PCT("Tone", 50), LIN("Level", -24, 12, -3, "dB"), HZ("Mid", 400, 1600, 720), LIN("Bass", -12, 6, -3, "dB"),
+         CHO("Hard Clip", ONOFF, 0), PCT("Blend", 100), NONE}},
+
+    [A_REVSHIFT] = {"Reverse Shift", G_PITCH, 45, "Reversed, pitch-shifted delays that cascade upwards",
+        {ST("Pitch A", 12), ST("Pitch B", 7), MS("Delay A", 150, 1500, 500), MS("Delay B", 150, 1500, 750), PCT("Feedback", 45),
+         PCT("Tone", 55), PCT("Mod", 10), PCT("Width", 100)}},
+    [A_DIATONIC] = {"Diatonic Harmony", G_PITCH, 50, "Two voices that follow your notes in a key and scale",
+        {CHO("Key", KEYS, 0), CHO("Scale", SCALES, 0), CHO("Voice 1", DEGREES, 9), CHO("Voice 2", DEGREES, 11),
+         PCT("Level 1", 80), PCT("Level 2", 60), MS("Delay", 1, 500, 1), PCT("Width", 60)}},
+    [A_VSHIFTER] = {"Vintage Shifter", G_PITCH, 50, "Early rack harmonizer: raw splices, delay, feedback",
+        {LIN("Pitch", -24, 24, 7, "st"), MS("Delay", 1, 1000, 1), PCT("Feedback", 0), CHO("Deglitch", ONOFF, 0), PCT("Tone", 50),
+         INT("Stereo", 0, 30, 0, "c"), NONE, NONE}},
+    [A_PMODHARM] = {"Pitch Mod Harmony", G_PITCH, 50, "Two shifted voices with pitch vibrato and delay",
+        {ST("Pitch A", -12), ST("Pitch B", 12), INT("Depth", 0, 100, 20, "c"), HZ("Rate", 0.05f, 8, 0.8f), MS("Delay", 1, 1000, 80),
+         PCT("Feedback", 20), PCT("Tone", 50), PCT("Width", 70)}},
+    [A_ARP] = {"Pitch Arp", G_PITCH, 60, "Steps a shifted voice through a pattern in your key",
+        {CHO("Key", KEYS, 0), CHO("Scale", SCALES, 0), CHO("Notes", ARP_SETS, 1), CHO("Pattern", PATTERNS, 0),
+         HZ("Rate", 0.5f, 16, 4), MS("Glide", 1, 200, 5), INT("Octaves", 1, 2, 1, ""), PCT("Feedback", 0)}},
+    [A_MICRO] = {"Micro Shift", G_PITCH, 50, "Slightly detuned, delayed copies for width",
+        {INT("Detune", 0, 50, 9, "c"), MS("Delay L", 1, 100, 7), MS("Delay R", 1, 100, 11), PCT("Feedback", 0), PCT("Tone", 50),
+         PCT("Drift", 20), NONE, NONE}},
+    [A_OCTAVER] = {"Octaver", G_PITCH, 100, "Octaves below and above your playing",
+        {PCT("Sub 1", 70), PCT("Sub 2", 0), PCT("Up", 0), PCT("Dry", 100), PCT("Tone", 50), PCT("Drive", 0), NONE, NONE}},
+    [A_BEND] = {"Pitch Bend", G_PITCH, 100, "Bend between two intervals (a Q-Link makes a pedal)",
+        {PCT("Bend", 0), ST("Heel", 0), ST("Toe", 12), MS("Glide", 1, 500, 30), CHO("Voices", VOICE_N, 0), PCT("Tone", 50), NONE, NONE}},
+    [A_POLYBEND] = {"Poly Bend", G_PITCH, 100, "Two voices bending in opposite directions",
+        {PCT("Bend", 0), ST("Range A", 12), ST("Range B", -12), MS("Glide", 1, 500, 30), PCT("Level A", 100), PCT("Level B", 70),
+         PCT("Tone", 50), NONE}},
+    [A_POLYSHIFT] = {"Poly Shift", G_PITCH, 50, "Two independent pitch voices for chords",
+        {ST("Pitch A", -12), INT("Fine A", -50, 50, 0, "c"), ST("Pitch B", 7), INT("Fine B", -50, 50, 0, "c"),
+         PCT("Level A", 100), PCT("Level B", 70), PCT("Width", 50), CHO("Latency", LATENCY, 1)}},
+    [A_SYNTH] = {"Pitch Synth", G_PITCH, 70, "A synth voice that follows the note you play",
+        {CHO("Wave", WAVES, 0), INT("Octave", -2, 1, -1, ""), HZ("Cutoff", 100, 8000, 900), PCT("Resonance", 40),
+         PCT("Env", 60), MS("Attack", 1, 500, 5), MS("Release", 20, 2000, 300), MS("Glide", 1, 300, 20)}},
+    [A_STEPSHIFT] = {"Step Shift", G_PITCH, 60, "A pitch sequence of four steps, with delay",
+        {ST("Step 1", 0), ST("Step 2", 7), ST("Step 3", 12), ST("Step 4", 5), HZ("Rate", 0.5f, 16, 3), MS("Glide", 1, 200, 5),
+         MS("Delay", 1, 1000, 1), PCT("Feedback", 20)}},
+    [A_QUAD] = {"Quad Harmony", G_PITCH, 50, "Four voices in key (Unison on voice 4: off)",
+        {CHO("Key", KEYS, 0), CHO("Scale", SCALES, 0), CHO("Voice 1", DEGREES, 9), CHO("Voice 2", DEGREES, 11),
+         CHO("Voice 3", DEGREES, 14), CHO("Voice 4", DEGREES, 7), PCT("Width", 70), MS("Delay", 1, 300, 1)}},
+    [A_RESONATOR] = {"Resonator", G_PITCH, 50, "Four tuned resonators ringing on a chord",
+        {CHO("Root", KEYS, 9), CHO("Chord", CHORDS, 3), INT("Octave", 1, 5, 3, ""), PCT("Decay", 70), PCT("Tone", 60),
+         PCT("Width", 60), PCT("Drive", 0), NONE}},
+    [A_VOCAL] = {"Vocal Shift", G_PITCH, 100, "Shifts a voice and pulls it towards the scale",
+        {ST("Pitch", 0), INT("Fine", -50, 50, 0, "c"), CHO("Key", KEYS, 0), CHO("Scale", SCALES, 0), PCT("Correct", 0),
+         MS("Speed", 1, 300, 50), PCT("Tone", 50), NONE}},
+    [A_CORRECT] = {"Pitch Correct", G_PITCH, 100, "Tunes a voice or instrument to the key and scale",
+        {CHO("Key", KEYS, 0), CHO("Scale", SCALES, 0), MS("Speed", 1, 300, 20), PCT("Amount", 100), INT("Detune", -50, 50, 0, "c"),
+         NONE, NONE, NONE}},
+
+    [A_CHORUS] = {"Chorus", G_MOD, 50, "Three voices of modulated delay",
+        {PCT("Depth", 45), HZ("Rate", 0.05f, 8, 0.6f), MS("Delay", 4, 30, 9), INT("Voices", 1, 3, 3, ""), PCT("Feedback", 0),
+         PCT("Tone", 55), PCT("Width", 80), CHO("Shape", SHAPES, 0)}},
+    [A_FLANGER] = {"Flanger", G_MOD, 50, "Short swept delay with resonance",
+        {MS("Delay", 0.3f, 10, 1.5f), PCT("Depth", 60), HZ("Rate", 0.02f, 8, 0.25f), LIN("Feedback", -95, 95, 60, "%"),
+         PCT("Tone", 60), PCT("Width", 60), CHO("Shape", SHAPES, 1), NONE}},
+    [A_TREMOLO] = {"Tremolo", G_MOD, 100, "Level modulation, smooth to choppy, mono to panning",
+        {PCT("Depth", 70), HZ("Rate", 0.5f, 20, 5), PCT("Shape", 20), PCT("Width", 0), NONE, NONE, NONE, NONE}},
+    [A_PHASER] = {"Phaser", G_MOD, 50, "Swept allpass stages with feedback",
+        {CHO("Stages", STAGES, 1), HZ("Center", 150, 4000, 700), PCT("Depth", 70), HZ("Rate", 0.02f, 8, 0.4f), PCT("Feedback", 40),
+         PCT("Width", 50), CHO("Shape", SHAPES, 0), NONE}},
+    [A_VIBE] = {"Vibe", G_MOD, 50, "Photocell phase-shifter wobble, chorus or vibrato",
+        {PCT("Intensity", 70), HZ("Speed", 0.3f, 10, 2), CHO("Mode", VIBE_MODES, 0), PCT("Throb", 40), PCT("Tone", 50),
+         PCT("Width", 30), NONE, NONE}},
+    [A_SFLANGER] = {"Studio Flanger", G_MOD, 50, "Tape-style flanging that can pass through zero",
+        {PCT("Manual", 30), PCT("Depth", 60), HZ("Rate", 0.02f, 4, 0.15f), LIN("Feedback", -95, 95, 0, "%"),
+         CHO("Mode", FLANGE_MODES, 1), PCT("Tone", 60), PCT("Width", 40), NONE}},
+    [A_SPHASER] = {"Studio Phaser", G_MOD, 50, "Smooth multi-stage studio phasing",
+        {PCT("Manual", 40), PCT("Depth", 70), HZ("Rate", 0.02f, 4, 0.2f), PCT("Feedback", 30), CHO("Stages", STAGES, 3),
+         CHO("Mode", PHASE_MODES, 0), PCT("Width", 50), NONE}},
+
+    [A_HALL] = {"Hall", G_REVERB, 35, "Large, smooth concert hall",
+        {PCT("Size", 65), EXPK("Decay", 0.5f, 20, 3, "s"), MS("Predelay", 1, 300, 20), PCT("Tone", 55), LIN("Low", -12, 6, 0, "dB"),
+         PCT("Mod", 30), PCT("Early", 30), NONE}},
+    [A_ROOM] = {"Room", G_REVERB, 30, "A small to medium room",
+        {PCT("Size", 40), EXPK("Decay", 0.2f, 5, 0.8f, "s"), MS("Predelay", 1, 100, 5), PCT("Tone", 50), PCT("Early", 50),
+         PCT("Mod", 15), NONE, NONE}},
+    [A_PLATE] = {"Plate", G_REVERB, 30, "Bright, dense plate",
+        {PCT("Size", 55), EXPK("Decay", 0.3f, 10, 2, "s"), MS("Predelay", 1, 200, 10), PCT("Tone", 70), PCT("Mod", 20),
+         HZ("Low Cut", 20, 800, 120), NONE, NONE}},
+    [A_SPRING] = {"Spring", G_REVERB, 30, "Amp-style spring tank, drip and all",
+        {EXPK("Decay", 0.5f, 6, 2, "s"), PCT("Tension", 50), PCT("Tone", 50), CHO("Springs", SPRINGS, 1), PCT("Drip", 40),
+         HZ("Low Cut", 20, 800, 150), NONE, NONE}},
+    [A_SHIMMER] = {"Shimmer", G_REVERB, 40, "Reverb whose tail climbs in pitch",
+        {PCT("Size", 70), EXPK("Decay", 1, 20, 6, "s"), ST("Pitch A", 12), ST("Pitch B", 19), PCT("Shimmer", 50), PCT("Tone", 60),
+         PCT("Mod", 30), NONE}},
+    [A_ABYSS] = {"Abyss", G_REVERB, 50, "Enormous dark space; full Decay holds forever",
+        {PCT("Size", 75), EXPK("Decay", 3, 100, 20, "s"), PCT("Swell", 0), PCT("Tone", 45), LIN("Low", -12, 6, 0, "dB"),
+         PCT("Mod", 50), HZ("Rate", 0.05f, 4, 0.3f), NONE}},
+    [A_CLASSIC] = {"Classic Verb", G_REVERB, 35, "80s studio reverb: early reflections, smooth tail",
+        {PCT("Size", 55), EXPK("Decay", 0.3f, 15, 2.5f, "s"), MS("Predelay", 1, 300, 30), PCT("Position", 50), PCT("Diffusion", 70),
+         PCT("Tone", 55), LIN("Low", -12, 6, 0, "dB"), NONE}},
+    [A_CRUSHVERB] = {"Crushed Verb", G_REVERB, 40, "Reverb pushed into distortion",
+        {PCT("Size", 60), EXPK("Decay", 0.5f, 15, 3, "s"), MS("Predelay", 1, 300, 20), PCT("Distortion", 50), CHO("Order", PREPOST, 1),
+         PCT("Tone", 50), PCT("Mod", 30), NONE}},
+    [A_TREMVERB] = {"Tremolo Verb", G_REVERB, 40, "Reverb with a pulsing tremolo",
+        {PCT("Size", 55), EXPK("Decay", 0.5f, 10, 2.5f, "s"), PCT("Tone", 55), PCT("Trem", 60), HZ("Trem Rate", 0.5f, 15, 4),
+         PCT("Shape", 30), CHO("Order", PREPOST, 1), NONE}},
+    [A_WARP] = {"Warp Verb", G_REVERB, 45, "A heavily bent, pitch-warping space",
+        {PCT("Size", 70), EXPK("Decay", 1, 30, 8, "s"), PCT("Warp", 50), HZ("Rate", 0.05f, 4, 0.2f), ST("Pitch", 0), PCT("Tone", 50),
+         PCT("Width", 80), NONE}},
+
+    [A_GRAINWEB] = {"Grain Web", G_GRAIN, 50, "Two pitched grain voices, reversing and feeding back",
+        {MS("Grain", 20, 500, 120), HZ("Density", 1, 40, 12), ST("Pitch A", 12), ST("Pitch B", -12), MS("Delay", 10, 2000, 300),
+         PCT("Feedback", 40), PCT("Reverse", 30), PCT("Tone", 55)}},
+    [A_GLITCH] = {"Glitch", G_GRAIN, 60, "Stutters, clock jumps and bit-crushing at random",
+        {HZ("Rate", 0.5f, 16, 4), PCT("Chance", 50), INT("Bits", 4, 16, 10, ""), INT("Alias", 1, 16, 1, "x"), MS("Length", 10, 500, 90),
+         PCT("Reverse", 30), PCT("Jump", 40), PCT("Tone", 60)}},
+    [A_GRAINMOD] = {"Grain Mod", G_GRAIN, 50, "Grain delay moved by four slow LFOs",
+        {MS("Grain", 20, 500, 150), HZ("Density", 1, 40, 10), MS("Delay", 10, 2000, 400), PCT("Feedback", 30), INT("Pitch Mod", 0, 1200, 100, "c"),
+         PCT("Pos Mod", 40), PCT("Pan Mod", 60), HZ("LFO Rate", 0.02f, 4, 0.3f)}},
+    [A_STUTTER] = {"Stutter", G_GRAIN, 100, "Catches a slice and repeats it, with tape-stop",
+        {MS("Slice", 20, 1000, 125), INT("Repeats", 1, 16, 4, ""), HZ("Rate", 0.2f, 8, 1), PCT("Chance", 60), PCT("Fade", 20),
+         PCT("Tape Stop", 0), PCT("Reverse", 0), NONE}},
+    [A_OFF] = {"Off", G_NONE, 0, "Passes the sound through", {NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE}},
+};
+
+/* ==== parameters (the order is the VST index: saved projects and Q-Links refer to them by it) ============== */
+enum { P_ALGO, P_OPEN, P_MIX, P_K, P_NAME = P_K + NK, P_INFO = P_NAME + NK, P_SLOT };   /* per slot */
 enum { kRouting = 2 * P_SLOT, kOutput, kNumParams };
-enum { A_OFF, A_DELAY, A_ECHO, A_REVERSE, A_DETUNE, A_PITCH, A_CHORUS, A_PHASER, A_TREMOLO, A_ROOM, A_SHIMMER,
-       A_ABYSS, kNumAlgos };
-static const char *const ALGOS[kNumAlgos] = {"Off", "Delay", "Echo", "Reverse", "Detune", "Pitch", "Chorus",
-                                             "Phaser", "Tremolo", "Room", "Shimmer", "Abyss"};
-static const char *const SLOT_NAMES[P_SLOT] = {"Algorithm", "Mix", "Time", "Feedback", "Tone", "Mod", "Rate", "Pitch"};
-static const float SLOT_DEFAULTS[P_SLOT] = {0, 0.4f, 0.5f, 0.4f, 0.5f, 0.25f, 0.3f, 0.75f};   /* pitch 0.75 = +12 */
 
-static int option_of(float v, int n) { return (int)lrintf((v < 0 ? 0 : v > 1 ? 1 : v) * (n - 1)); }
+static int option_of(float v, int n) { return (int)lrintf((v < 0 ? 0 : v > 1 ? 1 : v) * (float)(n - 1)); }
 static float lerp(float a, float b, float t) { return a + (b - a) * t; }
 static float expmap(float lo, float hi, float t) { return lo * powf(hi / lo, t); }
+static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ? hi : v; }
 static int finite_bits(float v) { uint32_t u; memcpy(&u, &v, 4); return (u & 0x7f800000u) != 0x7f800000u; }
+static float db(float d) { return powf(10, d / 20); }
 
-/* ---- building blocks ---------------------------------------------------------------------------------------- */
+static float knob_value(const Knob *k, float n) {   /* 0..1 -> the knob's own units (a choice: its index) */
+    n = clampf(n, 0, 1);
+    switch (k->map) {
+    case M_EXP: return expmap(k->lo, k->hi, n);
+    case M_INT: case M_CHOICE: return (float)lrintf(lerp(k->lo, k->hi, n));
+    default: return lerp(k->lo, k->hi, n);
+    }
+}
+static float knob_norm(const Knob *k, float v) {   /* the reverse */
+    if (!k->name || k->hi == k->lo) return 0;
+    if (k->map == M_EXP) return clampf(logf(v / k->lo) / logf(k->hi / k->lo), 0, 1);
+    return clampf((v - k->lo) / (k->hi - k->lo), 0, 1);
+}
+
+/* ==== building blocks ======================================================================================== */
 typedef struct { float *b; int mask, w; } Line;   /* a delay line, a power of two long */
-
 static int line_init(Line *l, int min_len) {
     int n = 1;
     while (n < min_len) n <<= 1;
@@ -55,63 +289,74 @@ static float line_read(const Line *l, float d) {   /* d samples ago (fractional;
 
 static float SINE[1025];
 static void sine_init(void) { for (int i = 0; i <= 1024; i++) SINE[i] = sinf(2 * PI * (float)i / 1024); }
-static float sine01(float ph) {   /* sin(2 pi ph), ph in [0, 1) */
+static float sine01(float ph) {   /* sin(2 pi ph) */
     const float x = (ph - floorf(ph)) * 1024;
     const int i = (int)x;
     return SINE[i] + (SINE[i + 1] - SINE[i]) * (x - (float)i);
 }
+static float tri01(float ph) { ph -= floorf(ph); return ph < 0.5f ? 4 * ph - 1 : 3 - 4 * ph; }
+static float hann01(float ph) { const float v = sine01(ph * 0.5f); return v * v; }
+static float softclip(float x) { return x / (1 + fabsf(x)); }
+static float tanh_fast(float x) { x = clampf(x, -3, 3); const float x2 = x * x; return x * (27 + x2) / (27 + 9 * x2); }
 
-typedef struct { float z; } OnePole;   /* lowpass: y += a (x - y) */
+typedef struct { float z; } OnePole;
 static float lp(OnePole *f, float x, float a) { f->z += a * (x - f->z); return f->z; }
+static float hp(OnePole *f, float x, float a) { return x - lp(f, x, a); }
 static float lp_coef(float hz, float fs) { const float a = 1 - expf(-2 * PI * hz / fs); return a > 1 ? 1 : a; }
 
-/* the shared Tone knob for delays: below the middle a lowpass closes (20 kHz -> 600 Hz), above it a highpass opens
- * (20 Hz -> 1.5 kHz) */
-typedef struct { OnePole l, h; } Tilt;
-static void tilt_coef(float tone, float fs, float *a, int *hp) {
-    *hp = tone >= 0.5f;
-    *a = *hp ? lp_coef(expmap(20, 1500, (tone - 0.5f) * 2), fs) : lp_coef(expmap(600, 20000, tone * 2), fs);
+/* state-variable filter (topology-preserving: stays stable while swept) */
+typedef struct { float ic1, ic2; } Svf;
+typedef struct { float g, k, a1, a2, a3; } SvfCo;
+static SvfCo svf_co(float hz, float q, float fs) {
+    SvfCo c;
+    c.g = tanf(PI * clampf(hz, 10, fs * 0.45f) / fs);
+    c.k = 1 / clampf(q, 0.5f, 25);
+    c.a1 = 1 / (1 + c.g * (c.g + c.k));
+    c.a2 = c.g * c.a1;
+    c.a3 = c.g * c.a2;
+    return c;
 }
-static float tilt(Tilt *t, float x, float a, int hp) { return hp ? x - lp(&t->h, x, a) : lp(&t->l, x, a); }
+static void svf(Svf *f, const SvfCo *c, float x, float *lo, float *bp, float *hi) {
+    const float v3 = x - f->ic2, v1 = c->a1 * f->ic1 + c->a2 * v3, v2 = f->ic2 + c->a2 * f->ic1 + c->a3 * v3;
+    f->ic1 = 2 * v1 - f->ic1;
+    f->ic2 = 2 * v2 - f->ic2;
+    *lo = v2; *bp = v1; *hi = x - c->k * v1 - v2;
+}
 
 /* a pitch shifter: two grains (Hann windows, half a grain apart, so their gains add to one) reading a delay line
- * at `ratio` times the speed it's written. Each new grain starts where its sound best matches what the other grain
- * is playing (a correlation search over about 12 ms), so the splices line up instead of cancelling the note. */
+ * at `ratio` times the speed it's written. With `search`, each new grain starts where its sound best matches what
+ * the other grain is playing (a correlation search), so the splices line up instead of cancelling the note;
+ * without it (the "vintage" sound) the splices land anywhere. */
 typedef struct { Line l; float d[2], ph[2]; int search, init; } Shifter;
-static float hann01(float ph) { const float v = sine01(ph * 0.5f); return v * v; }
-static float grain_start(Shifter *s, float ratio, float win, int other) {
+static float grain_start(Shifter *s, float ratio, float win, int other, int search) {
     const float base = 8 + (float)s->search + (ratio > 1 ? (ratio - 1) * win : 0);
-    /* what the other grain will play next (every 4th of 256 samples), against each candidate start */
-    float ref[64];
-    for (int i = 0; i < 64; i++) ref[i] = line_tap(&s->l, (int)(s->d[other] - (float)(i * 4) * ratio));
+    if (!search) return base;
+    float ref[32];   /* (32 points 6 samples apart, candidates 3 apart: light enough for eight shifters at once) */
+    for (int i = 0; i < 32; i++) ref[i] = line_tap(&s->l, (int)(s->d[other] - (float)(i * 6) * ratio));
     float best = base, best_v = -1e30f;
-    for (int o = -s->search; o <= s->search; o++) {
+    for (int o = -s->search; o <= s->search; o += 3) {
         const float c = base + (float)o;
         float xy = 0, yy = 1e-9f;
-        for (int i = 0; i < 64; i++) {
-            const float y = line_tap(&s->l, (int)(c - (float)(i * 4) * ratio));
-            xy += ref[i] * y;
-            yy += y * y;
-        }
+        for (int i = 0; i < 32; i++) { const float y = line_tap(&s->l, (int)(c - (float)(i * 6) * ratio)); xy += ref[i] * y; yy += y * y; }
         const float v = xy / sqrtf(yy);
         if (v > best_v) { best_v = v; best = c; }
     }
     return best;
 }
-static float shift(Shifter *s, float x, float ratio, float win) {
+static float shift_s(Shifter *s, float x, float ratio, float win, int search) {
     line_push(&s->l, x);
+    ratio = clampf(ratio, 0.125f, 4.2f);
     if (!s->init) { s->ph[0] = 0; s->ph[1] = 0.5f; s->d[0] = s->d[1] = 8 + (float)s->search + (ratio > 1 ? (ratio - 1) * win : 0); s->init = 1; }
     float y = 0;
     for (int k = 0; k < 2; k++) {
         s->ph[k] += 1 / win;
-        if (s->ph[k] >= 1) { s->ph[k] -= floorf(s->ph[k]); s->d[k] = grain_start(s, ratio, win, k ^ 1); }
+        if (s->ph[k] >= 1) { s->ph[k] -= floorf(s->ph[k]); s->d[k] = grain_start(s, ratio, win, k ^ 1, search); }
         s->d[k] += 1 - ratio;
         y += line_read(&s->l, s->d[k]) * hann01(s->ph[k]);
     }
     return y;
 }
 
-/* an allpass diffuser */
 typedef struct { Line l; int d; } Allpass;
 static float allpass(Allpass *a, float x, float g) {
     const float v = line_tap(&a->l, a->d - 1), u = x + g * v;
@@ -119,147 +364,174 @@ static float allpass(Allpass *a, float x, float g) {
     return v - g * u;
 }
 
-/* ---- one slot ------------------------------------------------------------------------------------------------- */
+/* a monophonic pitch tracker (YIN on a 4x decimated copy, every 512 samples) */
+#define TRK_N 1024
+typedef struct { float buf[TRK_N]; int w, dec, cnt; float acc, hz, conf; OnePole pre; } Tracker;
+static void track(Tracker *t, float x, float fs) {
+    t->acc += lp(&t->pre, x, 0.25f);
+    if (++t->dec < 4) return;
+    t->buf[t->w] = t->acc * 0.25f;
+    t->w = (t->w + 1) & (TRK_N - 1);
+    t->acc = 0; t->dec = 0;
+    if (++t->cnt < 128) return;
+    t->cnt = 0;
+    enum { W = 320, TMAX = 300, TMIN = 6 };
+    float d[TMAX + 1], x0[W + TMAX];
+    for (int i = 0; i < W + TMAX; i++) x0[i] = t->buf[(t->w - (W + TMAX) + i) & (TRK_N - 1)];
+    float energy = 0;
+    for (int i = 0; i < W; i++) energy += x0[i] * x0[i];
+    if (energy < 1e-5f) { t->conf = 0; return; }
+    float run = 0;
+    d[0] = 1;
+    int best = -1;
+    for (int tau = 1; tau <= TMAX; tau++) {
+        float s = 0;
+        for (int i = 0; i < W; i++) { const float e = x0[i] - x0[i + tau]; s += e * e; }
+        run += s;
+        d[tau] = s * (float)tau / (run + 1e-12f);
+        if (tau > TMIN + 1 && best < 0 && d[tau - 1] < 0.15f && d[tau - 1] <= d[tau] && d[tau - 1] <= d[tau - 2]) best = tau - 1;
+    }
+    if (best < 0) { t->conf = 0; return; }
+    const float a = d[best - 1], b = d[best], c = d[best + 1], den = a - 2 * b + c;
+    const float tau = (float)best + (fabsf(den) > 1e-9f ? 0.5f * (a - c) / den : 0);
+    t->hz = fs / 4 / tau;
+    t->conf = 1 - b;
+}
+static float midi_of(float hz) { return 69 + 12 * log2f(hz / 440); }
+/* semitones from the scale note nearest at or below MIDI note m to the one `steps` scale degrees away */
+static float diatonic_shift(float m, int key, int scale, int steps) {
+    const int *st = SCALE_STEPS[scale];
+    const int n = st[0];
+    const int note = (int)lrintf(m), rel = ((note - key) % 12 + 12) % 12, oct = (note - key - rel) / 12;
+    int idx = 0;
+    for (int i = 0; i < n; i++) if (st[1 + i] <= rel) idx = i;
+    int target = idx + steps, toct = oct;
+    while (target < 0) { target += n; toct--; }
+    while (target >= n) { target -= n; toct++; }
+    return (float)(key + toct * 12 + st[1 + target] - note);
+}
+static float nearest_in_scale(float m, int key, int scale) {
+    const int *st = SCALE_STEPS[scale];
+    float best = m, bd = 1e9f;
+    const int base = (int)floorf((m - (float)key) / 12);
+    for (int o = -1; o <= 1; o++)
+        for (int i = 0; i < st[0]; i++) {
+            const float c = (float)(key + st[1 + i] + 12 * (base + o));
+            if (fabsf(c - m) < bd) { bd = fabsf(c - m); best = c; }
+        }
+    return best;
+}
+/* a DEGREES choice (0..14) -> semitones to shift, for the note m in key/scale */
+static float degree_shift(float m, int key, int scale, int choice) {
+    const int steps = choice - 7;
+    if (steps == 7 || steps == -7) return (float)(steps / 7 * 12);
+    return diatonic_shift(m, key, scale, steps * SCALE_STEPS[scale][0] / 7);
+}
+
+/* ==== one slot =============================================================================================== */
 #define NFDN 8
+#define NSH 4
+#define NGR 12
 static const float FDN_MS[NFDN] = {29.7f, 37.1f, 41.1f, 43.7f, 47.9f, 53.3f, 59.1f, 67.3f};
-static const float DIFF_MS[4] = {4.7f, 3.6f, 12.7f, 9.3f};
+typedef struct { float pos, inc, len, age, pan; int on; } Grain;
 
 typedef struct {
-    int algo;                       /* what's running (a change clears the state first) */
-    float p[P_SLOT];                /* the knobs, 0..1 */
-    float mix_s, time_s;            /* smoothed */
-    float lfo;                      /* 0..1 */
-    /* delays, reverse, pitch, chorus */
-    Line dl[2];
-    Tilt tl[2];
-    OnePole echo_lp[2];
-    float fbv[2];
-    /* pitch shifters (pitch, detune, shimmer) */
-    Shifter sh[2];
-    /* reverse: grains reading backwards */
-    float rv_ph;
-    /* phaser */
-    float ap_z[2][8], ph_fb[2];
-    /* reverbs */
-    Line fdn[NFDN];
-    OnePole damp[NFDN];
-    Allpass diff[2][4];
-    float shim;                     /* the shimmer's pitched feedback */
-    OnePole shim_lp;
-    /* control values, worked out every 16 samples (slot_control) rather than per sample */
+    int algo;
+    float n[NK], v[NK];             /* knobs: 0..1 and in their own units */
+    float mix_n, mix_s;
     int tick;
-    float tilt_a, lp5k, lp9k; int tilt_hp;
-    float base, wow, fbg;           /* delays */
-    float grain, ratio;             /* reverse, pitch, shimmer */
-    float ratio_c[2], pdelay;       /* detune, pitch: per side */
-    float centre, tanh_k, k;        /* phaser, tremolo */
-    float lfo_inc;
-    float size, damp_a, depth, g[NFDN], shim_g; int ndiff, dd[2][4];   /* reverbs */
+    float fs;
+    uint32_t rng;
+    float lfo[4];
+    Line dl[2], dl2[2];             /* 4.2 s and 2.1 s a side */
+    Shifter sh[2][NSH];
+    Svf svf[2][4];
+    SvfCo sc[4];
+    OnePole op[2][8];
+    Allpass ap[2][12];
+    Line fdn[NFDN];
+    OnePole damp[NFDN], lowsh[NFDN];
+    Tracker trk;
+    Grain gr[2][NGR];
+    float st[2][16];                /* per-side state, meaning per algorithm */
+    float c[48];                    /* control values, meaning per algorithm (slot_control) */
+    float env[2], gate;
 } Slot;
+
+static float rnd(Slot *s) { s->rng = s->rng * 1664525u + 1013904223u; return (float)(s->rng >> 8) / 16777216.0f; }   /* 0..1 */
 
 static int slot_init(Slot *s, float fs) {
     int ok = 1;
+    s->fs = fs;
+    s->rng = 12345u;
     for (int c = 0; c < 2; c++) {
-        ok &= line_init(&s->dl[c], (int)(fs * 4.2f));            /* delay 2 s, reverse grains up to 4 s */
-        ok &= line_init(&s->sh[c].l, (int)(fs * 0.3f));   /* +24 st: 3 grains of 60 ms, + the search */
-        s->sh[c].search = (int)(fs * 0.012f);
-        for (int k = 0; k < 4; k++) {
-            ok &= line_init(&s->diff[c][k].l, (int)(fs * DIFF_MS[k] * 3 / 1000) + 4);
-        }
+        ok &= line_init(&s->dl[c], (int)(fs * 4.2f));
+        ok &= line_init(&s->dl2[c], (int)(fs * 2.1f));
+        for (int k = 0; k < NSH; k++) { ok &= line_init(&s->sh[c][k].l, (int)(fs * 0.3f)); s->sh[c][k].search = (int)(fs * 0.012f); }
+        for (int k = 0; k < 12; k++) ok &= line_init(&s->ap[c][k].l, (int)(fs * 0.12f));
     }
     for (int k = 0; k < NFDN; k++) ok &= line_init(&s->fdn[k], (int)(fs * FDN_MS[k] * 4.2f / 1000) + 8);
     return ok;
 }
 static void slot_free(Slot *s) {
     for (int c = 0; c < 2; c++) {
-        free(s->dl[c].b); free(s->sh[c].l.b);
-        for (int k = 0; k < 4; k++) free(s->diff[c][k].l.b);
+        free(s->dl[c].b); free(s->dl2[c].b);
+        for (int k = 0; k < NSH; k++) free(s->sh[c][k].l.b);
+        for (int k = 0; k < 12; k++) free(s->ap[c][k].l.b);
     }
     for (int k = 0; k < NFDN; k++) free(s->fdn[k].b);
 }
-static void slot_clear(Slot *s) {   /* everything back to silence (keeps the knobs) */
+static void slot_clear(Slot *s) {   /* back to silence (keeps the knobs) */
     for (int c = 0; c < 2; c++) {
-        line_clear(&s->dl[c]); line_clear(&s->sh[c].l); s->sh[c].init = 0;
-        for (int k = 0; k < 4; k++) line_clear(&s->diff[c][k].l);
-        memset(&s->tl[c], 0, sizeof s->tl[c]);
-        s->echo_lp[c].z = 0; s->fbv[c] = 0; s->ph_fb[c] = 0;
-        memset(s->ap_z[c], 0, sizeof s->ap_z[c]);
+        line_clear(&s->dl[c]); line_clear(&s->dl2[c]);
+        for (int k = 0; k < NSH; k++) { line_clear(&s->sh[c][k].l); s->sh[c][k].init = 0; }
+        for (int k = 0; k < 12; k++) { line_clear(&s->ap[c][k].l); s->ap[c][k].d = 2; }
+        memset(s->svf[c], 0, sizeof s->svf[c]);
+        memset(s->op[c], 0, sizeof s->op[c]);
+        memset(s->gr[c], 0, sizeof s->gr[c]);
+        memset(s->st[c], 0, sizeof s->st[c]);
     }
-    for (int k = 0; k < NFDN; k++) { line_clear(&s->fdn[k]); s->damp[k].z = 0; }
-    s->rv_ph = 0; s->shim = 0; s->shim_lp.z = 0;
+    for (int k = 0; k < NFDN; k++) { line_clear(&s->fdn[k]); s->damp[k].z = 0; s->lowsh[k].z = 0; }
+    memset(&s->trk, 0, sizeof s->trk);
+    memset(s->lfo, 0, sizeof s->lfo);
+    memset(s->sc, 0, sizeof s->sc);
+    s->env[0] = s->env[1] = s->gate = 0;
+    s->tick = 0;
 }
 
-static float semis(const Slot *s) { return (float)lrintf((s->p[P_PITCH] - 0.5f) * 48); }   /* -24..+24 */
-static float delay_ms(float t) { return expmap(20, 2000, t); }
-static float rate_hz(float r) { return expmap(0.05f, 10, r); }
-static float reverse_ms(float t) { return lerp(150, 1500, t); }
-
-/* the slow-changing values each algorithm needs, from the knobs (every 16 samples) */
-static void slot_control(Slot *s, float fs) {
-    const float t = s->time_s, fb = s->p[P_FEEDBACK], mod = s->p[P_MOD];
-    tilt_coef(s->p[P_TONE], fs, &s->tilt_a, &s->tilt_hp);
-    s->lp5k = lp_coef(5000, fs);
-    s->lp9k = lp_coef(9000, fs);
-    s->lfo_inc = rate_hz(s->p[P_RATE]) / fs;
-    s->ratio = powf(2, semis(s) / 12);
-    const float maxd = (float)s->dl[0].mask - 8;
-    switch (s->algo) {
-    case A_DELAY: case A_ECHO:
-        s->base = delay_ms(t) * fs / 1000;
-        s->wow = mod * (s->algo == A_ECHO ? 0.004f : 0.002f) * fs;   /* tape wow: up to 4 / 2 ms */
-        s->fbg = s->algo == A_ECHO ? fb * 1.05f : fb * 0.98f;       /* Echo can run away a little (it saturates) */
-        break;
-    case A_REVERSE:
-        s->grain = reverse_ms(t) * fs / 1000;
-        if (s->grain * (1 + s->ratio) + 0.004f * fs > maxd) s->grain = (maxd - 0.004f * fs) / (1 + s->ratio);
-        break;
-    case A_DETUNE: {
-        const float cents = t * 50;
-        s->ratio_c[0] = powf(2, cents / 1200);
-        s->ratio_c[1] = 1 / s->ratio_c[0];
-        break;
-    }
-    case A_PITCH: {
-        const float spread = mod * 15 / 100;   /* Mod: left and right voices apart by up to 30 cents */
-        s->ratio_c[0] = powf(2, (semis(s) + spread) / 12);
-        s->ratio_c[1] = powf(2, (semis(s) - spread) / 12);
-        s->pdelay = lerp(0.002f, 1.0f, t * t) * fs;
-        break;
-    }
-    case A_CHORUS: s->base = lerp(0.004f, 0.03f, t) * fs; s->wow = mod * 0.006f * fs; break;
-    case A_PHASER: s->centre = expmap(200, 3000, t); break;
-    case A_TREMOLO: s->k = 1 + t * 20; s->tanh_k = tanhf(s->k); break;
-    case A_ROOM: case A_SHIMMER: case A_ABYSS: {
-        const int abyss = s->algo == A_ABYSS;
-        s->size = abyss ? lerp(1.5f, 4.0f, t) : lerp(0.35f, 2.0f, t);
-        const float rt60 = abyss ? expmap(4, 60, fb) : expmap(0.3f, 12, fb);
-        s->damp_a = lp_coef(expmap(abyss ? 700 : 1200, 18000, s->p[P_TONE]), fs);
-        s->depth = mod * (abyss ? 0.004f : 0.0015f) * fs;   /* up to 4 / 1.5 ms of wobble */
-        for (int k = 0; k < NFDN; k++)
-            s->g[k] = powf(10, -3 * FDN_MS[k] * s->size / 1000 / rt60) * 0.35355339f;   /* 1/sqrt(8): lossless mix */
-        s->ndiff = abyss ? 4 : 2;
-        for (int c = 0; c < 2; c++)
-            for (int k = 0; k < 4; k++) {
-                int d = (int)(DIFF_MS[k] * (c ? 1.13f : 1) * (abyss ? 2.5f : 1) * fs / 1000);
-                s->dd[c][k] = d > s->diff[c][k].l.mask - 2 ? s->diff[c][k].l.mask - 2 : d;
-            }
-        /* how much pitched sound goes back in: less the longer the decay, so the loop always dies away */
-        s->shim_g = s->algo == A_SHIMMER ? mod * 0.22f * (1 - 0.55f * fb) : 0;
-        break;
-    }
-    default: break;
-    }
-}
-
-/* the reverbs (Room, Shimmer, Abyss): an 8-line feedback delay network with input diffusion */
-static void reverb(Slot *s, float fs, float inl, float inr, float *ol, float *or_) {
-    float x[2] = {inl + s->shim, inr + s->shim};
+/* ---- the reverb network, shared by the reverbs ------------------------------------------------------------- */
+typedef struct { float size, rt60, damp_hz, low_db, depth, rate; int ndiff; float diff_scale, diff_g; } VerbCfg;
+static void verb_control(Slot *s, const VerbCfg *v) {   /* uses c[0..15] */
+    const float fs = s->fs;
+    for (int k = 0; k < NFDN; k++)
+        s->c[k] = clampf(powf(10, -3 * FDN_MS[k] * v->size / 1000 / v->rt60), 0, 0.9999f) * 0.35355339f;   /* 1/sqrt(8): lossless mix */
+    s->c[8] = lp_coef(v->damp_hz, fs);
+    s->c[9] = v->size * fs / 1000;
+    s->c[10] = v->depth * fs;
+    s->c[11] = v->rate / fs;
+    s->c[12] = (float)v->ndiff;
+    static const float DIFF_MS[6] = {4.7f, 3.6f, 12.7f, 9.3f, 17.1f, 6.1f};
     for (int c = 0; c < 2; c++)
-        for (int k = 0; k < s->ndiff; k++) { s->diff[c][k].d = s->dd[c][k]; x[c] = allpass(&s->diff[c][k], x[c], 0.6f); }
+        for (int k = 0; k < 6; k++) {
+            const int d = (int)(DIFF_MS[k] * (c ? 1.13f : 1) * v->diff_scale * fs / 1000);
+            s->ap[c][k].d = d < 2 ? 2 : d > s->ap[c][k].l.mask - 2 ? s->ap[c][k].l.mask - 2 : d;
+        }
+    s->c[13] = v->diff_g;
+    float gmax = 0;   /* extra low-frequency gain in the loop, kept below what would make it ring on */
+    for (int k = 0; k < NFDN; k++) gmax = fmaxf(gmax, s->c[k] / 0.35355339f);
+    s->c[14] = fminf(db(v->low_db), 0.995f / fmaxf(gmax, 1e-6f)) - 1;
+    s->c[15] = lp_coef(250, fs);
+}
+static void verb_run(Slot *s, float inl, float inr, float *ol, float *or_, float extra_in) {
+    float x[2] = {inl + extra_in, inr + extra_in};
+    const int nd = (int)s->c[12];
+    for (int c = 0; c < 2; c++) for (int k = 0; k < nd; k++) x[c] = allpass(&s->ap[c][k], x[c], s->c[13]);
+    s->lfo[3] += s->c[11];
+    s->lfo[3] -= floorf(s->lfo[3]);
     float v[NFDN];
     for (int k = 0; k < NFDN; k++) {
-        float d = FDN_MS[k] * s->size * fs / 1000;
-        if (k & 1) d += s->depth * (1 + sine01(s->lfo + 0.125f * (float)k));
+        float d = FDN_MS[k] * s->c[9];
+        if (k & 1) d += s->c[10] * (1 + sine01(s->lfo[3] + 0.125f * (float)k));
         v[k] = line_read(&s->fdn[k], d);
     }
     *ol = (v[0] - v[2] + v[4] - v[6] + v[1] + v[5]) * 0.35f;
@@ -267,117 +539,831 @@ static void reverb(Slot *s, float fs, float inl, float inr, float *ol, float *or
     for (int h = 1; h < NFDN; h <<= 1)   /* Hadamard mix */
         for (int i = 0; i < NFDN; i += h << 1)
             for (int j = i; j < i + h; j++) { const float a = v[j], b = v[j + h]; v[j] = a + b; v[j + h] = a - b; }
-    for (int k = 0; k < NFDN; k++)
-        line_push(&s->fdn[k], lp(&s->damp[k], v[k] * s->g[k], s->damp_a) + ((k & 1) ? x[1] : x[0]) * 0.5f);
-    if (s->shim_g > 0) {   /* Shimmer: the reverb's sound, pitched (Pitch knob), fed back in and mixed in (Mod = how much) */
-        const float y = lp(&s->shim_lp, shift(&s->sh[0], (*ol + *or_) * 0.5f, s->ratio, 0.06f * fs), s->lp9k);
-        s->shim = tanhf(y * s->shim_g);
-        *ol += y * s->p[P_MOD] * 0.8f;   /* and heard directly (outside the loop: no effect on its stability) */
-        *or_ += y * s->p[P_MOD] * 0.8f;
-    } else s->shim = 0;
+    for (int k = 0; k < NFDN; k++) {
+        float y = lp(&s->damp[k], v[k] * s->c[k], s->c[8]);
+        y += lp(&s->lowsh[k], y, s->c[15]) * s->c[14];
+        line_push(&s->fdn[k], clampf(y, -20, 20) + ((k & 1) ? x[1] : x[0]) * 0.5f);
+    }
 }
 
-static void slot_param_update(Slot *s, int algo) {
-    if (algo != s->algo) { slot_clear(s); s->algo = algo; s->tick = 0; }
-}
+/* ---- per-algorithm control values (every 16 samples) -------------------------------------------------------- */
+#define V(i) (s->v[i])
+#define PC(i) (s->v[i] * 0.01f)
+static float tone_cut(float pct) { return expmap(800, 18000, pct * 0.01f); }   /* a "Tone" percentage as a lowpass */
 
-/* one sample through the slot: its wet sound out */
-static void slot_run(Slot *s, float fs, float l, float r, float *wl, float *wr) {
-    s->mix_s += 0.002f * (s->p[P_MIX] - s->mix_s);
-    s->time_s += 0.0005f * (s->p[P_TIME] - s->time_s);   /* slow: turning Time bends delays like tape */
-    if (!(s->tick++ & 15)) slot_control(s, fs);
-    const float mod = s->p[P_MOD], fb = s->p[P_FEEDBACK];
-    s->lfo += s->lfo_inc;
-    s->lfo -= floorf(s->lfo);
-    const float in[2] = {l, r};
-    float out[2] = {0, 0};
+static void slot_control(Slot *s) {
+    const float fs = s->fs;
+    for (int i = 0; i < NK; i++) if (ALGOS[s->algo].k[i].name) s->v[i] = knob_value(&ALGOS[s->algo].k[i], s->n[i]);
+    float *c = s->c;
+    VerbCfg vc;
     switch (s->algo) {
-    case A_DELAY: case A_ECHO: {
-        const int echo = s->algo == A_ECHO;
-        for (int c = 0; c < 2; c++) {
-            const float d = s->base * (c ? 1.0f : 0.993f) + s->wow * (1 + sine01(s->lfo + (c ? 0.25f : 0))) +
-                            (echo ? 0.0004f * fs * sine01(s->lfo * 7.3f + 0.5f * (float)c) * mod : 0);
-            float y = line_read(&s->dl[c], d);
-            out[c] = y;
-            y = tilt(&s->tl[c], y, s->tilt_a, s->tilt_hp);
-            if (echo) { y = lp(&s->echo_lp[c], y, s->lp5k); y = tanhf(y * 1.2f) / 1.2f; }
-            line_push(&s->dl[c], in[c] + y * s->fbg);
+    case A_BAND: c[20] = lp_coef(tone_cut(V(7)), fs); c[21] = powf(2, V(6) / 12); break;
+    case A_BBD: c[20] = lp_coef(V(4), fs); c[21] = lp_coef(V(4) * 0.8f, fs); break;
+    case A_DIGITAL: c[20] = lp_coef(V(2), fs); c[21] = lp_coef(V(3), fs); break;
+    case A_DUCKED: c[20] = db(V(2)); c[21] = db(-V(3)); c[22] = expf(-1 / (V(4) * 0.001f * fs)); c[23] = lp_coef(tone_cut(V(5)), fs); break;
+    case A_HEADS: case A_TAPE: c[20] = lp_coef(V(s->algo == A_TAPE ? 5 : 6), fs); c[21] = lp_coef(80, fs); break;
+    case A_MODDLY: case A_MULTITAP: case A_REVDLY: case A_TAPCLOUD:
+        c[20] = lp_coef(tone_cut(V(s->algo == A_TAPCLOUD ? 7 : s->algo == A_REVDLY ? 2 : 5)), fs);
+        break;
+    case A_VINTAGE: c[20] = lp_coef(lerp(2500, 12000, PC(4)), fs); c[21] = powf(2, V(2) - 1); break;
+    case A_FUZZOCT: c[20] = lp_coef(lerp(1200, 9000, PC(2)), fs); c[21] = db(V(3)); break;
+    case A_CRUSH: c[20] = lp_coef(lerp(1500, 12000, PC(3)), fs); c[21] = db(V(5)); c[22] = db(V(4)) - 1; c[23] = lp_coef(200, fs);
+        c[24] = db(V(6)); break;
+    case A_FUZZDLY: c[20] = lp_coef(lerp(1500, 9000, PC(1)), fs); c[21] = db(V(2)); c[22] = powf(2, V(6) / 1200); break;
+    case A_BANDDRIVE: c[20] = lp_coef(V(0), fs); c[21] = db(V(3)); c[22] = db(V(4)); c[23] = lp_coef(V(5), fs); break;
+    case A_MIDDRIVE: c[21] = lp_coef(lerp(1500, 8000, PC(1)), fs); c[22] = db(V(2)); c[23] = db(V(4));
+        c[24] = lp_coef(V(3) * 0.4f, fs); break;
+    case A_REVSHIFT: c[20] = lp_coef(tone_cut(V(5)), fs); c[21] = powf(2, V(0) / 12); c[22] = powf(2, V(1) / 12); break;
+    case A_VSHIFTER: c[20] = lp_coef(tone_cut(V(4)), fs); c[21] = powf(2, V(0) / 12); c[22] = powf(2, V(5) / 1200); break;
+    case A_PMODHARM: c[20] = lp_coef(tone_cut(V(6)), fs); c[21] = powf(2, V(0) / 12); c[22] = powf(2, V(1) / 12); break;
+    case A_MICRO: c[20] = lp_coef(tone_cut(V(4)), fs); c[21] = powf(2, V(0) / 1200); break;
+    case A_OCTAVER: c[20] = lp_coef(tone_cut(V(4)), fs); break;
+    case A_BEND: case A_POLYBEND: c[20] = lp_coef(tone_cut(V(s->algo == A_BEND ? 5 : 6)), fs); c[21] = expf(-1 / (V(3) * 0.001f * fs)); break;
+    case A_POLYSHIFT: c[21] = powf(2, (V(0) + V(1) * 0.01f) / 12); c[22] = powf(2, (V(2) + V(3) * 0.01f) / 12); break;
+    case A_SYNTH: c[21] = expf(-1 / (V(5) * 0.001f * fs)); c[22] = expf(-1 / (V(6) * 0.001f * fs)); c[23] = expf(-1 / (V(7) * 0.001f * fs));
+        c[24] = powf(2, V(1)); break;
+    case A_STEPSHIFT: case A_ARP: c[21] = expf(-1 / (V(5) * 0.001f * fs)); break;
+    case A_RESONATOR: {
+        const int root = (int)V(0), ch = (int)V(1);
+        for (int k = 0; k < 4; k++) {
+            const float hz = 440 * powf(2, ((float)(root + 12 * ((int)V(2) + 1) + CHORD_ST[ch][k]) - 69) / 12);
+            c[24 + k] = clampf(fs / hz, 8, (float)s->ap[0][1].l.mask - 8);
         }
+        c[20] = lerp(0.8f, 0.995f, PC(3)); c[21] = lp_coef(tone_cut(V(4)), fs);
         break;
     }
-    case A_REVERSE: {   /* the input played backwards in grains of Time ms, pitched (Pitch), with feedback */
-        s->rv_ph += 1 / s->grain;
-        s->rv_ph -= floorf(s->rv_ph);
-        for (int c = 0; c < 2; c++) {
-            float y = 0;
-            for (int k = 0; k < 2; k++) {
-                float ph = s->rv_ph + 0.5f * (float)k;
-                ph -= floorf(ph);
-                /* the read head runs backwards at `ratio` while the write head runs forwards */
-                const float d = 4 + ph * s->grain * (1 + s->ratio) + mod * 0.002f * fs * (1 + sine01(s->lfo));
-                y += line_read(&s->dl[c], d) * sine01(ph * 0.5f);
+    case A_VOCAL: c[20] = lp_coef(tone_cut(V(6)), fs); c[21] = expf(-1 / (V(5) * 0.001f * fs)); break;
+    case A_CORRECT: c[20] = lp_coef(16000, fs); c[21] = expf(-1 / (V(2) * 0.001f * fs)); break;
+    case A_CHORUS: c[20] = lp_coef(tone_cut(V(5)), fs); break;
+    case A_FLANGER: c[20] = lp_coef(tone_cut(V(4)), fs); break;
+    case A_SFLANGER: c[20] = lp_coef(tone_cut(V(5)), fs); break;
+    case A_VIBE: c[20] = lp_coef(tone_cut(V(4)), fs); break;
+    case A_TREMOLO: c[21] = 1 + PC(2) * 15; c[22] = tanh_fast(c[21]); break;
+    case A_HALL:
+        vc = (VerbCfg){lerp(0.8f, 2.4f, PC(0)), V(1), lerp(2000, 16000, PC(3)), V(4), lerp(0, 0.003f, PC(5)), 0.4f, 4, 1.2f, 0.65f};
+        verb_control(s, &vc); c[20] = V(2) * 0.001f * fs; c[21] = PC(6); break;
+    case A_ROOM:
+        vc = (VerbCfg){lerp(0.3f, 1.0f, PC(0)), V(1), lerp(2000, 14000, PC(3)), 0, lerp(0, 0.0015f, PC(5)), 0.6f, 2, 0.7f, 0.6f};
+        verb_control(s, &vc); c[20] = V(2) * 0.001f * fs; c[21] = PC(4); break;
+    case A_PLATE:
+        vc = (VerbCfg){lerp(0.5f, 1.5f, PC(0)), V(1), lerp(3000, 19000, PC(3)), 0, lerp(0, 0.002f, PC(4)), 0.9f, 6, 0.9f, 0.72f};
+        verb_control(s, &vc); c[20] = V(2) * 0.001f * fs; c[21] = lp_coef(V(5), fs); break;
+    case A_SPRING: {
+        const float tension = PC(1);
+        for (int ch = 0; ch < 2; ch++)
+            for (int k = 0; k < 12; k++) {   /* a chain of short allpasses: the spring's chirp */
+                const int d = (int)((lerp(0.5f, 2.2f, tension) + 0.37f * (float)k + (ch ? 0.21f : 0)) * fs / 1000);
+                s->ap[ch][k].d = d < 2 ? 2 : d;
             }
-            out[c] = y;
-            line_push(&s->dl[c], in[c] + tilt(&s->tl[c], y, s->tilt_a, s->tilt_hp) * fb * 0.9f);
-        }
+        const float loop = lerp(0.035f, 0.06f, tension);
+        c[20] = lp_coef(lerp(1500, 6000, PC(2)), fs); c[21] = lp_coef(V(5), fs);
+        c[22] = powf(10, -3 * loop / V(0));   /* loop gain for Decay */
+        c[23] = loop * fs;
         break;
     }
-    case A_DETUNE:   /* left up, right down by Time (0..50 cents), with a short offset; Mod/Rate drift it */
-        for (int c = 0; c < 2; c++) {
-            const float drift = 1 + 0.003f * mod * sine01(s->lfo + 0.5f * (float)c);
-            line_push(&s->dl[c], in[c]);
-            out[c] = shift(&s->sh[c], line_read(&s->dl[c], (c ? 0.011f : 0.007f) * fs), s->ratio_c[c] * drift, 0.03f * fs);
-        }
+    case A_SHIMMER:
+        vc = (VerbCfg){lerp(0.8f, 2.6f, PC(0)), V(1), lerp(2500, 16000, PC(5)), 0, lerp(0, 0.003f, PC(6)), 0.3f, 4, 1.3f, 0.65f};
+        verb_control(s, &vc); c[20] = powf(2, V(2) / 12); c[21] = powf(2, V(3) / 12); c[22] = lp_coef(9000, fs);
+        c[23] = PC(4) * 0.22f * (1 - 0.6f * clampf((V(1) - 1) / 19, 0, 1));   /* pitched sound back in: less as Decay grows */
         break;
-    case A_PITCH:   /* harmonizer: the input delayed (Time) and shifted (Pitch); Feedback repeats it, stepping */
-        for (int c = 0; c < 2; c++) {
-            const float y = shift(&s->sh[c], line_read(&s->dl[c], s->pdelay), s->ratio_c[c], 0.05f * fs);
-            out[c] = y;
-            line_push(&s->dl[c], in[c] + tilt(&s->tl[c], y, s->tilt_a, s->tilt_hp) * fb * 0.95f);
-        }
+    case A_ABYSS: {
+        const int frozen = V(1) >= 99.5f;
+        vc = (VerbCfg){lerp(1.5f, 4.0f, PC(0)), frozen ? 1e6f : V(1), lerp(700, 12000, PC(3)), frozen ? 0 : V(4), lerp(0, 0.006f, PC(5)), V(6), 6, 2.5f, 0.7f};
+        verb_control(s, &vc); c[20] = PC(2); c[21] = (float)frozen;
         break;
-    case A_CHORUS:   /* three modulated taps a side; Feedback towards a flanger */
-        for (int c = 0; c < 2; c++) {
-            float y = 0;
-            for (int k = 0; k < 3; k++)
-                y += line_read(&s->dl[c], s->base + s->wow * 0.5f * (1 + sine01(s->lfo + (float)k / 3 + 0.17f * (float)c)));
-            y *= 0.45f;
-            out[c] = y;
-            line_push(&s->dl[c], in[c] + tilt(&s->tl[c], y, s->tilt_a, s->tilt_hp) * fb * 0.85f);
-        }
+    }
+    case A_CLASSIC:
+        vc = (VerbCfg){lerp(0.7f, 2.2f, PC(0)), V(1), lerp(2000, 14000, PC(5)), V(6), 0.0008f, 0.5f, 4, 1.0f, lerp(0.3f, 0.75f, PC(4))};
+        verb_control(s, &vc); c[20] = V(2) * 0.001f * fs; c[21] = PC(3); break;
+    case A_CRUSHVERB:
+        vc = (VerbCfg){lerp(0.8f, 2.2f, PC(0)), V(1), 9000, 0, lerp(0, 0.003f, PC(6)), 0.5f, 4, 1.2f, 0.65f};
+        verb_control(s, &vc); c[20] = V(2) * 0.001f * fs; c[21] = lp_coef(tone_cut(V(5)), fs); break;
+    case A_TREMVERB:
+        vc = (VerbCfg){lerp(0.7f, 2.2f, PC(0)), V(1), lerp(2000, 15000, PC(2)), 0, 0.001f, 0.5f, 4, 1.1f, 0.65f};
+        verb_control(s, &vc); c[21] = 1 + PC(5) * 15; c[22] = tanh_fast(c[21]); break;
+    case A_WARP:
+        vc = (VerbCfg){lerp(1.2f, 3.2f, PC(0)), V(1), 16000, 0, lerp(0.002f, 0.012f, PC(2)), V(3), 6, 2.0f, 0.7f};
+        verb_control(s, &vc); c[20] = powf(2, V(4) / 12); c[22] = lp_coef(8000, fs); c[24] = lp_coef(tone_cut(V(5)), fs);
+        c[23] = (V(4) != 0 ? 0.12f : 0) * (1 - 0.6f * clampf((V(1) - 1) / 29, 0, 1));
         break;
-    case A_PHASER:   /* 8 allpass stages swept around Time's frequency; Feedback = resonance */
-        for (int c = 0; c < 2; c++) {
-            const float sw = sine01(s->lfo + (c ? 0.25f : 0));
-            float f = s->centre * expf(sw * mod * 2.5f * 0.693147f);
-            if (f > fs * 0.45f) f = fs * 0.45f;
-            const float w = PI * f / fs, a = (1 - w) / (1 + w);
-            float y = in[c] + s->ph_fb[c] * fb * 0.85f;
-            for (int k = 0; k < 8; k++) {   /* first-order allpass, one state each */
-                const float o = -a * y + s->ap_z[c][k];
-                s->ap_z[c][k] = y + a * o;
-                y = o;
-            }
-            s->ph_fb[c] = y;
-            out[c] = (in[c] + y) * 0.5f;
-        }
-        break;
-    case A_TREMOLO:   /* Mod = depth, Time = shape (sine -> square), Feedback = stereo spread (to auto-pan) */
-        for (int c = 0; c < 2; c++) {
-            const float w = tanhf(sine01(s->lfo + (c ? fb * 0.5f : 0)) * s->k) / s->tanh_k;
-            out[c] = in[c] * (1 - mod * 0.5f * (1 - w));
-        }
-        break;
-    case A_ROOM: case A_SHIMMER: case A_ABYSS:
-        reverb(s, fs, l, r, &out[0], &out[1]);
-        break;
+    case A_GRAINWEB: c[20] = lp_coef(tone_cut(V(7)), fs); break;
+    case A_GRAINMOD: c[20] = lp_coef(tone_cut(60), fs); break;
+    case A_GLITCH: c[20] = lp_coef(tone_cut(V(7)), fs); c[21] = powf(2, V(2) - 1); break;
     default: break;
     }
+}
+
+/* ---- the algorithms, one sample (in: l r, out: wet) --------------------------------------------------------- */
+static float lfo_shape(float ph, int shape, Slot *s, int ch) {
+    switch (shape) {
+    case 1: return tri01(ph);
+    case 2: return sine01(ph) >= 0 ? 1.0f : -1.0f;
+    case 3: {   /* smoothed random: a new target each cycle (state in st[ch][13..15]) */
+        float *val = &s->st[ch][15], *tg = &s->st[ch][14], *last = &s->st[ch][13];
+        if (ph < *last) *tg = rnd(s) * 2 - 1;
+        *last = ph;
+        *val += 0.002f * (*tg - *val);
+        return *val;
+    }
+    default: return sine01(ph);
+    }
+}
+static float adv(float *ph, float hz, float fs) { *ph += hz / fs; *ph -= floorf(*ph); return *ph; }
+/* a delay time, slewed so turning it bends the pitch like tape instead of clicking */
+static float slew(float *cur, float target) { if (*cur <= 0) *cur = target; *cur += 0.0006f * (target - *cur); return *cur; }
+static Line *res_line(Slot *s, int ch, int k) { return k == 0 ? &s->dl[ch] : k == 2 ? &s->dl2[ch] : &s->ap[ch][k].l; }
+
+static void run_algo(Slot *s, const float in[2], float out[2]) {
+    const float fs = s->fs, ms = fs * 0.001f;
+    const int ctl = (s->tick & 15) == 1;   /* a sample on which the swept filters recompute */
+    float *c = s->c;
+    switch (s->algo) {
+    case A_BAND: {
+        const float ph = adv(&s->lfo[0], V(5), fs);
+        for (int ch = 0; ch < 2; ch++) {
+            if (ctl) s->sc[ch] = svf_co(V(2) * (1 + PC(4) * 0.8f * sine01(ph + 0.25f * (float)ch)), lerp(0.7f, 12, PC(3)), fs);
+            float y = line_read(&s->dl[ch], slew(&s->st[ch][0], V(0) * ms)), lo, bp, hi;
+            svf(&s->svf[ch][0], &s->sc[ch], y, &lo, &bp, &hi);
+            y = lp(&s->op[ch][0], bp * s->sc[ch].k * 1.5f, c[20]);   /* (k = 1/Q: the band's peak at unity) */
+            if (V(6) != 0) y = shift_s(&s->sh[ch][0], y, c[21], 0.05f * fs, 1);
+            out[ch] = y;
+            line_push(&s->dl[ch], in[ch] + tanh_fast(y * PC(1) * 0.98f));
+        }
+        break;
+    }
+    case A_BBD: {
+        const float ph = adv(&s->lfo[0], V(3), fs);
+        for (int ch = 0; ch < 2; ch++) {
+            const float d = slew(&s->st[ch][0], V(0) * ms) + PC(2) * 0.003f * fs * (1 + sine01(ph + 0.3f * (float)ch));
+            float y = lp(&s->op[ch][1], lp(&s->op[ch][0], line_read(&s->dl[ch], d), c[20]), c[21]);
+            y += (rnd(s) - 0.5f) * PC(5) * 0.004f;
+            out[ch] = y;
+            line_push(&s->dl[ch], in[ch] + tanh_fast(y * PC(1) * lerp(1.0f, 1.25f, PC(5))));
+        }
+        break;
+    }
+    case A_DIGITAL: {
+        const float ph = adv(&s->lfo[0], V(5), fs);
+        const int pp = V(7) > 0.5f;
+        float y[2];
+        for (int ch = 0; ch < 2; ch++) {
+            const float d = slew(&s->st[ch][0], (V(0) + (ch ? V(6) : 0)) * ms) + PC(4) * 0.002f * fs * (1 + sine01(ph + 0.25f * (float)ch));
+            y[ch] = lp(&s->op[ch][1], hp(&s->op[ch][0], line_read(&s->dl[ch], d), c[20]), c[21]);
+            out[ch] = y[ch];
+        }
+        for (int ch = 0; ch < 2; ch++)   /* ping-pong: the mono input goes in on the left, repeats cross over */
+            line_push(&s->dl[ch], (pp ? (ch ? 0 : (in[0] + in[1]) * 0.5f) : in[ch]) + tanh_fast((pp ? y[ch ^ 1] : y[ch]) * PC(1) * 0.98f));
+        break;
+    }
+    case A_DUCKED: {
+        const float lvl = fmaxf(fabsf(in[0]), fabsf(in[1]));
+        s->env[0] = lvl > s->env[0] ? lvl : s->env[0] * c[22];
+        s->gate += 0.002f * ((s->env[0] > c[20] ? c[21] : 1) - s->gate);
+        const float ph = adv(&s->lfo[0], 0.5f, fs);
+        for (int ch = 0; ch < 2; ch++) {
+            const float d = slew(&s->st[ch][0], (V(0) + (ch ? V(7) : 0)) * ms) + PC(6) * 0.002f * fs * (1 + sine01(ph + 0.25f * (float)ch));
+            const float y = lp(&s->op[ch][0], line_read(&s->dl[ch], d), c[23]);
+            out[ch] = y * s->gate;
+            line_push(&s->dl[ch], in[ch] + tanh_fast(y * PC(1) * 0.98f));
+        }
+        break;
+    }
+    case A_FPONG: {
+        const float ph = adv(&s->lfo[0], V(5), fs);
+        const int type = (int)V(6);
+        float y[2];
+        for (int ch = 0; ch < 2; ch++) {
+            if (ctl) s->sc[ch] = svf_co(V(2) * (1 + PC(4) * 0.85f * sine01(ph + 0.5f * (float)ch)), lerp(0.7f, 10, PC(3)), fs);
+            float lo, bp, hi;
+            svf(&s->svf[ch][0], &s->sc[ch], line_read(&s->dl[ch], slew(&s->st[ch][0], V(0) * ms)), &lo, &bp, &hi);
+            const float k = s->sc[ch].k;   /* 1/Q: keeps the resonant peak near unity */
+            y[ch] = (type == 0 ? lo : type == 1 ? bp : hi) * (type == 1 ? k * 1.4f : fminf(1, 1.6f * k));
+        }
+        const float mid = (y[0] + y[1]) * 0.5f;
+        out[0] = lerp(mid, y[0], PC(7));
+        out[1] = lerp(mid, y[1], PC(7));
+        line_push(&s->dl[0], (in[0] + in[1]) * 0.5f + tanh_fast(y[1] * PC(1) * 0.98f));
+        line_push(&s->dl[1], tanh_fast(y[0] * PC(1) * 0.98f));
+        break;
+    }
+    case A_HEADS: case A_TAPE: {
+        const int tape = s->algo == A_TAPE;
+        const float wow = PC(tape ? 2 : 3), flut = PC(tape ? 3 : 4), sat = PC(tape ? 4 : 5), spread = PC(7);
+        const float p1 = adv(&s->lfo[0], 0.6f, fs), p2 = adv(&s->lfo[1], 7.1f, fs);
+        const float mod = wow * 0.004f * fs * (1 + sine01(p1)) + flut * 0.0004f * fs * sine01(p2);
+        static const int MASK[7] = {1, 2, 4, 3, 5, 6, 7};   /* HEADS[] -> which of heads 1, 2, 3 play */
+        const int m = tape ? 1 : MASK[(int)V(1)];
+        for (int ch = 0; ch < 2; ch++) {
+            const float base = slew(&s->st[ch][0], V(0) * ms) * (1 + spread * 0.04f * (float)ch);
+            float y = 0;
+            int n = 0;
+            for (int h = 0; h < 3; h++) if (m & (1 << h)) { y += line_read(&s->dl[ch], base * (float)(h + 1) + mod); n++; }
+            if (n > 1) y *= 0.7f;
+            y = hp(&s->op[ch][1], lp(&s->op[ch][0], y, c[20]), c[21]);
+            if (tape) y += (rnd(s) - 0.5f) * PC(6) * 0.003f;
+            out[ch] = y;
+            const float drive = 1 + sat * 3;
+            /* small-signal loop gain = Feedback x 1.05: past ~95% it runs away into the saturation, like a real one */
+            line_push(&s->dl[ch], in[ch] + tanh_fast(y * PC(tape ? 1 : 2) * 1.05f * drive) / drive);
+        }
+        break;
+    }
+    case A_MODDLY: {
+        const float ph = adv(&s->lfo[0], V(3), fs);
+        for (int ch = 0; ch < 2; ch++) {
+            const float m = lfo_shape(ph + 0.25f * (float)ch, (int)V(4), s, ch);
+            const float d = slew(&s->st[ch][0], (V(0) + (ch ? V(6) : 0)) * ms) + PC(2) * 0.006f * fs * (1 + m);
+            const float y = lp(&s->op[ch][0], line_read(&s->dl[ch], d), c[20]);
+            out[ch] = y;
+            line_push(&s->dl[ch], in[ch] + tanh_fast(y * PC(1) * 0.98f));
+        }
+        break;
+    }
+    case A_MULTITAP: {
+        const int n = (int)V(1);
+        const float span = slew(&s->st[0][0], V(0) * ms), curve = V(2) * 0.01f, taper = V(3) * 0.01f;
+        float acc[2] = {0, 0};
+        for (int t = 0; t < n; t++) {
+            float u = (float)(t + 1) / (float)n;
+            u = curve >= 0 ? powf(u, 1 + curve * 2) : 1 - powf(1 - u, 1 - curve * 2);
+            const float g = clampf(1 + taper * (taper > 0 ? (u - 1) : -u), 0, 1) / sqrtf((float)n) * 1.4f;
+            const float pan = (t & 1 ? 1 : -1) * PC(6) * 0.5f;
+            for (int ch = 0; ch < 2; ch++) acc[ch] += line_read(&s->dl[ch], span * u) * g * (ch ? 0.5f + pan : 0.5f - pan) * 2;
+        }
+        for (int ch = 0; ch < 2; ch++) {
+            float y = lp(&s->op[ch][0], acc[ch], c[20]);
+            if (PC(7) > 0.01f)
+                for (int k = 0; k < 4; k++) { s->ap[ch][k].d = (int)((3.1f + 4.3f * (float)k + (float)ch) * ms); y = allpass(&s->ap[ch][k], y, 0.6f * PC(7)); }
+            out[ch] = y;
+            line_push(&s->dl[ch], in[ch] + tanh_fast(line_read(&s->dl[ch], span) * PC(4) * 0.98f));
+        }
+        break;
+    }
+    case A_REVDLY: case A_REVSHIFT: {   /* grains read backwards: the read head runs back while the write head runs on */
+        const int rs = s->algo == A_REVSHIFT;
+        for (int ch = 0; ch < 2; ch++) {
+            const float grain = clampf((rs ? V(2 + ch) : V(0)) * ms, 0.05f * fs, 1.5f * fs);
+            const float ratio = rs ? (ch ? c[22] : c[21]) : 1;
+            float *ph = &s->st[ch][1];
+            *ph += 1 / grain;
+            *ph -= floorf(*ph);
+            const float wob = PC(rs ? 6 : 3) * 0.002f * fs * (1 + sine01(adv(&s->lfo[ch], rs ? 0.3f : V(4), fs)));
+            float y = 0;
+            for (int k = 0; k < 2; k++) {
+                float p = *ph + 0.5f * (float)k;
+                p -= floorf(p);
+                y += line_read(&s->dl[ch], 4 + p * grain * (1 + ratio) + wob) * hann01(p);
+            }
+            y = lp(&s->op[ch][0], y, c[20]);
+            out[ch] = y;
+            line_push(&s->dl[ch], in[ch] + tanh_fast(y * PC(rs ? 4 : 1) * 0.9f));
+        }
+        if (rs) { const float mid = (out[0] + out[1]) * 0.5f; out[0] = lerp(mid, out[0], PC(7)); out[1] = lerp(mid, out[1], PC(7)); }
+        break;
+    }
+    case A_TAPCLOUD: {
+        const int n = (int)V(1);
+        const float len = slew(&s->st[0][0], V(0) * ms), pre = V(2) * ms, spread = V(3) * 0.01f, taper = V(4) * 0.01f;
+        const float chop = V(6) > 0.15f ? 0.5f + 0.5f * sine01(adv(&s->lfo[0], V(6), fs)) : 1;
+        float acc[2] = {0, 0};
+        for (int t = 0; t < n; t++) {
+            float u = n > 1 ? (float)t / (float)(n - 1) : 0;
+            u = spread >= 0 ? powf(u, 1 + spread * 2) : 1 - powf(1 - u, 1 - spread * 2);
+            const float g = clampf(1 + taper * (taper > 0 ? (u - 1) : -u), 0, 1) / sqrtf((float)n) * 1.3f;
+            for (int ch = 0; ch < 2; ch++) acc[ch] += line_read(&s->dl[ch], pre + len * u + (float)(ch * (t % 3)) * 0.4f * ms) * g;
+        }
+        const float sm = PC(5);
+        for (int ch = 0; ch < 2; ch++) {
+            float y = lp(&s->op[ch][0], acc[ch], c[20]);
+            if (sm > 0.01f)
+                for (int k = 0; k < 6; k++) {
+                    s->ap[ch][k].d = (int)((5.3f + 7.9f * (float)k + 1.3f * (float)ch) * ms * (0.5f + sm));
+                    y = allpass(&s->ap[ch][k], y, 0.7f * sm);
+                }
+            out[ch] = y * chop;
+            line_push(&s->dl[ch], in[ch]);
+        }
+        break;
+    }
+    case A_VINTAGE: {
+        const float ph = adv(&s->lfo[0], V(6), fs);
+        const int div = (int)V(3);
+        for (int ch = 0; ch < 2; ch++) {
+            const float d = slew(&s->st[ch][0], (V(0) + (ch ? V(7) : 0)) * ms) + PC(5) * 0.002f * fs * (1 + sine01(ph + 0.25f * (float)ch));
+            const float y0 = line_read(&s->dl[ch], d);
+            if (++s->st[ch][2] >= (float)div) { s->st[ch][2] = 0; s->st[ch][3] = floorf(y0 * c[21] + 0.5f) / c[21]; }   /* hold + quantise */
+            const float y = lp(&s->op[ch][1], lp(&s->op[ch][0], s->st[ch][3], c[20]), c[20]);
+            out[ch] = y;
+            line_push(&s->dl[ch], in[ch] + tanh_fast(y * PC(1) * 0.98f));
+        }
+        break;
+    }
+
+    case A_FUZZOCT: {
+        const float trem = 1 - PC(4) * 0.5f * (1 - sine01(adv(&s->lfo[0], V(5), fs)));
+        for (int ch = 0; ch < 2; ch++) {
+            const float x = in[ch] * (1 + PC(0) * 60);
+            float y = softclip(x + PC(1) * (fabsf(x) - 0.3f));   /* rectifying adds the octave */
+            y = hp(&s->op[ch][1], y, 0.004f);
+            if (PC(6) > 0.01f) {   /* envelope filter */
+                const float e = fabsf(in[ch]);
+                s->env[ch] = e > s->env[ch] ? s->env[ch] + 0.01f * (e - s->env[ch]) : s->env[ch] * 0.9995f;
+                if (ctl) s->sc[ch] = svf_co(300 + 6000 * clampf(s->env[ch] * 8 * PC(6), 0, 1), lerp(1, 8, PC(7)), fs);
+                float lo, bp, hi;
+                svf(&s->svf[ch][0], &s->sc[ch], y, &lo, &bp, &hi);
+                y = bp * 1.5f;
+            }
+            out[ch] = lp(&s->op[ch][0], y, c[20]) * c[21] * trem;
+        }
+        break;
+    }
+    case A_CRUSH: {
+        const float lvl = fmaxf(fabsf(in[0]), fabsf(in[1]));
+        s->env[0] += (lvl > s->env[0] ? 0.01f : 0.0003f) * (lvl - s->env[0]);
+        const float sag = 1 - PC(1) * clampf(s->env[0] * 4, 0, 0.8f);   /* loud playing pulls the supply down */
+        const float comp = 1 / (1 + PC(2) * 8 * s->env[0]);
+        s->gate += 0.001f * ((s->env[0] > c[24] ? 1.0f : 0.0f) - s->gate);
+        for (int ch = 0; ch < 2; ch++) {
+            const float x = (in[ch] + lp(&s->op[ch][2], in[ch], c[23]) * c[22]) * (1 + PC(0) * 40) * comp;
+            float y = tanh_fast(x * sag + 0.1f * PC(1)) - tanh_fast(0.1f * PC(1));
+            y = lp(&s->op[ch][0], y, c[20]);
+            out[ch] = hp(&s->op[ch][1], y, 0.003f) * c[21] * s->gate;
+        }
+        break;
+    }
+    case A_FUZZDLY: {
+        for (int ch = 0; ch < 2; ch++) {
+            float y = softclip(in[ch] * (1 + PC(0) * 80));
+            y = lp(&s->op[ch][0], hp(&s->op[ch][1], y, 0.004f), c[20]) * c[21];
+            const float da = line_read(&s->dl[ch], slew(&s->st[ch][0], V(3) * ms));
+            const float dbv = line_read(&s->dl2[ch], slew(&s->st[ch][1], V(4) * ms));
+            const float ra = shift_s(&s->sh[ch][0], da, ch ? 1 / c[22] : c[22], 0.03f * fs, 1);
+            line_push(&s->dl[ch], y + tanh_fast(dbv * PC(5) * 0.95f));
+            line_push(&s->dl2[ch], y + tanh_fast(ra * PC(5) * 0.95f));
+            out[ch] = tanh_fast((y + (ra + dbv) * 0.5f * PC(7)) / 3) * 3;   /* (fuzz + full repeats: kept under the ceiling) */
+        }
+        break;
+    }
+    case A_BANDDRIVE: {
+        const float lvl = fmaxf(fabsf(in[0]), fabsf(in[1]));
+        s->env[0] += (lvl > s->env[0] ? 0.01f : 0.0003f) * (lvl - s->env[0]);
+        const float comp = 1 / (1 + PC(6) * 6 * s->env[0]);
+        for (int ch = 0; ch < 2; ch++) {
+            const float lo = lp(&s->op[ch][0], in[ch], c[20]), hi = in[ch] - lo;
+            const float yl = tanh_fast(lo * (1 + PC(1) * 30)) * c[21];
+            const float yh = softclip(hi * (1 + PC(2) * 60)) * c[22];
+            out[ch] = lp(&s->op[ch][1], (yl + yh) * comp, c[23]);
+        }
+        break;
+    }
+    case A_MIDDRIVE: {
+        for (int ch = 0; ch < 2; ch++) {
+            const float low = lp(&s->op[ch][3], in[ch], c[24]);
+            const float x = (in[ch] - low) + low * c[23];   /* less bass into the clipper: the mid hump */
+            float y = x * (1 + PC(0) * 50);
+            y = V(5) > 0.5f ? clampf(y, -0.7f, 0.7f) : tanh_fast(y);
+            y = lp(&s->op[ch][1], y, c[21]);
+            out[ch] = lerp(in[ch], y * c[22], PC(6));
+        }
+        break;
+    }
+
+    case A_DIATONIC: case A_QUAD: case A_ARP: case A_VOCAL: case A_CORRECT: case A_SYNTH: {
+        track(&s->trk, (in[0] + in[1]) * 0.5f, fs);
+        if (s->trk.conf > 0.5f && s->trk.hz > 40 && s->trk.hz < 2000) s->st[0][4] = midi_of(s->trk.hz);
+        const float m = s->st[0][4] > 0 ? s->st[0][4] : 60;
+        const float win = 0.04f * fs;
+        if (s->algo == A_SYNTH) {
+            const float e = fmaxf(fabsf(in[0]), fabsf(in[1]));
+            s->env[0] = e > s->env[0] ? e + c[21] * (s->env[0] - e) : e + c[22] * (s->env[0] - e);
+            const float target = 440 * powf(2, (m - 69) / 12) * c[24];
+            float *f = &s->st[0][6], *ph = &s->st[0][7], *ph2 = &s->st[0][8];
+            *f = target + c[23] * (*f - target);
+            adv(ph, *f, fs);
+            adv(ph2, *f * 0.5f, fs);
+            const int w = (int)V(0);
+            const float saw = 2 * *ph - 1, sq = *ph < 0.5f ? 1.0f : -1.0f, sub = *ph2 < 0.5f ? 1.0f : -1.0f;
+            const float osc = w == 0 ? saw : w == 1 ? sq : w == 2 ? sub : 0.6f * saw + 0.6f * sub;
+            if (ctl) s->sc[0] = svf_co(V(2) * (1 + PC(4) * 6 * clampf(s->env[0] * 4, 0, 1)), lerp(0.7f, 8, PC(3)), fs);
+            float lo, bp, hi;
+            svf(&s->svf[0][0], &s->sc[0], osc, &lo, &bp, &hi);
+            out[0] = out[1] = lo * clampf(s->env[0] * 3, 0, 1) * 0.5f;
+            break;
+        }
+        const int key = (int)V(s->algo == A_VOCAL ? 2 : 0), scale = (int)V(s->algo == A_VOCAL ? 3 : 1);
+        if (s->algo == A_DIATONIC || s->algo == A_QUAD) {
+            const int quad = s->algo == A_QUAD, nv = quad ? 4 : 2;
+            const float dly = V(quad ? 7 : 6) * ms + 2, width = PC(quad ? 6 : 7);
+            for (int ch = 0; ch < 2; ch++) line_push(&s->dl[ch], in[ch]);
+            float acc[2] = {0, 0};
+            for (int k = 0; k < nv; k++) {
+                const int choice = (int)V(2 + k);
+                if (quad && k == 3 && choice == 7) continue;   /* Unison on voice 4: off */
+                float *cur = &s->st[1][5 + k];
+                *cur += 0.01f * (degree_shift(m, key, scale, choice) - *cur);
+                const float ratio = powf(2, *cur / 12), lvl = quad ? 0.6f : PC(4 + k), pan = width * (k & 1 ? 0.5f : -0.5f);
+                for (int ch = 0; ch < 2; ch++)
+                    acc[ch] += shift_s(&s->sh[ch][k], line_read(&s->dl[ch], dly), ratio, win, 1) * lvl * (ch ? 1 + pan : 1 - pan);
+            }
+            out[0] = acc[0]; out[1] = acc[1];
+            break;
+        }
+        if (s->algo == A_ARP) {
+            float *ph = &s->lfo[0];
+            const float before = *ph;
+            adv(ph, V(4), fs);
+            const int set = (int)V(2), per = ARP_DEG[set][0], cnt = per * (int)V(6), pat = (int)V(3);
+            float *stepf = &s->st[1][0], *dir = &s->st[1][1];
+            int step = (int)*stepf;
+            if (*ph < before) {   /* the next note of the pattern */
+                if (pat == 0) step = (step + 1) % cnt;
+                else if (pat == 1) step = (step + cnt - 1) % cnt;
+                else if (pat == 2) {
+                    if (*dir == 0) *dir = 1;
+                    if (step + (int)*dir < 0 || step + (int)*dir >= cnt) *dir = -*dir;
+                    step = (int)clampf((float)(step + (int)*dir), 0, (float)(cnt - 1));
+                } else step = (int)(rnd(s) * (float)cnt) % cnt;
+            }
+            step %= cnt;
+            *stepf = (float)step;
+            const int deg = ARP_DEG[set][1 + step % per];   /* in seven-note terms (7 = the octave) */
+            const float st = diatonic_shift(m, key, scale, deg * SCALE_STEPS[scale][0] / 7) + 12 * (float)(step / per);
+            float *cur = &s->st[0][9];
+            *cur = st + c[21] * (*cur - st);
+            for (int ch = 0; ch < 2; ch++) {
+                const float y = shift_s(&s->sh[ch][0], in[ch] + s->st[ch][10] * PC(7) * 0.9f, powf(2, *cur / 12), win, 1);
+                s->st[ch][10] = y;
+                out[ch] = y;
+            }
+            break;
+        }
+        /* Vocal Shift / Pitch Correct: towards the scale note (by Correct / Amount), at Speed */
+        const float target = nearest_in_scale(m, key, scale);
+        const float amt = PC(s->algo == A_VOCAL ? 4 : 3);
+        const float want = (target - m) * amt + (s->algo == A_VOCAL ? V(0) + V(1) * 0.01f : V(4) * 0.01f);
+        float *cur = &s->st[0][11];
+        *cur = want + c[21] * (*cur - want);
+        const float ratio = powf(2, *cur / 12);
+        for (int ch = 0; ch < 2; ch++) out[ch] = lp(&s->op[ch][0], shift_s(&s->sh[ch][0], in[ch], ratio, 0.03f * fs, 1), c[20]);
+        break;
+    }
+    case A_VSHIFTER: {
+        for (int ch = 0; ch < 2; ch++) {
+            const float r = c[21] * (ch ? c[22] : 1 / c[22]);
+            const float y = lp(&s->op[ch][0], shift_s(&s->sh[ch][0], line_read(&s->dl[ch], V(1) * ms + 2), r, 0.045f * fs, V(3) > 0.5f), c[20]);
+            out[ch] = y;
+            line_push(&s->dl[ch], in[ch] + tanh_fast(y * PC(2) * 0.95f));
+        }
+        break;
+    }
+    case A_PMODHARM: {
+        const float m = sine01(adv(&s->lfo[0], V(3), fs)) * V(2) / 1200;
+        const float wa = powf(2, m), wb = 1 / wa;
+        for (int ch = 0; ch < 2; ch++) {
+            const float x = line_read(&s->dl[ch], V(4) * ms + 2);
+            const float a = shift_s(&s->sh[ch][0], x, c[21] * wa, 0.04f * fs, 1), b = shift_s(&s->sh[ch][1], x, c[22] * wb, 0.04f * fs, 1);
+            const float v = lp(&s->op[ch][0], lerp((a + b) * 0.5f, ch ? b : a, PC(7)), c[20]);
+            out[ch] = v;
+            line_push(&s->dl[ch], in[ch] + tanh_fast(v * PC(5) * 0.9f));
+        }
+        break;
+    }
+    case A_MICRO: {
+        const float drift = 1 + PC(5) * 0.003f * sine01(adv(&s->lfo[0], 0.3f, fs));
+        for (int ch = 0; ch < 2; ch++) {
+            const float x = line_read(&s->dl[ch], V(1 + ch) * ms + 2);
+            const float y = lp(&s->op[ch][0], shift_s(&s->sh[ch][0], x, (ch ? 1 / c[21] : c[21]) * drift, 0.03f * fs, 1), c[20]);
+            out[ch] = y;
+            line_push(&s->dl[ch], in[ch] + tanh_fast(y * PC(3) * 0.9f));
+        }
+        break;
+    }
+    case A_OCTAVER: {
+        for (int ch = 0; ch < 2; ch++) {
+            const float x = in[ch];
+            const float s1 = shift_s(&s->sh[ch][0], x, 0.5f, 0.05f * fs, 1);
+            const float s2 = PC(1) > 0.01f ? shift_s(&s->sh[ch][1], x, 0.25f, 0.07f * fs, 1) : 0;
+            const float up = PC(2) > 0.01f ? shift_s(&s->sh[ch][2], x, 2.0f, 0.03f * fs, 1) : 0;
+            float y = s1 * PC(0) + s2 * PC(1) + up * PC(2);
+            if (PC(5) > 0.01f) y = tanh_fast(y * (1 + PC(5) * 10)) / (1 + PC(5) * 2);
+            out[ch] = lp(&s->op[ch][0], y, c[20]) + x * PC(3);
+        }
+        break;
+    }
+    case A_BEND: case A_POLYBEND: {
+        const int poly = s->algo == A_POLYBEND;
+        float *b = &s->st[0][0];
+        *b = PC(0) + c[21] * (*b - PC(0));
+        const float sa = poly ? lerp(0, V(1), *b) : lerp(V(1), V(2), *b);
+        const float sb = poly ? lerp(0, V(2), *b) : sa - 12;
+        const int dual = poly || V(4) > 0.5f;
+        const float ra = powf(2, sa / 12), rb = powf(2, sb / 12);
+        for (int ch = 0; ch < 2; ch++) {
+            float y = shift_s(&s->sh[ch][0], in[ch], ra, 0.04f * fs, 1) * (poly ? PC(4) : 1);
+            if (dual) y += shift_s(&s->sh[ch][1], in[ch], rb, 0.04f * fs, 1) * (poly ? PC(5) : 0.7f);
+            out[ch] = lp(&s->op[ch][0], y, c[20]);
+        }
+        break;
+    }
+    case A_POLYSHIFT: {
+        const float win = (V(7) < 0.5f ? 0.02f : 0.045f) * fs, w = PC(6) * 0.5f;
+        for (int ch = 0; ch < 2; ch++) {
+            const float a = shift_s(&s->sh[ch][0], in[ch], c[21], win, 1) * PC(4);
+            const float b = shift_s(&s->sh[ch][1], in[ch], c[22], win, 1) * PC(5);
+            out[ch] = ch ? a * (1 - w) + b * (1 + w) : a * (1 + w) + b * (1 - w);
+        }
+        break;
+    }
+    case A_STEPSHIFT: {
+        float *ph = &s->lfo[0];
+        const float before = *ph;
+        adv(ph, V(4), fs);
+        if (*ph < before) s->st[1][0] = (float)(((int)s->st[1][0] + 1) & 3);
+        const float st = V((int)s->st[1][0]);
+        float *cur = &s->st[0][9];
+        *cur = st + c[21] * (*cur - st);
+        const float ratio = powf(2, *cur / 12);
+        for (int ch = 0; ch < 2; ch++) {
+            const float y = shift_s(&s->sh[ch][0], line_read(&s->dl[ch], V(6) * ms + 2), ratio, 0.04f * fs, 1);
+            out[ch] = y;
+            line_push(&s->dl[ch], in[ch] + tanh_fast(y * PC(7) * 0.9f));
+        }
+        break;
+    }
+    case A_RESONATOR: {   /* four tuned combs (one line each), damped by Tone */
+        for (int ch = 0; ch < 2; ch++) {
+            const float x = PC(6) > 0.01f ? tanh_fast(in[ch] * (1 + PC(6) * 8)) : in[ch];
+            float y = 0;
+            for (int k = 0; k < 4; k++) {
+                Line *l = res_line(s, ch, k);
+                const float own = line_read(l, c[24 + k] * (1 + (ch ? 0.003f : 0) * PC(5)));
+                y += own;
+                line_push(l, x * 0.3f + lp(&s->op[ch][1 + k], own, c[21]) * c[20]);
+            }
+            out[ch] = y * 0.35f;
+        }
+        break;
+    }
+
+    case A_CHORUS: {
+        const float ph = adv(&s->lfo[0], V(1), fs);
+        const int nv = (int)V(3);
+        for (int ch = 0; ch < 2; ch++) {
+            float y = 0;
+            for (int k = 0; k < nv; k++)
+                y += line_read(&s->dl[ch], V(2) * ms + PC(0) * 0.003f * fs * (1 + lfo_shape(ph + (float)k / 3 + 0.17f * (float)ch * PC(6), (int)V(7), s, ch)));
+            y = lp(&s->op[ch][0], y * 1.2f / (float)nv, c[20]);
+            out[ch] = y;
+            line_push(&s->dl[ch], in[ch] + tanh_fast(y * PC(4) * 0.7f));
+        }
+        break;
+    }
+    case A_FLANGER: case A_SFLANGER: {
+        const int studio = s->algo == A_SFLANGER;
+        const float ph = adv(&s->lfo[0], V(2), fs);
+        const int tz = studio && V(4) > 0.5f;
+        const float base = studio ? lerp(0.3f, 8, PC(0)) * ms : V(0) * ms, fb = V(3) * 0.01f;
+        for (int ch = 0; ch < 2; ch++) {
+            const float m = lfo_shape(ph + PC(studio ? 6 : 5) * 0.25f * (float)ch, studio ? 1 : (int)V(6), s, ch);
+            float y = lp(&s->op[ch][0], line_read(&s->dl[ch], base * (1 + PC(1) * 0.95f * m) + 2), c[20]);
+            /* thru-zero: the dry side is delayed by the sweep's middle, so the two cross */
+            const float dry = tz ? line_read(&s->dl2[ch], base + 2) : in[ch];
+            if (tz) line_push(&s->dl2[ch], in[ch]);
+            out[ch] = (dry + (tz ? -y : y)) * 0.6f;
+            line_push(&s->dl[ch], in[ch] + tanh_fast(y * fb * 0.95f));
+        }
+        break;
+    }
+    case A_TREMOLO: case A_TREMVERB: {
+        const int tv = s->algo == A_TREMVERB, post = tv && V(6) > 0.5f;
+        const float ph = adv(&s->lfo[0], V(tv ? 4 : 1), fs), depth = PC(tv ? 3 : 0);
+        float x[2] = {in[0], in[1]};
+        if (post) verb_run(s, x[0], x[1], &x[0], &x[1], 0);
+        for (int ch = 0; ch < 2; ch++) {
+            const float w = tanh_fast(sine01(ph + (tv ? 0 : PC(3) * 0.5f) * (float)ch) * c[21]) / c[22];
+            x[ch] *= 1 - depth * 0.5f * (1 - w);
+        }
+        if (tv && !post) verb_run(s, x[0], x[1], &x[0], &x[1], 0);
+        out[0] = x[0]; out[1] = x[1];
+        break;
+    }
+    case A_PHASER: case A_SPHASER: {
+        const int studio = s->algo == A_SPHASER;
+        static const int NST[4] = {4, 6, 8, 12};
+        const int n = NST[(int)V(studio ? 4 : 0)];
+        const float ph = adv(&s->lfo[0], V(studio ? 2 : 3), fs);
+        const float centre = studio ? expmap(150, 4000, PC(0)) : V(1), depth = PC(studio ? 1 : 2), fbk = PC(studio ? 3 : 4);
+        const int vib = studio && V(5) > 0.5f;
+        for (int ch = 0; ch < 2; ch++) {
+            const float sw = lfo_shape(ph + PC(studio ? 6 : 5) * 0.25f * (float)ch, studio ? 0 : (int)V(6), s, ch);
+            const float f = clampf(centre * expf(sw * depth * 2.5f * 0.693147f), 20, fs * 0.45f);
+            const float w = PI * f / fs, a = (1 - w) / (1 + w);
+            float y = in[ch] + s->st[ch][0] * fbk * 0.85f;
+            for (int k = 0; k < n; k++) { const float o = -a * y + s->st[ch][1 + k]; s->st[ch][1 + k] = y + a * o; y = o; }
+            s->st[ch][0] = y;
+            out[ch] = vib ? y : (in[ch] + y) * 0.5f;
+        }
+        break;
+    }
+    case A_VIBE: {   /* a lamp (rises fast, falls slow) lighting four photocells; Throb makes the swing lopsided */
+        static const float BASE[4] = {60, 300, 900, 2200};
+        const float ph = adv(&s->lfo[0], V(1), fs);
+        for (int ch = 0; ch < 2; ch++) {
+            float l = 0.5f + 0.5f * sine01(ph + PC(5) * 0.25f * (float)ch);
+            l = l * lerp(1, l, PC(3));
+            float *lamp = &s->st[ch][8];
+            *lamp += (l > *lamp ? 0.01f : 0.002f) * (l - *lamp);
+            float y = in[ch];
+            for (int k = 0; k < 4; k++) {
+                const float w = PI * clampf(BASE[k] * (1 + PC(0) * 4 * *lamp), 20, fs * 0.45f) / fs, a = (1 - w) / (1 + w);
+                const float o = -a * y + s->st[ch][1 + k];
+                s->st[ch][1 + k] = y + a * o;
+                y = o;
+            }
+            y = lp(&s->op[ch][0], y, c[20]);
+            out[ch] = V(2) > 0.5f ? y : (in[ch] + y) * 0.5f;
+        }
+        break;
+    }
+
+    case A_HALL: case A_ROOM: case A_PLATE: case A_CLASSIC: case A_CRUSHVERB: {
+        const float pre = c[20];
+        for (int ch = 0; ch < 2; ch++) line_push(&s->dl2[ch], in[ch]);
+        float x[2] = {line_read(&s->dl2[0], pre + 1), line_read(&s->dl2[1], pre + 1)};
+        if (s->algo == A_PLATE) { x[0] = hp(&s->op[0][0], x[0], c[21]); x[1] = hp(&s->op[1][0], x[1], c[21]); }
+        const float drive = 1 + PC(3) * 30;
+        if (s->algo == A_CRUSHVERB && V(4) < 0.5f) for (int ch = 0; ch < 2; ch++) x[ch] = tanh_fast(x[ch] * drive) * 0.5f;
+        float l, r;
+        verb_run(s, x[0], x[1], &l, &r, 0);
+        if (s->algo == A_HALL || s->algo == A_ROOM || s->algo == A_CLASSIC) {   /* early reflections */
+            static const float ER[6] = {7.3f, 11.9f, 17.7f, 23.1f, 31.3f, 41.9f};
+            const float sz = s->algo == A_ROOM ? lerp(0.4f, 1.2f, PC(0)) : lerp(0.8f, 2.0f, PC(0));
+            float el = 0, er = 0;
+            for (int k = 0; k < 6; k++) {
+                el += line_read(&s->dl2[0], pre + ER[k] * sz * ms) * (0.8f - 0.1f * (float)k);
+                er += line_read(&s->dl2[1], pre + ER[k] * sz * 1.07f * ms) * (0.8f - 0.1f * (float)k);
+            }
+            const float early = s->algo == A_CLASSIC ? 1 - c[21] : c[21], late = s->algo == A_CLASSIC ? 0.5f + c[21] : 1;
+            l = l * late + el * early * 0.4f;
+            r = r * late + er * early * 0.4f;
+        }
+        if (s->algo == A_CRUSHVERB) {
+            if (V(4) > 0.5f) { l = tanh_fast(l * drive) * 0.5f; r = tanh_fast(r * drive) * 0.5f; }
+            l = lp(&s->op[0][1], l, c[21]); r = lp(&s->op[1][1], r, c[21]);
+        }
+        out[0] = l; out[1] = r;
+        break;
+    }
+    case A_SPRING: {
+        const int n = (int)V(3) + 1;
+        for (int ch = 0; ch < 2; ch++) {
+            float x = hp(&s->op[ch][0], in[ch], c[21]);
+            x += x * PC(4) * 2 * fabsf(x);   /* drip: louder hits splash more */
+            float y = x + s->st[ch][0];
+            for (int k = 0; k < 12; k++) y = allpass(&s->ap[ch][k], y, 0.6f);
+            line_push(&s->dl2[ch], y);
+            float acc = 0;
+            for (int k = 0; k < n; k++) acc += line_read(&s->dl2[ch], c[23] * (1 + 0.13f * (float)k));
+            acc /= (float)n;
+            s->st[ch][0] = clampf(lp(&s->op[ch][1], acc, c[20]) * c[22], -4, 4);
+            out[ch] = acc;
+        }
+        break;
+    }
+    case A_SHIMMER: {
+        float l, r;
+        verb_run(s, in[0], in[1], &l, &r, s->st[0][0]);
+        const float mono = (l + r) * 0.5f;
+        const float a = shift_s(&s->sh[0][0], mono, c[20], 0.06f * fs, 1), b = shift_s(&s->sh[0][1], mono, c[21], 0.06f * fs, 1);
+        const float y = lp(&s->op[0][0], (a + b) * 0.5f, c[22]);
+        s->st[0][0] = tanh_fast(y * c[23]);
+        out[0] = l + y * PC(4) * 0.8f;
+        out[1] = r + y * PC(4) * 0.8f;
+        break;
+    }
+    case A_ABYSS: {
+        float x[2] = {in[0], in[1]};
+        if (c[20] > 0.01f) {   /* Swell: the reverb hears less of you while you play, so it blooms after */
+            const float lvl = fmaxf(fabsf(in[0]), fabsf(in[1]));
+            s->env[0] += (lvl > s->env[0] ? 0.005f : 0.0002f) * (lvl - s->env[0]);
+            const float g = 1 / (1 + c[20] * 20 * s->env[0]);
+            x[0] *= g; x[1] *= g;
+        }
+        if (c[21] > 0.5f) { x[0] *= 0.02f; x[1] *= 0.02f; }   /* frozen: it keeps what it has */
+        verb_run(s, x[0], x[1], &out[0], &out[1], 0);
+        out[0] *= 0.7f; out[1] *= 0.7f;
+        break;
+    }
+    case A_WARP: {
+        float l, r;
+        verb_run(s, in[0], in[1], &l, &r, s->st[0][0]);
+        if (c[23] > 0) s->st[0][0] = tanh_fast(lp(&s->op[0][0], shift_s(&s->sh[0][0], (l + r) * 0.5f, c[20], 0.07f * fs, 1), c[22]) * c[23]);
+        else s->st[0][0] = 0;
+        const float mid = (l + r) * 0.5f;
+        out[0] = lp(&s->op[0][1], lerp(mid, l, PC(6)), c[24]);
+        out[1] = lp(&s->op[1][1], lerp(mid, r, PC(6)), c[24]);
+        break;
+    }
+
+    case A_GRAINWEB: case A_GRAINMOD: {
+        const int web = s->algo == A_GRAINWEB;
+        const float glen = V(0) * ms, dens = V(1), dly = V(web ? 4 : 2) * ms;
+        float mods[4] = {0, 0, 0, 0};
+        if (!web) for (int k = 0; k < 4; k++) mods[k] = sine01(adv(&s->lfo[k], V(7) * (1 + 0.37f * (float)k), fs));
+        for (int ch = 0; ch < 2; ch++) {
+            float *timer = &s->st[ch][0];
+            *timer -= dens / fs;
+            if (*timer <= 0) {   /* a new grain */
+                *timer += 0.5f + rnd(s);
+                for (int g = 0; g < NGR; g++) {
+                    Grain *gr = &s->gr[ch][g];
+                    if (gr->on) continue;
+                    const float st = web ? (rnd(s) < 0.5f ? V(2) : V(3)) : mods[0] * V(4) * 0.01f;
+                    const int rev = web && rnd(s) < PC(6);
+                    const float ratio = powf(2, st / 12);
+                    const float len = glen * (web ? 1 : 1 + 0.25f * mods[2]);
+                    const float jitter = web ? rnd(s) * dly * 0.5f : PC(5) * (0.5f + 0.5f * mods[1]) * dly * 0.5f;
+                    gr->on = 1; gr->age = 0; gr->len = len;
+                    /* the read point's delay changes by inc each sample: forwards at `ratio`, or backwards */
+                    gr->inc = rev ? 1 + ratio : 1 - ratio;
+                    gr->pos = dly + jitter + 4 + (!rev && ratio > 1 ? (ratio - 1) * len : 0);
+                    gr->pan = web ? rnd(s) - 0.5f : mods[3] * PC(6) * 0.5f;
+                    break;
+                }
+            }
+            float y = 0;
+            for (int g = 0; g < NGR; g++) {
+                Grain *gr = &s->gr[ch][g];
+                if (!gr->on) continue;
+                y += line_read(&s->dl[ch], clampf(gr->pos, 2, (float)s->dl[ch].mask - 4)) * hann01(gr->age / gr->len) * (1 + (ch ? gr->pan : -gr->pan));
+                gr->pos += gr->inc;
+                if (++gr->age >= gr->len) gr->on = 0;
+            }
+            y = lp(&s->op[ch][0], y * 1.4f / sqrtf(1 + dens * V(0) * 0.001f), c[20]);
+            out[ch] = y;
+            line_push(&s->dl[ch], in[ch] + tanh_fast(y * PC(web ? 5 : 3) * 0.7f));
+        }
+        break;
+    }
+    case A_GLITCH: case A_STUTTER: {   /* catch a slice into dl2 (as a plain buffer) and replay it */
+        const int glitch = s->algo == A_GLITCH;
+        float *ph = &s->lfo[0];
+        const float before = *ph;
+        adv(ph, V(glitch ? 0 : 2), fs);
+        float *active = &s->st[0][0], *pos = &s->st[0][1], *len = &s->st[0][2], *left = &s->st[0][3], *dir = &s->st[0][4], *speed = &s->st[0][5];
+        for (int ch = 0; ch < 2; ch++) line_push(&s->dl[ch], in[ch]);
+        if (*ph < before && rnd(s) < PC(glitch ? 1 : 3)) {
+            const int L = (int)clampf(V(glitch ? 4 : 0) * ms, 16, (float)s->dl2[0].mask - 4);
+            const int jump = glitch && rnd(s) < PC(6) ? (int)(rnd(s) * 0.5f * fs) : 0;   /* a clock jump: from further back */
+            for (int ch = 0; ch < 2; ch++)
+                for (int i = 0; i < L; i++) s->dl2[ch].b[i] = line_tap(&s->dl[ch], L + jump - 1 - i);
+            *active = 1; *len = (float)L; *pos = 0; *speed = 1;
+            *left = (float)L * (glitch ? (float)(1 + (int)(rnd(s) * 4)) : V(1));
+            *dir = rnd(s) < PC(glitch ? 5 : 6) ? -1.0f : 1.0f;
+        }
+        if (*active > 0.5f) {
+            const float fade = glitch ? 0.1f : clampf(PC(4), 0.02f, 1);
+            const float u = *pos / *len, w = clampf(fminf(u, 1 - u) / (fade * 0.5f + 1e-3f), 0, 1);
+            const float at = *dir > 0 ? *pos : *len - 1 - *pos;
+            const int i0 = (int)at;
+            const float f = at - (float)i0;
+            for (int ch = 0; ch < 2; ch++) {
+                const float *b = s->dl2[ch].b;
+                const int i1 = i0 + 1 < (int)*len ? i0 + 1 : i0;
+                out[ch] = (b[i0] + (b[i1] - b[i0]) * f) * w;
+            }
+            if (!glitch && PC(5) > 0.01f) *speed = fmaxf(0.05f, *speed - PC(5) * 2 / fmaxf(*left, 1));   /* tape stop */
+            *pos += *speed;
+            if (*pos >= *len) *pos -= *len;
+            if ((*left -= 1) <= 0) *active = 0;
+        } else { out[0] = in[0]; out[1] = in[1]; }
+        if (glitch) {
+            const int alias = (int)V(3);
+            for (int ch = 0; ch < 2; ch++) {
+                if (++s->st[ch][6] >= (float)alias) { s->st[ch][6] = 0; s->st[ch][7] = floorf(out[ch] * c[21] + 0.5f) / c[21]; }
+                out[ch] = lp(&s->op[ch][0], s->st[ch][7], c[20]);
+            }
+        }
+        break;
+    }
+    default: out[0] = out[1] = 0; break;
+    }
+}
+
+static void slot_set_algo(Slot *s, int algo) { if (algo != s->algo) { slot_clear(s); s->algo = algo; } }
+
+/* one sample through the slot -> its wet sound */
+static void slot_run(Slot *s, float l, float r, float *wl, float *wr) {
+    s->mix_s += 0.002f * (s->mix_n - s->mix_s);
+    if (!(s->tick++ & 15)) slot_control(s);
+    const float in[2] = {l, r};
+    float out[2];
+    run_algo(s, in, out);
     *wl = out[0];
     *wr = out[1];
 }
 
-/* ---- the plugin --------------------------------------------------------------------------------------------- */
+/* ==== the plugin ============================================================================================= */
 typedef struct {
     AEffect fx;
     audioMasterCallback master;
@@ -387,15 +1373,23 @@ typedef struct {
     int ready;
     float out_s;
     volatile int update_display;
+    volatile uint64_t automate;     /* parameters to report back to MPC (bit = index), sent from process() */
 } Plugin;
 
-static void copy_str(void *dst, const char *src, size_t max) { strncpy((char *)dst, src, max - 1); ((char *)dst)[max - 1] = 0; }
+static void copy_str(void *dst, const char *src, size_t max) { const size_t n = strnlen(src, max - 1); memcpy(dst, src, n); ((char *)dst)[n] = 0; }
+static int algo_of(const Plugin *s, int k) { return option_of(s->norm[k * P_SLOT + P_ALGO], kNumAlgos); }
 
-static void apply_params(Plugin *s) {   /* knobs -> slots (on the audio thread) */
-    for (int k = 0; k < 2; k++) {
-        Slot *sl = &s->slot[k];
-        for (int i = 0; i < P_SLOT; i++) sl->p[i] = s->norm[k * P_SLOT + i];
-        slot_param_update(sl, option_of(sl->p[P_ALGO], kNumAlgos));
+static void load_defaults(Plugin *s, int k, int algo) {   /* an algorithm was chosen: its own knob settings */
+    const Algo *a = &ALGOS[algo];
+    for (int i = P_NAME; i <= P_INFO; i++) {   /* the name/info read-outs follow (their value is the algorithm) */
+        s->norm[k * P_SLOT + i] = (float)algo / (float)(kNumAlgos - 1);
+        s->automate |= 1ull << (k * P_SLOT + i);
+    }
+    s->norm[k * P_SLOT + P_MIX] = a->mix * 0.01f;
+    s->automate |= 1ull << (k * P_SLOT + P_MIX);
+    for (int i = 0; i < NK; i++) {
+        s->norm[k * P_SLOT + P_K + i] = a->k[i].name ? knob_norm(&a->k[i], a->k[i].def) : 0;
+        s->automate |= 1ull << (k * P_SLOT + P_K + i);
     }
 }
 
@@ -404,23 +1398,46 @@ static int setup(Plugin *s, float fs) {
     for (int k = 0; k < 2; k++) slot_free(&s->slot[k]);
     memset(s->slot, 0, sizeof s->slot);
     s->fs = fs;
-    s->ready = slot_init(&s->slot[0], fs) && slot_init(&s->slot[1], fs);
-    for (int k = 0; k < 2; k++) { s->slot[k].algo = -1; s->slot[k].mix_s = s->norm[k * P_SLOT + P_MIX]; s->slot[k].time_s = s->norm[k * P_SLOT + P_TIME]; }
-    return s->ready;
+    const int ok = slot_init(&s->slot[0], fs) && slot_init(&s->slot[1], fs);
+    for (int k = 0; k < 2; k++) { s->slot[k].algo = -1; s->slot[k].mix_s = s->norm[k * P_SLOT + P_MIX]; }
+    s->ready = ok;
+    return ok;
 }
 
 static void setParameter(AEffect *e, int32_t i, float v) {
     Plugin *s = (Plugin *)e->object;
     if (i < 0 || i >= kNumParams) return;
-    v = v < 0 ? 0 : v > 1 ? 1 : v;
-    const int n = i == kRouting ? 2 : (i % P_SLOT == P_ALGO && i < kRouting) ? kNumAlgos : 0;
-    if (n) {   /* an option; a small move off one (a Q-Link nudge) steps one; others snap */
-        const float pos = v * (float)(n - 1), cur = (float)option_of(s->norm[i], n);
-        int opt = n > 2 && fabsf(pos - roundf(pos)) > 0.001f && fabsf(pos - cur) < 1 ? (int)cur + (pos > cur ? 1 : -1)
-                                                                                    : (int)lrintf(pos);
-        opt = opt < 0 ? 0 : opt > n - 1 ? n - 1 : opt;
-        v = (float)opt / (float)(n - 1);
+    v = clampf(v, 0, 1);
+    if (i == kRouting) { s->norm[i] = (float)option_of(v, 2); s->update_display = 1; return; }
+    if (i == kOutput) { s->norm[i] = v; return; }
+    const int k = i / P_SLOT, w = i % P_SLOT;
+    if (w >= P_NAME) return;   /* read-only */
+    if (w == P_OPEN) { s->norm[i] = v > 0.5f ? 1 : 0; return; }
+    if (w == P_ALGO) {   /* a pick from the list (which closes it), or a Q-Link nudge (steps one) */
+        const float pos = v * (float)(kNumAlgos - 1), cur = (float)algo_of(s, k);
+        const int between = fabsf(pos - roundf(pos)) > 0.001f;
+        int opt = between && fabsf(pos - cur) < 1 ? (int)cur + (pos > cur ? 1 : -1) : (int)lrintf(pos);
+        opt = opt < 0 ? 0 : opt > kNumAlgos - 1 ? kNumAlgos - 1 : opt;
+        s->norm[i] = (float)opt / (float)(kNumAlgos - 1);
+        if (opt != (int)cur) load_defaults(s, k, opt);
+        if (!between && s->norm[k * P_SLOT + P_OPEN] > 0.5f) {
+            s->norm[k * P_SLOT + P_OPEN] = 0;
+            s->automate |= 1ull << (k * P_SLOT + P_OPEN);
+        }
         s->update_display = 1;
+        return;
+    }
+    if (w >= P_K && w < P_K + NK) {   /* a choice or whole-number knob snaps (a Q-Link nudge steps one) */
+        const Knob *kn = &ALGOS[algo_of(s, k)].k[w - P_K];
+        if (kn->name && (kn->map == M_CHOICE || kn->map == M_INT)) {
+            const int n = (int)(kn->hi - kn->lo) + 1;
+            if (n > 1) {
+                const float pos = v * (float)(n - 1), cur = (float)option_of(s->norm[i], n);
+                int opt = n > 2 && fabsf(pos - roundf(pos)) > 0.001f && fabsf(pos - cur) < 1 ? (int)cur + (pos > cur ? 1 : -1) : (int)lrintf(pos);
+                opt = opt < 0 ? 0 : opt > n - 1 ? n - 1 : opt;
+                v = (float)opt / (float)(n - 1);
+            }
+        }
     }
     s->norm[i] = v;
 }
@@ -429,62 +1446,31 @@ static float getParameter(AEffect *e, int32_t i) {
     return i >= 0 && i < kNumParams ? s->norm[i] : 0;
 }
 
+static void fmt_knob(const Knob *k, float n, char *t) {
+    if (!k->name) { snprintf(t, 32, " "); return; }
+    const float v = knob_value(k, n);
+    if (k->map == M_CHOICE) { snprintf(t, 32, "%s", k->choices[(int)v]); return; }
+    if (!strcmp(k->unit, "ms") && v >= 1000) { snprintf(t, 32, "%.2f s", v / 1000); return; }
+    if (!strcmp(k->unit, "Hz") && v >= 1000) { snprintf(t, 32, "%.1f kHz", v / 1000); return; }
+    if (!strcmp(k->unit, "s") && v >= 99.5f && k->hi >= 100) { snprintf(t, 32, "Infinite"); return; }
+    if (!strcmp(k->unit, "st") || !strcmp(k->unit, "c")) { snprintf(t, 32, "%+.0f %s", v, k->unit); return; }
+    if (!strcmp(k->unit, "dB")) { snprintf(t, 32, "%+.1f dB", v); return; }
+    const int pct = !strcmp(k->unit, "%");
+    if (k->map == M_INT || pct || fabsf(v) >= 100) snprintf(t, 32, "%.0f%s%s", v, k->unit[0] && !pct ? " " : "", k->unit);
+    else snprintf(t, 32, fabsf(v) >= 10 ? "%.1f %s" : "%.2f %s", v, k->unit);
+}
+
 static void param_display(Plugin *s, int i, char *t) {
-    const float v = s->norm[i];
-    if (i == kRouting) { snprintf(t, 24, "%s", option_of(v, 2) ? "Parallel" : "Series"); return; }
-    if (i == kOutput) { snprintf(t, 24, "%+.1f dB", lerp(-24, 12, v)); return; }
-    const int k = i / P_SLOT, which = i % P_SLOT, algo = option_of(s->norm[k * P_SLOT + P_ALGO], kNumAlgos);
-    const float semi = (float)lrintf((s->norm[k * P_SLOT + P_PITCH] - 0.5f) * 48);
-    switch (which) {
-    case P_ALGO: snprintf(t, 24, "%s", ALGOS[algo]); return;
-    case P_MIX: snprintf(t, 24, "%.0f%%", v * 100); return;
-    case P_TONE: snprintf(t, 24, v < 0.48f ? "Dark %.0f" : v > 0.52f ? "Bright %.0f" : "Flat", fabsf(v - 0.5f) * 200); return;
-    case P_RATE: snprintf(t, 24, algo == A_OFF ? "-" : "%.2f Hz", rate_hz(v)); return;
-    case P_PITCH:
-        if (algo == A_REVERSE || algo == A_PITCH || algo == A_SHIMMER) snprintf(t, 24, "%+.0f st", semi);
-        else snprintf(t, 24, "-");
-        return;
-    }
-    switch (algo) {
-    case A_DELAY: case A_ECHO:
-        if (which == P_TIME) snprintf(t, 24, "%.0f ms", delay_ms(v));
-        else if (which == P_FEEDBACK) snprintf(t, 24, "%.0f%%", v * 100);
-        else snprintf(t, 24, "Wow %.0f%%", v * 100);
-        return;
-    case A_REVERSE:
-        if (which == P_TIME) snprintf(t, 24, "%.0f ms", reverse_ms(v));
-        else snprintf(t, 24, "%.0f%%", v * 100);
-        return;
-    case A_DETUNE:
-        if (which == P_TIME) snprintf(t, 24, "%.0f cents", v * 50);
-        else if (which == P_FEEDBACK) snprintf(t, 24, "-");
-        else snprintf(t, 24, "Drift %.0f%%", v * 100);
-        return;
-    case A_PITCH:
-        if (which == P_TIME) snprintf(t, 24, "%.0f ms", lerp(2, 1000, v * v));
-        else if (which == P_FEEDBACK) snprintf(t, 24, "%.0f%%", v * 100);
-        else snprintf(t, 24, "Spread %.0f c", v * 30);
-        return;
-    case A_CHORUS:
-        if (which == P_TIME) snprintf(t, 24, "%.1f ms", lerp(4, 30, v));
-        else snprintf(t, 24, "%.0f%%", v * 100);
-        return;
-    case A_PHASER:
-        if (which == P_TIME) snprintf(t, 24, "%.0f Hz", expmap(200, 3000, v));
-        else snprintf(t, 24, "%.0f%%", v * 100);
-        return;
-    case A_TREMOLO:
-        if (which == P_TIME) snprintf(t, 24, v < 0.1f ? "Smooth" : v > 0.9f ? "Square" : "Shape %.0f", v * 100);
-        else if (which == P_FEEDBACK) snprintf(t, 24, v > 0.95f ? "Auto-pan" : "Spread %.0f%%", v * 100);
-        else snprintf(t, 24, "Depth %.0f%%", v * 100);
-        return;
-    case A_ROOM: case A_SHIMMER: case A_ABYSS:
-        if (which == P_TIME) snprintf(t, 24, "Size %.0f%%", v * 100);
-        else if (which == P_FEEDBACK) snprintf(t, 24, "%.1f s", algo == A_ABYSS ? expmap(4, 60, v) : expmap(0.3f, 12, v));
-        else snprintf(t, 24, algo == A_SHIMMER ? "Shimmer %.0f%%" : "%.0f%%", v * 100);
-        return;
-    default: snprintf(t, 24, "-"); return;
-    }
+    if (i == kRouting) { snprintf(t, 96, "%s", s->norm[i] > 0.5f ? "Parallel" : "Series"); return; }
+    if (i == kOutput) { snprintf(t, 96, "%+.1f dB", lerp(-24, 12, s->norm[i])); return; }
+    const int k = i / P_SLOT, w = i % P_SLOT;
+    const Algo *a = &ALGOS[algo_of(s, k)];
+    if (w == P_ALGO) snprintf(t, 96, "%s", a->name);
+    else if (w == P_OPEN) snprintf(t, 96, "%s", s->norm[i] > 0.5f ? "Open" : "Closed");
+    else if (w == P_MIX) snprintf(t, 96, "%.0f%%", s->norm[i] * 100);
+    else if (w < P_NAME) fmt_knob(&a->k[w - P_K], s->norm[i], t);
+    else if (w < P_INFO) snprintf(t, 96, "%s", a->k[w - P_NAME].name ? a->k[w - P_NAME].name : " ");
+    else snprintf(t, 96, "%s%s%s", GROUP_NAMES[a->group], a->group == G_NONE ? "" : ": ", a->about);
 }
 
 static void process(AEffect *e, float **in, float **out, int32_t n) {
@@ -494,15 +1480,25 @@ static void process(AEffect *e, float **in, float **out, int32_t n) {
     __asm__ volatile("vmsr fpscr, %0" : : "r"(fpscr | (1u << 24)));
 #endif
     Plugin *s = (Plugin *)e->object;
-    if (s->update_display && s->master) { s->update_display = 0; s->master(e, audioMasterUpdateDisplay, 0, 0, NULL, 0); }
-    const float *il = in && in[0] ? in[0] : NULL, *ir = in && in[1] ? in[1] : il;
-    if (!s->ready) {
-        for (int k = 0; k < n; k++) { out[0][k] = 0; out[1][k] = 0; }
-        goto done;
+    if (s->master) {
+        const uint64_t a = s->automate;
+        if (a) {
+            s->automate &= ~a;
+            for (int i = 0; i < kNumParams; i++) if (a & (1ull << i)) s->master(e, audioMasterAutomate, i, 0, NULL, s->norm[i]);
+            s->update_display = 1;
+        }
+        if (s->update_display) { s->update_display = 0; s->master(e, audioMasterUpdateDisplay, 0, 0, NULL, 0); }
     }
-    apply_params(s);
-    const int parallel = option_of(s->norm[kRouting], 2);
-    const float og = powf(10, lerp(-24, 12, s->norm[kOutput]) / 20);
+    const float *il = in && in[0] ? in[0] : NULL, *ir = in && in[1] ? in[1] : il;
+    if (!s->ready) { for (int k = 0; k < n; k++) out[0][k] = out[1][k] = 0; goto done; }
+    for (int k = 0; k < 2; k++) {
+        Slot *sl = &s->slot[k];
+        slot_set_algo(sl, algo_of(s, k));
+        sl->mix_n = s->norm[k * P_SLOT + P_MIX];
+        for (int j = 0; j < NK; j++) sl->n[j] = s->norm[k * P_SLOT + P_K + j];
+    }
+    const int parallel = s->norm[kRouting] > 0.5f;
+    const float og = db(lerp(-24, 12, s->norm[kOutput]));
     for (int k = 0; k < n; k++) {
         float l = il ? il[k] : 0, r = ir ? ir[k] : 0;
         if (!finite_bits(l) || l > 8 || l < -8) l = 0;   /* only clean audio in */
@@ -514,7 +1510,7 @@ static void process(AEffect *e, float **in, float **out, int32_t n) {
                 Slot *sl = &s->slot[c];
                 if (sl->algo == A_OFF) continue;
                 float wl, wr;
-                slot_run(sl, s->fs, yl, yr, &wl, &wr);
+                slot_run(sl, yl, yr, &wl, &wr);
                 const float m = sl->mix_s, dg = m < 0.5f ? 1 : 2 * (1 - m), wg = m > 0.5f ? 1 : 2 * m;
                 yl = yl * dg + wl * wg;
                 yr = yr * dg + wr * wg;
@@ -525,7 +1521,7 @@ static void process(AEffect *e, float **in, float **out, int32_t n) {
                 Slot *sl = &s->slot[c];
                 if (sl->algo == A_OFF) { dg += 0.5f; continue; }
                 float wl, wr;
-                slot_run(sl, s->fs, l, r, &wl, &wr);
+                slot_run(sl, l, r, &wl, &wr);
                 const float m = sl->mix_s;
                 dg += 0.5f * (m < 0.5f ? 1 : 2 * (1 - m));
                 const float wg = m > 0.5f ? 1 : 2 * m;
@@ -540,8 +1536,8 @@ static void process(AEffect *e, float **in, float **out, int32_t n) {
             slot_clear(&s->slot[0]); slot_clear(&s->slot[1]);
             yl = yr = 0;
         }
-        out[0][k] = yl > 4 ? 4 : yl < -4 ? -4 : yl;   /* +12 dB ceiling */
-        out[1][k] = yr > 4 ? 4 : yr < -4 ? -4 : yr;
+        out[0][k] = clampf(yl, -4, 4);   /* +12 dB ceiling */
+        out[1][k] = clampf(yr, -4, 4);
     }
 done:
 #if defined(__arm__)
@@ -550,28 +1546,37 @@ done:
     return;
 }
 
+static const char *const SLOT_PARAM_NAMES[P_SLOT] = {"Algorithm", "Algorithm List", "Mix", "Knob 1", "Knob 2", "Knob 3",
+    "Knob 4", "Knob 5", "Knob 6", "Knob 7", "Knob 8", "Name 1", "Name 2", "Name 3", "Name 4", "Name 5", "Name 6",
+    "Name 7", "Name 8", "Info"};
+
 static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, void *p, float opt) {
-    (void)val;
     Plugin *s = (Plugin *)e->object;
     switch (op) {
     case effOpen: return 1;
     case effClose: for (int k = 0; k < 2; k++) slot_free(&s->slot[k]); free(s); return 1;
     case effGetParamName:
         if (idx >= 0 && idx < kNumParams) {
-            char t[32];
+            char t[40];
+            const int w = idx % P_SLOT;
+            const Knob *kn = idx < kRouting && w >= P_K && w < P_K + NK ? &ALGOS[algo_of(s, idx / P_SLOT)].k[w - P_K] : NULL;
             if (idx == kRouting) snprintf(t, sizeof t, "Routing");
             else if (idx == kOutput) snprintf(t, sizeof t, "Output");
-            else snprintf(t, sizeof t, "%c %s", idx < P_SLOT ? 'A' : 'B', SLOT_NAMES[idx % P_SLOT]);
+            else if (kn) snprintf(t, sizeof t, "%s", kn->name ? kn->name : "-");   /* the algorithm's own name for it */
+            else if (w == P_MIX) snprintf(t, sizeof t, "Mix");
+            else snprintf(t, sizeof t, "%c %s", idx < P_SLOT ? 'A' : 'B', SLOT_PARAM_NAMES[w]);
             copy_str(p, t, 32);
         }
         return 1;
     case effGetParamLabel: copy_str(p, "", 8); return 1;
-    case effGetParamDisplay: if (idx >= 0 && idx < kNumParams) { char t[24]; param_display(s, idx, t); copy_str(p, t, 24); } return 1;
-    case effCanBeAutomated: return idx >= 0 && idx < kNumParams;
+    case effGetParamDisplay:
+        if (idx >= 0 && idx < kNumParams) { char t[96]; param_display(s, idx, t); copy_str(p, t, idx < kRouting && idx % P_SLOT == P_INFO ? 64 : 24); }
+        return 1;
+    case effCanBeAutomated: return idx >= 0 && idx < kNumParams && !(idx < kRouting && idx % P_SLOT >= P_NAME);
     case effGetPlugCategory: return kPlugCategEffect;
     case effGetEffectName: case effGetProductString: copy_str(p, "Duo FX", 32); return 1;
     case effGetVendorString: copy_str(p, "Duo-FX", 32); return 1;
-    case effGetVendorVersion: return 1000;
+    case effGetVendorVersion: return 2000;
     case effGetVstVersion: return 2400;
     case effSetSampleRate: if (opt > 1000 && fabsf(opt - s->fs) > 0.5f) setup(s, opt); return 1;
     case effSetBlockSize: return 1;
@@ -586,13 +1591,13 @@ __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallbac
     Plugin *s = calloc(1, sizeof *s);
     if (!s) return NULL;
     s->master = master;
-    for (int k = 0; k < 2; k++)
-        for (int i = 0; i < P_SLOT; i++) s->norm[k * P_SLOT + i] = SLOT_DEFAULTS[i];
-    s->norm[P_ALGO] = (float)A_DELAY / (kNumAlgos - 1);              /* A: delay into B: room */
-    s->norm[P_SLOT + P_ALGO] = (float)A_ROOM / (kNumAlgos - 1);
-    s->norm[P_SLOT + P_FEEDBACK] = 0.55f;
+    s->norm[P_ALGO] = (float)A_TAPE / (float)(kNumAlgos - 1);            /* A: tape echo into B: hall */
+    s->norm[P_SLOT + P_ALGO] = (float)A_HALL / (float)(kNumAlgos - 1);
+    load_defaults(s, 0, A_TAPE);
+    load_defaults(s, 1, A_HALL);
+    s->automate = 0;
     s->norm[kRouting] = 0;
-    s->norm[kOutput] = 24.0f / 36;                                   /* 0 dB */
+    s->norm[kOutput] = 24.0f / 36;                                       /* 0 dB */
     s->out_s = 1;
     setup(s, 44100);
     AEffect *e = &s->fx;
@@ -607,6 +1612,34 @@ __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallbac
     e->flags = effFlagsCanReplacing;
     e->object = s;
     e->uniqueID = 0x44554f46;   /* 'DUOF' */
-    e->version = 1000;
+    e->version = 2000;
     return e;
 }
+
+#ifdef DUO_FX_PARAMS
+/* the page's parameter list (params.json), written from the tables above so the two can't drift apart:
+ *   cc -DDUO_FX_PARAMS -I<vst2.h dir> duo_fx.c -lm && ./a.out > params.json */
+int main(void) {
+    for (int a = 0; a < kNumAlgos; a++) {   /* the info line (group: about) must fit effGetParamDisplay's 63 characters */
+        char t[200];
+        snprintf(t, sizeof t, "%s%s%s", GROUP_NAMES[ALGOS[a].group], ALGOS[a].group == G_NONE ? "" : ": ", ALGOS[a].about);
+        if (strlen(t) > 63) { fprintf(stderr, "info too long (%zu): %s\n", strlen(t), t); return 1; }
+    }
+    printf("{\n  \"name\": \"Duo FX\",\n  \"params\": [\n");
+    for (int k = 0; k < 2; k++) {
+        const char S = k ? 'B' : 'A', s = k ? 'b' : 'a';
+        printf("    {\"key\": \"%c_algo\", \"name\": \"%c Algorithm\", \"options\": [", s, S);
+        for (int a = 0; a < kNumAlgos; a++) printf("%s\"%s\"", a ? ", " : "", ALGOS[a].name);
+        printf("]},\n");
+        printf("    {\"key\": \"%c_algo__open\", \"name\": \"%c Algorithm List\", \"options\": [\"Closed\", \"Open\"]},\n", s, S);
+        printf("    {\"key\": \"%c_mix\", \"name\": \"%c Mix\", \"min\": 0, \"max\": 100, \"unit\": \"%%\"},\n", s, S);
+        for (int i = 0; i < NK; i++) printf("    {\"key\": \"%c_k%d\", \"name\": \"%c Knob %d\", \"min\": 0, \"max\": 100},\n", s, i + 1, S, i + 1);
+        for (int i = 0; i < NK; i++)
+            printf("    {\"key\": \"%c_n%d\", \"name\": \"%c Name %d\", \"min\": 0, \"max\": 1, \"display\": \"string\", \"type\": \"stepper\"},\n", s, i + 1, S, i + 1);
+        printf("    {\"key\": \"%c_info\", \"name\": \"%c Info\", \"min\": 0, \"max\": 1, \"display\": \"string\", \"type\": \"stepper\"},\n", s, S);
+    }
+    printf("    {\"key\": \"routing\", \"name\": \"Routing\", \"options\": [\"Series\", \"Parallel\"]},\n");
+    printf("    {\"key\": \"output\", \"name\": \"Output\", \"min\": -24, \"max\": 12, \"default\": 0, \"unit\": \"dB\"}\n  ]\n}\n");
+    return 0;
+}
+#endif

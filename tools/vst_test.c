@@ -1,6 +1,7 @@
 /* vst_test: load any VST2 effect or instrument the way MPC does, check it, and measure its CPU cost.
  *   vst_test <plugin.so> [--quiet]           exit status 0 = PASSED
- * Prints the plugin's identity and every parameter (name, value text, unit). Then checks: parameters round-trip,
+ * Prints the plugin's identity and every parameter (name, value text, unit). Then checks: parameters round-trip
+ * (those it says can be automated),
  * audio stays finite with every parameter at its minimum and its maximum, an effect answers an impulse (for a
  * reverb: a tail that is still there after 0.5 s), a synth makes sound from a note, state saves and restores
  * when the plugin uses chunks. Finally times 128-frame blocks at 44.1 kHz, MPC's own rate and block size. */
@@ -126,6 +127,7 @@ int main(int argc, char **argv) {
     }
     int rt = 1, stepped = 0;
     for (int i = 0; i < e->numParams; i++) {
+        if (!e->dispatcher(e, effCanBeAutomated, i, 0, NULL, 0)) continue;   /* read-only (a name or info read-out) */
         e->setParameter(e, i, 0.25f);
         const float got = e->getParameter(e, i);
         if (fabsf(got - 0.25f) > 0.02f) {
