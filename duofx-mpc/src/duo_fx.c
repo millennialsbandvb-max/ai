@@ -1,6 +1,7 @@
 /* Duo FX: an H90-style dual multi-effect for MPC OS (VST2, stereo). Two slots, A and B, in series (A then B) or
- * in parallel, each running one of 54 algorithms in six groups (delay, distortion, pitch, modulation, reverb,
- * granular). Each algorithm has up to 8 knobs of its own (names, ranges, defaults in ALGOS[]); the slot's eight
+ * in parallel, each running one of 55 algorithms in six groups (delay, distortion, pitch, modulation, reverb,
+ * granular), named after the H90 algorithms they imitate (near-miss spellings: this is a personal build). Each
+ * algorithm has up to 8 knobs of its own (names, ranges, defaults in ALGOS[]); the slot's eight
  * knob parameters take those meanings, and eight read-only "name" parameters tell the page what each knob is.
  * Choosing an algorithm loads its defaults. All of the sound processing is our own.
  * Safety, as in every plugin here: input cleaned, everything reset if the output goes bad or past +36 dB, the
@@ -55,6 +56,9 @@ static const char *const SPRINGS[] = {"1", "2", "3"};
 static const char *const PREPOST[] = {"Pre", "Post"};
 static const char *const LATENCY[] = {"Low", "Normal"};
 static const char *const VOICE_N[] = {"Single", "Dual"};
+static const char *const SHIM_PITCHES[] = {"-12 st", "-5 st", "+7 st", "+12 st", "+19 st", "+24 st"};
+static const float SHIM_ST[] = {-12, -5, 7, 12, 19, 24};
+static const char *const CHORUS_MODES[] = {"Chorus", "Vibrato"};
 
 /* ==== the algorithms ========================================================================================= */
 enum {   /* in the pop-up's order */
@@ -63,7 +67,7 @@ enum {   /* in the pop-up's order */
     /* distortion */ A_FUZZOCT, A_CRUSH, A_FUZZDLY, A_BANDDRIVE, A_MIDDRIVE,
     /* pitch */ A_REVSHIFT, A_DIATONIC, A_VSHIFTER, A_PMODHARM, A_ARP, A_MICRO, A_OCTAVER, A_BEND, A_POLYBEND, A_POLYSHIFT,
     A_SYNTH, A_STEPSHIFT, A_QUAD, A_RESONATOR, A_VOCAL, A_CORRECT,
-    /* modulation */ A_CHORUS, A_FLANGER, A_TREMOLO, A_PHASER, A_VIBE, A_SFLANGER, A_SPHASER,
+    /* modulation */ A_CHORUS, A_FLANGER, A_TREMOLO, A_PHASER, A_VIBE, A_SFLANGER, A_SPHASER, A_TRICHORUS,
     /* reverb */ A_HALL, A_ROOM, A_PLATE, A_SPRING, A_SHIMMER, A_ABYSS, A_CLASSIC, A_CRUSHVERB, A_TREMVERB, A_WARP,
     /* granular */ A_GRAINWEB, A_GLITCH, A_GRAINMOD, A_STUTTER,
     A_OFF, kNumAlgos
@@ -76,7 +80,7 @@ static const Algo ALGOS[kNumAlgos] = {
     [A_BAND] = {"Band Delay", G_DELAY, 40, "Repeats through a swept resonant band, can be pitched",
         {MS("Time", 20, 2000, 400), PCT("Feedback", 50), HZ("Band", 150, 6000, 900), PCT("Resonance", 50),
          PCT("Sweep", 40), HZ("Rate", 0.05f, 8, 0.4f), ST("Pitch", 0), PCT("Tone", 50)}},
-    [A_BBD] = {"BBD Delay", G_DELAY, 40, "Bucket-brigade: dark, chorused, saturating repeats",
+    [A_BBD] = {"Bouqet Delay", G_DELAY, 40, "Bucket-brigade: dark, chorused, saturating repeats",
         {MS("Time", 20, 600, 300), PCT("Feedback", 45), PCT("Mod", 30), HZ("Rate", 0.05f, 8, 0.6f), HZ("Tone", 1200, 7000, 3000),
          PCT("Age", 30), NONE, NONE}},
     [A_DIGITAL] = {"Digital Delay", G_DELAY, 35, "Clean, exact repeats",
@@ -85,90 +89,90 @@ static const Algo ALGOS[kNumAlgos] = {
     [A_DUCKED] = {"Ducked Delay", G_DELAY, 45, "Repeats duck while you play, swell up in the gaps",
         {MS("Time", 20, 2000, 450), PCT("Feedback", 45), LIN("Threshold", -60, 0, -30, "dB"), LIN("Duck", 0, 40, 18, "dB"),
          MS("Release", 20, 2000, 300), PCT("Tone", 50), PCT("Mod", 10), MS("Spread", 0.5f, 100, 10)}},
-    [A_FPONG] = {"Filter Ping-Pong", G_DELAY, 45, "Repeats bounce L-R through sweeping resonant filters",
+    [A_FPONG] = {"FiltrPong", G_DELAY, 45, "Repeats bounce L-R through sweeping resonant filters",
         {MS("Time", 20, 2000, 350), PCT("Feedback", 55), HZ("Filter", 150, 8000, 1200), PCT("Resonance", 55),
          PCT("Sweep", 60), HZ("Rate", 0.05f, 8, 0.3f), CHO("Type", FTYPES, 1), PCT("Width", 100)}},
-    [A_HEADS] = {"Multi-Head Echo", G_DELAY, 40, "Tape echo with three playback heads",
+    [A_HEADS] = {"HeadSpce", G_DELAY, 40, "Tape echo with three playback heads",
         {MS("Spacing", 40, 600, 180), CHO("Heads", HEADS, 6), PCT("Feedback", 45), PCT("Wow", 25), PCT("Flutter", 20),
          PCT("Saturate", 35), HZ("Tone", 1000, 10000, 3500), PCT("Spread", 40)}},
     [A_MODDLY] = {"Mod Delay", G_DELAY, 40, "Delay with a modulated, chorusing line",
         {MS("Time", 20, 2000, 400), PCT("Feedback", 40), PCT("Depth", 40), HZ("Rate", 0.05f, 8, 0.8f), CHO("Shape", SHAPES, 0),
          PCT("Tone", 50), MS("Spread", 0.5f, 100, 12), NONE}},
-    [A_MULTITAP] = {"Multi-Tap", G_DELAY, 40, "Up to 10 taps: even, speeding up or slowing down",
+    [A_MULTITAP] = {"MultiTp", G_DELAY, 40, "Up to 10 taps: even, speeding up or slowing down",
         {MS("Span", 50, 2500, 800), INT("Taps", 2, 10, 6, ""), LIN("Spacing", -100, 100, 0, ""), LIN("Taper", -100, 100, -40, ""),
          PCT("Feedback", 20), PCT("Tone", 50), PCT("Width", 70), PCT("Diffuse", 0)}},
-    [A_REVDLY] = {"Reverse Delay", G_DELAY, 45, "The input played backwards, then repeated",
+    [A_REVDLY] = {"Reverse", G_DELAY, 45, "The input played backwards, then repeated",
         {MS("Time", 150, 2000, 600), PCT("Feedback", 35), PCT("Tone", 50), PCT("Mod", 10), HZ("Rate", 0.05f, 8, 0.5f), NONE, NONE, NONE}},
     [A_TAPE] = {"Tape Echo", G_DELAY, 40, "Saturating tape loop with wow, flutter and hiss",
         {MS("Time", 40, 1500, 350), PCT("Feedback", 45), PCT("Wow", 30), PCT("Flutter", 25), PCT("Saturate", 40),
          HZ("Tone", 1000, 10000, 4000), PCT("Age", 25), PCT("Spread", 30)}},
-    [A_TAPCLOUD] = {"Tap Cloud", G_DELAY, 45, "Up to 32 taps: rhythms, smears, reverbs, textures",
+    [A_TAPCLOUD] = {"UltraTp", G_DELAY, 45, "Up to 32 taps: rhythms, smears, reverbs, textures",
         {MS("Length", 20, 2000, 500), INT("Taps", 1, 32, 12, ""), MS("Predelay", 1, 1000, 1), LIN("Spread", -100, 100, 0, ""),
          LIN("Taper", -100, 100, 0, ""), PCT("Smear", 30), HZ("Chop", 0.1f, 20, 0.1f), PCT("Tone", 50)}},
     [A_VINTAGE] = {"Vintage Delay", G_DELAY, 40, "Early digital delay: fewer bits, lower sample rate",
         {MS("Time", 20, 2000, 420), PCT("Feedback", 40), INT("Bits", 6, 16, 12, ""), INT("Rate Div", 1, 8, 2, "x"),
          PCT("Tone", 45), PCT("Mod", 10), HZ("Mod Rate", 0.05f, 8, 0.6f), MS("Spread", 0.5f, 100, 0.5f)}},
 
-    [A_FUZZOCT] = {"Fuzz Octave", G_DIST, 100, "Fuzz with an octave up, tremolo and envelope filter",
+    [A_FUZZOCT] = {"Aggravat3", G_DIST, 100, "Fuzz with an octave up, tremolo and envelope filter",
         {PCT("Drive", 60), PCT("Octave", 50), PCT("Tone", 55), LIN("Level", -24, 6, -6, "dB"), PCT("Trem", 0),
          HZ("Trem Rate", 0.5f, 15, 5), PCT("Envelope", 0), PCT("Env Q", 50)}},
-    [A_CRUSH] = {"Crush Drive", G_DIST, 100, "Drive into compression, with power-supply sag",
+    [A_CRUSH] = {"CrushStatn", G_DIST, 100, "Drive into compression, with power-supply sag",
         {PCT("Drive", 55), PCT("Sag", 30), PCT("Comp", 40), PCT("Tone", 55), LIN("Bass", -12, 12, 0, "dB"),
          LIN("Level", -24, 6, -6, "dB"), LIN("Gate", -90, -30, -90, "dB"), NONE}},
-    [A_FUZZDLY] = {"Fuzz Delay", G_DIST, 100, "Fuzz feeding two detuned delays",
+    [A_FUZZDLY] = {"PtchFuzz", G_DIST, 100, "Fuzz feeding two detuned delays",
         {PCT("Fuzz", 60), PCT("Tone", 50), LIN("Level", -24, 6, -6, "dB"), MS("Delay A", 20, 1000, 180),
          MS("Delay B", 20, 1000, 300), PCT("Feedback", 35), INT("Detune", 0, 50, 12, "c"), PCT("Delay Mix", 40)}},
-    [A_BANDDRIVE] = {"Band Drive", G_DIST, 100, "Lows and highs driven separately, then blended",
+    [A_BANDDRIVE] = {"Sculpt3", G_DIST, 100, "Lows and highs driven separately, then blended",
         {HZ("Split", 100, 2000, 400), PCT("Low Drive", 30), PCT("High Drive", 60), LIN("Low Level", -24, 6, 0, "dB"),
          LIN("High Level", -24, 6, -3, "dB"), HZ("Filter", 1000, 16000, 7000), PCT("Comp", 30), NONE}},
-    [A_MIDDRIVE] = {"Mid Drive", G_DIST, 100, "Mid-hump overdrive in the classic green-pedal style",
+    [A_MIDDRIVE] = {"WeedWackr", G_DIST, 100, "Mid-hump overdrive in the classic green-pedal style",
         {PCT("Drive", 45), PCT("Tone", 50), LIN("Level", -24, 12, -3, "dB"), HZ("Mid", 400, 1600, 720), LIN("Bass", -12, 6, -3, "dB"),
          CHO("Hard Clip", ONOFF, 0), PCT("Blend", 100), NONE}},
 
-    [A_REVSHIFT] = {"Reverse Shift", G_PITCH, 45, "Reversed, pitch-shifted delays that cascade upwards",
+    [A_REVSHIFT] = {"Crystalz", G_PITCH, 45, "Reversed, pitch-shifted delays that cascade upwards",
         {ST("Pitch A", 12), ST("Pitch B", 7), MS("Delay A", 150, 1500, 500), MS("Delay B", 150, 1500, 750), PCT("Feedback", 45),
          PCT("Tone", 55), PCT("Mod", 10), PCT("Width", 100)}},
-    [A_DIATONIC] = {"Diatonic Harmony", G_PITCH, 50, "Two voices that follow your notes in a key and scale",
+    [A_DIATONIC] = {"Diatonik", G_PITCH, 50, "Two voices that follow your notes in a key and scale",
         {CHO("Key", KEYS, 0), CHO("Scale", SCALES, 0), CHO("Voice 1", DEGREES, 9), CHO("Voice 2", DEGREES, 11),
          PCT("Level 1", 80), PCT("Level 2", 60), MS("Delay", 1, 500, 1), PCT("Width", 60)}},
-    [A_VSHIFTER] = {"Vintage Shifter", G_PITCH, 50, "Early rack harmonizer: raw splices, delay, feedback",
+    [A_VSHIFTER] = {"H91O", G_PITCH, 50, "Early rack harmonizer: raw splices, delay, feedback",
         {LIN("Pitch", -24, 24, 7, "st"), MS("Delay", 1, 1000, 1), PCT("Feedback", 0), CHO("Deglitch", ONOFF, 0), PCT("Tone", 50),
          INT("Stereo", 0, 30, 0, "c"), NONE, NONE}},
-    [A_PMODHARM] = {"Pitch Mod Harmony", G_PITCH, 50, "Two shifted voices with pitch vibrato and delay",
+    [A_PMODHARM] = {"HarModulatr", G_PITCH, 50, "Two shifted voices with pitch vibrato and delay",
         {ST("Pitch A", -12), ST("Pitch B", 12), INT("Depth", 0, 100, 20, "c"), HZ("Rate", 0.05f, 8, 0.8f), MS("Delay", 1, 1000, 80),
          PCT("Feedback", 20), PCT("Tone", 50), PCT("Width", 70)}},
-    [A_ARP] = {"Pitch Arp", G_PITCH, 60, "Steps a shifted voice through a pattern in your key",
+    [A_ARP] = {"HarPeggiatr", G_PITCH, 60, "Steps a shifted voice through a pattern in your key",
         {CHO("Key", KEYS, 0), CHO("Scale", SCALES, 0), CHO("Notes", ARP_SETS, 1), CHO("Pattern", PATTERNS, 0),
          HZ("Rate", 0.5f, 16, 4), MS("Glide", 1, 200, 5), INT("Octaves", 1, 2, 1, ""), PCT("Feedback", 0)}},
-    [A_MICRO] = {"Micro Shift", G_PITCH, 50, "Slightly detuned, delayed copies for width",
+    [A_MICRO] = {"MicroPtch", G_PITCH, 50, "Slightly detuned, delayed copies for width",
         {INT("Detune", 0, 50, 9, "c"), MS("Delay L", 1, 100, 7), MS("Delay R", 1, 100, 11), PCT("Feedback", 0), PCT("Tone", 50),
          PCT("Drift", 20), NONE, NONE}},
     [A_OCTAVER] = {"Octaver", G_PITCH, 100, "Octaves below and above your playing",
         {PCT("Sub 1", 70), PCT("Sub 2", 0), PCT("Up", 0), PCT("Dry", 100), PCT("Tone", 50), PCT("Drive", 0), NONE, NONE}},
-    [A_BEND] = {"Pitch Bend", G_PITCH, 100, "Bend between two intervals (a Q-Link makes a pedal)",
+    [A_BEND] = {"PitchFlx", G_PITCH, 100, "Bend between two intervals (a Q-Link makes a pedal)",
         {PCT("Bend", 0), ST("Heel", 0), ST("Toe", 12), MS("Glide", 1, 500, 30), CHO("Voices", VOICE_N, 0), PCT("Tone", 50), NONE, NONE}},
-    [A_POLYBEND] = {"Poly Bend", G_PITCH, 100, "Two voices bending in opposite directions",
+    [A_POLYBEND] = {"PolyFlx", G_PITCH, 100, "Two voices bending in opposite directions",
         {PCT("Bend", 0), ST("Range A", 12), ST("Range B", -12), MS("Glide", 1, 500, 30), PCT("Level A", 100), PCT("Level B", 70),
          PCT("Tone", 50), NONE}},
-    [A_POLYSHIFT] = {"Poly Shift", G_PITCH, 50, "Two independent pitch voices for chords",
+    [A_POLYSHIFT] = {"Polyphny", G_PITCH, 50, "Two independent pitch voices for chords",
         {ST("Pitch A", -12), INT("Fine A", -50, 50, 0, "c"), ST("Pitch B", 7), INT("Fine B", -50, 50, 0, "c"),
          PCT("Level A", 100), PCT("Level B", 70), PCT("Width", 50), CHO("Latency", LATENCY, 1)}},
-    [A_SYNTH] = {"Pitch Synth", G_PITCH, 70, "A synth voice that follows the note you play",
+    [A_SYNTH] = {"PolySynt", G_PITCH, 70, "A synth voice that follows the note you play",
         {CHO("Wave", WAVES, 0), INT("Octave", -2, 1, -1, ""), HZ("Cutoff", 100, 8000, 900), PCT("Resonance", 40),
          PCT("Env", 60), MS("Attack", 1, 500, 5), MS("Release", 20, 2000, 300), MS("Glide", 1, 300, 20)}},
-    [A_STEPSHIFT] = {"Step Shift", G_PITCH, 60, "A pitch sequence of four steps, with delay",
+    [A_STEPSHIFT] = {"PrismShft", G_PITCH, 60, "A pitch sequence of four steps, with delay",
         {ST("Step 1", 0), ST("Step 2", 7), ST("Step 3", 12), ST("Step 4", 5), HZ("Rate", 0.5f, 16, 3), MS("Glide", 1, 200, 5),
          MS("Delay", 1, 1000, 1), PCT("Feedback", 20)}},
-    [A_QUAD] = {"Quad Harmony", G_PITCH, 50, "Four voices in key (Unison on voice 4: off)",
+    [A_QUAD] = {"Quadravx", G_PITCH, 50, "Four voices in key (Unison on voice 4: off)",
         {CHO("Key", KEYS, 0), CHO("Scale", SCALES, 0), CHO("Voice 1", DEGREES, 9), CHO("Voice 2", DEGREES, 11),
          CHO("Voice 3", DEGREES, 14), CHO("Voice 4", DEGREES, 7), PCT("Width", 70), MS("Delay", 1, 300, 1)}},
     [A_RESONATOR] = {"Resonator", G_PITCH, 50, "Four tuned resonators ringing on a chord",
         {CHO("Root", KEYS, 9), CHO("Chord", CHORDS, 3), INT("Octave", 1, 5, 3, ""), PCT("Decay", 70), PCT("Tone", 60),
          PCT("Width", 60), PCT("Drive", 0), NONE}},
-    [A_VOCAL] = {"Vocal Shift", G_PITCH, 100, "Shifts a voice and pulls it towards the scale",
+    [A_VOCAL] = {"VocalShft", G_PITCH, 100, "Shifts a voice and pulls it towards the scale",
         {ST("Pitch", 0), INT("Fine", -50, 50, 0, "c"), CHO("Key", KEYS, 0), CHO("Scale", SCALES, 0), PCT("Correct", 0),
          MS("Speed", 1, 300, 50), PCT("Tone", 50), NONE}},
-    [A_CORRECT] = {"Pitch Correct", G_PITCH, 100, "Tunes a voice or instrument to the key and scale",
+    [A_CORRECT] = {"VocalTun", G_PITCH, 100, "Tunes a voice or instrument to the key and scale",
         {CHO("Key", KEYS, 0), CHO("Scale", SCALES, 0), MS("Speed", 1, 300, 20), PCT("Amount", 100), INT("Detune", -50, 50, 0, "c"),
          NONE, NONE, NONE}},
 
@@ -183,15 +187,19 @@ static const Algo ALGOS[kNumAlgos] = {
     [A_PHASER] = {"Phaser", G_MOD, 50, "Swept allpass stages with feedback",
         {CHO("Stages", STAGES, 1), HZ("Center", 150, 4000, 700), PCT("Depth", 70), HZ("Rate", 0.02f, 8, 0.4f), PCT("Feedback", 40),
          PCT("Width", 50), CHO("Shape", SHAPES, 0), NONE}},
-    [A_VIBE] = {"Vibe", G_MOD, 50, "Photocell phase-shifter wobble, chorus or vibrato",
+    [A_VIBE] = {"Even-Vib3", G_MOD, 50, "Photocell phase-shifter wobble, chorus or vibrato",
         {PCT("Intensity", 70), HZ("Speed", 0.3f, 10, 2), CHO("Mode", VIBE_MODES, 0), PCT("Throb", 40), PCT("Tone", 50),
          PCT("Width", 30), NONE, NONE}},
-    [A_SFLANGER] = {"Studio Flanger", G_MOD, 50, "Tape-style flanging that can pass through zero",
+    [A_SFLANGER] = {"InstFlangr", G_MOD, 50, "Tape-style flanging that can pass through zero",
         {PCT("Manual", 30), PCT("Depth", 60), HZ("Rate", 0.02f, 4, 0.15f), LIN("Feedback", -95, 95, 0, "%"),
          CHO("Mode", FLANGE_MODES, 1), PCT("Tone", 60), PCT("Width", 40), NONE}},
-    [A_SPHASER] = {"Studio Phaser", G_MOD, 50, "Smooth multi-stage studio phasing",
+    [A_SPHASER] = {"InstPhasr", G_MOD, 50, "Smooth multi-stage studio phasing",
         {PCT("Manual", 40), PCT("Depth", 70), HZ("Rate", 0.02f, 4, 0.2f), PCT("Feedback", 30), CHO("Stages", STAGES, 3),
          CHO("Mode", PHASE_MODES, 0), PCT("Width", 50), NONE}},
+
+    [A_TRICHORUS] = {"TricraChrs", G_MOD, 50, "Three BBD voices, ensemble wobble and shimmer",
+        {HZ("Rate", 0.05f, 8, 0.6f), PCT("Depth", 50), PCT("Ensemble", 35), PCT("Width", 80), HZ("Tone", 2000, 16000, 6300),
+         PCT("Shimmer", 0), CHO("Shim Pitch", SHIM_PITCHES, 3), CHO("Mode", CHORUS_MODES, 0)}},
 
     [A_HALL] = {"Hall", G_REVERB, 35, "Large, smooth concert hall",
         {PCT("Size", 65), EXPK("Decay", 0.5f, 20, 3, "s"), MS("Predelay", 1, 300, 20), PCT("Tone", 55), LIN("Low", -12, 6, 0, "dB"),
@@ -205,32 +213,32 @@ static const Algo ALGOS[kNumAlgos] = {
     [A_SPRING] = {"Spring", G_REVERB, 30, "Amp-style spring tank, drip and all",
         {EXPK("Decay", 0.5f, 6, 2, "s"), PCT("Tension", 50), PCT("Tone", 50), CHO("Springs", SPRINGS, 1), PCT("Drip", 40),
          HZ("Low Cut", 20, 800, 150), NONE, NONE}},
-    [A_SHIMMER] = {"Shimmer", G_REVERB, 40, "Reverb whose tail climbs in pitch",
+    [A_SHIMMER] = {"ShimmrVerb", G_REVERB, 40, "Reverb whose tail climbs in pitch",
         {PCT("Size", 70), EXPK("Decay", 1, 20, 6, "s"), ST("Pitch A", 12), ST("Pitch B", 19), PCT("Shimmer", 50), PCT("Tone", 60),
          PCT("Mod", 30), NONE}},
-    [A_ABYSS] = {"Abyss", G_REVERB, 50, "Enormous dark space; full Decay holds forever",
+    [A_ABYSS] = {"Blackhol3", G_REVERB, 50, "Enormous dark space; full Decay holds forever",
         {PCT("Size", 75), EXPK("Decay", 3, 100, 20, "s"), PCT("Swell", 0), PCT("Tone", 45), LIN("Low", -12, 6, 0, "dB"),
          PCT("Mod", 50), HZ("Rate", 0.05f, 4, 0.3f), NONE}},
-    [A_CLASSIC] = {"Classic Verb", G_REVERB, 35, "80s studio reverb: early reflections, smooth tail",
+    [A_CLASSIC] = {"SP2O16", G_REVERB, 35, "80s studio reverb: early reflections, smooth tail",
         {PCT("Size", 55), EXPK("Decay", 0.3f, 15, 2.5f, "s"), MS("Predelay", 1, 300, 30), PCT("Position", 50), PCT("Diffusion", 70),
          PCT("Tone", 55), LIN("Low", -12, 6, 0, "dB"), NONE}},
-    [A_CRUSHVERB] = {"Crushed Verb", G_REVERB, 40, "Reverb pushed into distortion",
+    [A_CRUSHVERB] = {"MangldVerb", G_REVERB, 40, "Reverb pushed into distortion",
         {PCT("Size", 60), EXPK("Decay", 0.5f, 15, 3, "s"), MS("Predelay", 1, 300, 20), PCT("Distortion", 50), CHO("Order", PREPOST, 1),
          PCT("Tone", 50), PCT("Mod", 30), NONE}},
-    [A_TREMVERB] = {"Tremolo Verb", G_REVERB, 40, "Reverb with a pulsing tremolo",
+    [A_TREMVERB] = {"TremoloVrb", G_REVERB, 40, "Reverb with a pulsing tremolo",
         {PCT("Size", 55), EXPK("Decay", 0.5f, 10, 2.5f, "s"), PCT("Tone", 55), PCT("Trem", 60), HZ("Trem Rate", 0.5f, 15, 4),
          PCT("Shape", 30), CHO("Order", PREPOST, 1), NONE}},
-    [A_WARP] = {"Warp Verb", G_REVERB, 45, "A heavily bent, pitch-warping space",
+    [A_WARP] = {"Wormhol3", G_REVERB, 45, "A heavily bent, pitch-warping space",
         {PCT("Size", 70), EXPK("Decay", 1, 30, 8, "s"), PCT("Warp", 50), HZ("Rate", 0.05f, 4, 0.2f), ST("Pitch", 0), PCT("Tone", 50),
          PCT("Width", 80), NONE}},
 
-    [A_GRAINWEB] = {"Grain Web", G_GRAIN, 50, "Two pitched grain voices, reversing and feeding back",
+    [A_GRAINWEB] = {"CosmicWb", G_GRAIN, 50, "Two pitched grain voices, reversing and feeding back",
         {MS("Grain", 20, 500, 120), HZ("Density", 1, 40, 12), ST("Pitch A", 12), ST("Pitch B", -12), MS("Delay", 10, 2000, 300),
          PCT("Feedback", 40), PCT("Reverse", 30), PCT("Tone", 55)}},
     [A_GLITCH] = {"Glitch", G_GRAIN, 60, "Stutters, clock jumps and bit-crushing at random",
         {HZ("Rate", 0.5f, 16, 4), PCT("Chance", 50), INT("Bits", 4, 16, 10, ""), INT("Alias", 1, 16, 1, "x"), MS("Length", 10, 500, 90),
          PCT("Reverse", 30), PCT("Jump", 40), PCT("Tone", 60)}},
-    [A_GRAINMOD] = {"Grain Mod", G_GRAIN, 50, "Grain delay moved by four slow LFOs",
+    [A_GRAINMOD] = {"GrainMd", G_GRAIN, 50, "Grain delay moved by four slow LFOs",
         {MS("Grain", 20, 500, 150), HZ("Density", 1, 40, 10), MS("Delay", 10, 2000, 400), PCT("Feedback", 30), INT("Pitch Mod", 0, 1200, 100, "c"),
          PCT("Pos Mod", 40), PCT("Pan Mod", 60), HZ("LFO Rate", 0.02f, 4, 0.3f)}},
     [A_STUTTER] = {"Stutter", G_GRAIN, 100, "Catches a slice and repeats it, with tape-stop",
@@ -602,6 +610,8 @@ static void slot_control(Slot *s) {
     case A_FLANGER: c[20] = lp_coef(tone_cut(V(4)), fs); break;
     case A_SFLANGER: c[20] = lp_coef(tone_cut(V(5)), fs); break;
     case A_VIBE: c[20] = lp_coef(tone_cut(V(4)), fs); break;
+    case A_TRICHORUS: c[20] = lp_coef(V(4), fs); c[21] = powf(2, SHIM_ST[(int)V(6)] / 12); c[22] = lp_coef(14000, fs);
+        c[23] = 10.7f * fs / 1000; c[24] = lp_coef(9000, fs); break;
     case A_TREMOLO: c[21] = 1 + PC(2) * 15; c[22] = tanh_fast(c[21]); break;
     case A_HALL:
         vc = (VerbCfg){lerp(0.8f, 2.4f, PC(0)), V(1), lerp(2000, 16000, PC(3)), V(4), lerp(0, 0.003f, PC(5)), 0.4f, 4, 1.2f, 0.65f};
@@ -1189,6 +1199,29 @@ static void run_algo(Slot *s, const float in[2], float out[2]) {
         break;
     }
 
+    case A_TRICHORUS: {   /* as the Tri Chorus plugin: three BBD voices a third of a cycle apart, panned L/C/R */
+        const float ph = adv(&s->lfo[0], V(0), fs), fast = adv(&s->lfo[1], V(0) * 9.5f, fs);
+        const int vib = V(7) > 0.5f;
+        const float w = PC(3), ens = PC(2);
+        const float pan[3][2] = {{lerp(0.6f, 1.0f, w), lerp(0.6f, 0.0f, w)}, {0.7f, 0.7f}, {lerp(0.6f, 0.0f, w), lerp(0.6f, 1.0f, w)}};
+        const float mono = lp(&s->op[0][7], (in[0] + in[1]) * 0.5f, c[22]);
+        line_push(&s->dl[0], tanh_fast(mono * 1.2f) / 1.2f);
+        const float swing = PC(1) * (vib ? 0.008f : 0.0045f) * fs;
+        float wet[2] = {0, 0};
+        for (int v = 0; v < 3; v++) {
+            const float off = (float)v / 3, m = sine01(ph + off) + ens * 0.35f * sine01(fast + off * 1.7f);
+            float y = line_read(&s->dl[0], c[23] + swing * 0.5f * (1 + m) + 2);
+            y = lp(&s->op[1][v], lp(&s->op[0][v], y, c[20]), c[20]);   /* the BBD's darkening */
+            wet[0] += y * pan[v][0];
+            wet[1] += y * pan[v][1];
+        }
+        for (int ch = 0; ch < 2; ch++) {
+            wet[ch] *= 0.75f;
+            if (PC(5) > 0.001f) wet[ch] += lp(&s->op[ch][6], shift_s(&s->sh[ch][0], wet[ch], c[21] * (ch ? 1.003f : 1), 0.05f * fs, 1), c[24]) * PC(5) * 0.8f;
+            out[ch] = wet[ch];
+        }
+        break;
+    }
     case A_HALL: case A_ROOM: case A_PLATE: case A_CLASSIC: case A_CRUSHVERB: {
         const float pre = c[20];
         for (int ch = 0; ch < 2; ch++) line_push(&s->dl2[ch], in[ch]);
@@ -1345,7 +1378,8 @@ static void slot_set_algo(Slot *s, int algo) { if (algo != s->algo) { slot_clear
 
 /* one sample through the slot -> its wet sound */
 static void slot_run(Slot *s, float l, float r, float *wl, float *wr) {
-    s->mix_s += 0.002f * (s->mix_n - s->mix_s);
+    const float mix_t = s->algo == A_TRICHORUS && s->v[7] > 0.5f ? 1 : s->mix_n;   /* (Tri Chorus's Vibrato: wet only) */
+    s->mix_s += 0.002f * (mix_t - s->mix_s);
     if (!(s->tick++ & 15)) slot_control(s);
     const float in[2] = {l, r};
     float out[2];

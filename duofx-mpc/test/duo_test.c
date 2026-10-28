@@ -128,7 +128,7 @@ static void stability(int a) {
             CHECK(peak < 3.99f, "%s %s %s: hits the +12 dB ceiling (peak %.2f)", names[a], where, SET[setting], peak);
             const double end = rms(buf, 34 * FS, 35 * FS), before = rms(buf, 29 * FS, 30 * FS);
             /* every knob at full may hold forever (full Feedback / Decay), by design: then it only has to stay in bounds */
-            const int holds = setting == 2 || (!strcmp(names[a], "Abyss") && setting >= 3);
+            const int holds = setting == 2 || (!strcmp(names[a], "Blackhol3") && setting >= 3);
             CHECK(holds || end < 0.003 || end < (setting >= 3 ? 0.85 : 0.5) * before, "%s %s %s: still %.4f rms 14 s after the input stopped (%.4f 5 s before)",
                   names[a], where, SET[setting], end, before);
             if (setting == 0 && slot == 0 && strcmp(names[a], "Off")) {
@@ -152,8 +152,8 @@ int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: %s <Duo-FX.so> [algorithm]\n", argv[0]); return 2; }
     void *h = dlopen(argv[1], RTLD_NOW);
     if (!h || !(*(void **)&entry = dlsym(h, "VSTPluginMain"))) { fprintf(stderr, "can't load %s\n", argv[1]); return 1; }
-    {   /* the algorithm names, from the plugin (55 options: the last is Off) */
-        nalgo = 55;
+    {   /* the algorithm names, from the plugin (56 options: the last is Off) */
+        nalgo = 56;
         AEffect *e = make();
         for (int a = 0; a < nalgo; a++) {
             e->setParameter(e, P_ALGO, (float)a / (float)(nalgo - 1));
@@ -184,13 +184,13 @@ int main(int argc, char **argv) {
             e->dispatcher(e, effClose, 0, 0, NULL, 0);
         }
         struct { const char *algo; float in; double want; const char *k1, *v1, *k2, *v2; } P[] = {
-            {"Poly Shift", 220, 330, "Level A", "0%", "Pitch B", "+7 st"},         /* a fifth up */
+            {"Polyphny", 220, 330, "Level A", "0%", "Pitch B", "+7 st"},         /* a fifth up */
             {"Octaver", 220, 110, "Dry", "0%", NULL, NULL},
-            {"Diatonic Harmony", 220, 261.6, "Level 2", "0%", "Voice 1", "3rd Up"},  /* A, a third up in C major: C */
-            {"Diatonic Harmony", 261.6, 329.6, "Level 2", "0%", "Voice 1", "3rd Up"}, /* C, a third up: E */
-            {"Pitch Correct", 226, 220, NULL, NULL, NULL, NULL},                     /* a sharp A pulled to A */
-            {"Pitch Bend", 220, 440, "Bend", "100%", NULL, NULL},                    /* toe: +12 */
-            {"Micro Shift", 220, 221.15, "Delay L", "1.0", NULL, NULL},               /* +9 cents on the left */
+            {"Diatonik", 220, 261.6, "Level 2", "0%", "Voice 1", "3rd Up"},  /* A, a third up in C major: C */
+            {"Diatonik", 261.6, 329.6, "Level 2", "0%", "Voice 1", "3rd Up"}, /* C, a third up: E */
+            {"VocalTun", 226, 220, NULL, NULL, NULL, NULL},                     /* a sharp A pulled to A */
+            {"PitchFlx", 220, 440, "Bend", "100%", NULL, NULL},                    /* toe: +12 */
+            {"MicroPtch", 220, 221.15, "Delay L", "1.0", NULL, NULL},               /* +9 cents on the left */
         };
         for (size_t i = 0; i < sizeof P / sizeof *P; i++) {
             AEffect *e = one(P[i].algo, 1);
@@ -207,7 +207,7 @@ int main(int argc, char **argv) {
             e->dispatcher(e, effClose, 0, 0, NULL, 0);
         }
         {   /* Shimmer climbs: an octave above a held note builds up in the tail */
-            AEffect *e = one("Shimmer", 1);
+            AEffect *e = one("ShimmrVerb", 1);
             set_by_text(e, 0, "Shimmer", "100%");
             settle(e);
             hz_in = 220;
@@ -219,7 +219,7 @@ int main(int argc, char **argv) {
             e->dispatcher(e, effClose, 0, 0, NULL, 0);
         }
         {   /* the reverbs leave a tail */
-            const char *R[] = {"Hall", "Room", "Plate", "Spring", "Shimmer", "Abyss", "Classic Verb", "Crushed Verb", "Tremolo Verb", "Warp Verb"};
+            const char *R[] = {"Hall", "Room", "Plate", "Spring", "ShimmrVerb", "Blackhol3", "SP2O16", "MangldVerb", "TremoloVrb", "Wormhol3"};
             for (size_t i = 0; i < sizeof R / sizeof *R; i++) {
                 AEffect *e = one(R[i], 1);
                 settle(e);
