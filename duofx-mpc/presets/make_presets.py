@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Make Duo FX's preset bank: our versions of the H90's factory algorithm presets.
-   make_presets.py <h90_preset_names.json> <table.json> <out presets.h> [h90_backup.json]
+   make_presets.py <h90_preset_names.json> <table.json> <out presets.h> [h90_backup.json [h90_video_programs.json]]
 h90_preset_names.json: the factory preset names per H90 algorithm, as the H90 manual's Algorithm Guide lists them
 (names only: the manual gives no settings). table.json: Duo FX's algorithm table (build/gen-table, -DDUO_FX_TABLE).
 Each preset starts from its algorithm's own defaults and is shaped by what its name says (slap, long, dark, bright,
@@ -8,7 +8,8 @@ slow, octave, 5th, freeze, ...), plus a small variation from the name so no two 
 from the names, made to A/B against the real thing; the settings are ours.
 With h90_backup.json (h90_backup.py, from an H90 backup): every preset found there gets its real settings (converted
 by h90_convert.py), missing ones are added, and the backup's factory programs become PROGRAMS[] (both slots and
-the routing)."""
+the routing). With h90_video_programs.json (make_video_programs.py: guesses from the play-through video), the
+factory programs the backup didn't have are added too."""
 import hashlib
 import json
 import re
@@ -207,6 +208,21 @@ if len(sys.argv) > 4:
         if all(r[0] == ALG["Off"] for r in slots):
             continue
         programs.append((prog["name"][:22], int(prog["parallel"]), slots))
+    if len(sys.argv) > 5:   # the rest of the factory programs, guessed from the video
+        for prog in json.load(open(sys.argv[5])):
+            if prog["name"].lower() in seen_p:
+                continue
+            seen_p.add(prog["name"].lower())
+            slots = []
+            for sl in prog["slots"]:
+                a = ALG[sl["algorithm"]]
+                knobs = [norm(k, k["def"]) if k else 0 for k in table[a]["knobs"]]
+                for i, k in enumerate(table[a]["knobs"]):
+                    if k and k["name"] in sl["knobs"]:
+                        v = sl["knobs"][k["name"]]
+                        knobs[i] = k["choices"].index(v) / (len(k["choices"]) - 1) if k["map"] == 3 else set_units(k, v)
+                slots.append((a, "", sl["mix"], knobs))
+            programs.append((prog["name"], int(prog["parallel"]), slots))
     programs.sort(key=lambda p: p[0].lower())
 
 out.sort(key=lambda p: (p[0], p[1].lower()))

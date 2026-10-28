@@ -148,7 +148,12 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   settings onto ours (units partly worked out from the play-through video's audio: H9 delay values under 60 are
   2.45*v^2 ms; PitchFuzz pitch 25 = unison). make_presets.py (4th arg) overwrites/adds those presets and writes
   PROGRAMS[] (24 factory programs: both slots + routing; Program stepper params 48..50 on the PROGRAM tab). The
-  routing flag is a guess (header byte 3 = parallel, from "Floating in Space"). That data also reshaped PtchFuzz (fuzz
+  routing flag is a guess (header byte 3 = parallel, from "Floating in Space"). The other factory programs (69) are
+  guessed from the play-through video (user's MP3 on Drive): `abtest/analyze_video.py` measures each chapter
+  (echoes, decay, tremolo, flatness = drive, pitch intervals) into `presets/h90_video_measures.json`,
+  `make_video_programs.py` picks algorithms from that + the names (5th arg of make_presets.py; backup wins). Its
+  decay measure is unreliable (tremolo, playing), so reverb choice leans on names. `abtest/make_ab_signal.py` is the
+  test file for the user to record through the pedal (not done yet). That data also reshaped PtchFuzz (fuzz
   on two pitch voices + delay), Crystalz (delays to 2.5 s, a Reverb knob), Blackhol3 (Predelay), Shimmer (voices
   +4/-7 cents) and Hall/SP2O16 predelay (to 1 s).
   Per slot a Preset stepper (params 42..47, after Output): < > step within the algorithm and on; an exact value (a

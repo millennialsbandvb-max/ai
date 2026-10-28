@@ -1,0 +1,1765 @@
+[
+ {
+  "name": "Bedroom Vibes",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Even-Vib3",
+    "mix": 50,
+    "knobs": {
+     "Speed": 0.89,
+     "Intensity": 70
+    }
+   },
+   {
+    "algorithm": "Room",
+    "mix": 25,
+    "knobs": {
+     "Decay": 2.18,
+     "Size": 45
+    }
+   }
+  ]
+ },
+ {
+  "name": "Wide & Clean",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Chorus",
+    "mix": 50,
+    "knobs": {
+     "Depth": 50,
+     "Rate": 0.7
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 22,
+    "knobs": {
+     "Decay": 1.6
+    }
+   }
+  ]
+ },
+ {
+  "name": "12 Stringy",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Polyphny",
+    "mix": 45,
+    "knobs": {
+     "Pitch A": 12,
+     "Fine A": 6,
+     "Pitch B": 0,
+     "Fine B": -8,
+     "Level A": 70,
+     "Level B": 50
+    }
+   },
+   {
+    "algorithm": "ShimmrVerb",
+    "mix": 35,
+    "knobs": {
+     "Decay": 8.48,
+     "Pitch A": 12,
+     "Pitch B": 12,
+     "Shimmer": 45
+    }
+   }
+  ]
+ },
+ {
+  "name": "Autowah",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Aggravat3",
+    "mix": 100,
+    "knobs": {
+     "Drive": 8,
+     "Octave": 0,
+     "Envelope": 85,
+     "Env Q": 70,
+     "Level": -6
+    }
+   },
+   {
+    "algorithm": "Room",
+    "mix": 20,
+    "knobs": {
+     "Decay": 0.8
+    }
+   }
+  ]
+ },
+ {
+  "name": "Awaken",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "ShimmrVerb",
+    "mix": 35,
+    "knobs": {
+     "Decay": 4.86,
+     "Pitch A": 12,
+     "Pitch B": 12,
+     "Shimmer": 45
+    }
+   },
+   {
+    "algorithm": "Off",
+    "mix": 0,
+    "knobs": {}
+   }
+  ]
+ },
+ {
+  "name": "Paradise Clean",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Chorus",
+    "mix": 50,
+    "knobs": {
+     "Depth": 50,
+     "Rate": 0.7
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 30,
+    "knobs": {
+     "Decay": 4.688000000000001
+    }
+   }
+  ]
+ },
+ {
+  "name": "Green Tides",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "WeedWackr",
+    "mix": 100,
+    "knobs": {
+     "Drive": 40,
+     "Tone": 50
+    }
+   },
+   {
+    "algorithm": "Room",
+    "mix": 20,
+    "knobs": {
+     "Decay": 0.8
+    }
+   }
+  ]
+ },
+ {
+  "name": "Teacher Preacher W",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "WeedWackr",
+    "mix": 100,
+    "knobs": {
+     "Drive": 40,
+     "Tone": 50
+    }
+   },
+   {
+    "algorithm": "Room",
+    "mix": 20,
+    "knobs": {
+     "Decay": 0.8
+    }
+   }
+  ]
+ },
+ {
+  "name": "Twister Echo",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Flanger",
+    "mix": 50,
+    "knobs": {
+     "Rate": 0.3,
+     "Feedback": 55
+    }
+   },
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 33.849999999999994,
+     "Mod": 30
+    }
+   }
+  ]
+ },
+ {
+  "name": "Shoegazer",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Digital Delay",
+    "mix": 40,
+    "knobs": {
+     "Time": 315.2,
+     "Feedback": 12.142377434519812
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 22,
+    "knobs": {
+     "Decay": 1.6
+    }
+   }
+  ]
+ },
+ {
+  "name": "Zero Gravity",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Chorus",
+    "mix": 40,
+    "knobs": {}
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 25,
+    "knobs": {
+     "Decay": 1.5
+    }
+   }
+  ]
+ },
+ {
+  "name": "Entanglements",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Chorus",
+    "mix": 40,
+    "knobs": {}
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 25,
+    "knobs": {
+     "Decay": 1.5
+    }
+   }
+  ]
+ },
+ {
+  "name": "Polyphonic Room W",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Polyphny",
+    "mix": 45,
+    "knobs": {
+     "Pitch A": 7,
+     "Pitch B": -5,
+     "Level B": 60
+    }
+   },
+   {
+    "algorithm": "Room",
+    "mix": 25,
+    "knobs": {
+     "Decay": 3,
+     "Size": 45
+    }
+   }
+  ]
+ },
+ {
+  "name": "Empty Universe",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Digital Delay",
+    "mix": 30,
+    "knobs": {
+     "Time": 430.7,
+     "Feedback": 25.390070921985814
+    }
+   },
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 8,
+     "Mod": 30
+    }
+   }
+  ]
+ },
+ {
+  "name": "Freeman",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Chorus",
+    "mix": 40,
+    "knobs": {}
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 25,
+    "knobs": {
+     "Decay": 1.5
+    }
+   }
+  ]
+ },
+ {
+  "name": "Instant Flavor",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Chorus",
+    "mix": 40,
+    "knobs": {}
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 25,
+    "knobs": {
+     "Decay": 1.5
+    }
+   }
+  ]
+ },
+ {
+  "name": "Mirror Dimension",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 34.1,
+     "Mod": 30
+    }
+   },
+   {
+    "algorithm": "Off",
+    "mix": 0,
+    "knobs": {}
+   }
+  ]
+ },
+ {
+  "name": "Dirty Ham",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "PtchFuzz",
+    "mix": 100,
+    "knobs": {
+     "Fuzz": 70,
+     "Pitch A": -12,
+     "Pitch B": 12,
+     "Pitch Mix": 30
+    }
+   },
+   {
+    "algorithm": "Room",
+    "mix": 20,
+    "knobs": {
+     "Decay": 0.8
+    }
+   }
+  ]
+ },
+ {
+  "name": "Tidal Wave",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Tape Echo",
+    "mix": 40,
+    "knobs": {
+     "Time": 333.3,
+     "Feedback": 70.0
+    }
+   },
+   {
+    "algorithm": "Hall",
+    "mix": 35,
+    "knobs": {
+     "Decay": 7.12,
+     "Size": 70,
+     "Mod": 40
+    }
+   }
+  ]
+ },
+ {
+  "name": "Harmonic Room",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Polyphny",
+    "mix": 45,
+    "knobs": {
+     "Pitch A": 7,
+     "Pitch B": -5,
+     "Level B": 60
+    }
+   },
+   {
+    "algorithm": "Room",
+    "mix": 25,
+    "knobs": {
+     "Decay": 2.355,
+     "Size": 45
+    }
+   }
+  ]
+ },
+ {
+  "name": "Graduation",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Digital Delay",
+    "mix": 40,
+    "knobs": {
+     "Time": 167.0,
+     "Feedback": 38.026666666666664
+    }
+   },
+   {
+    "algorithm": "Hall",
+    "mix": 35,
+    "knobs": {
+     "Decay": 6.99,
+     "Size": 70,
+     "Mod": 40
+    }
+   }
+  ]
+ },
+ {
+  "name": "Recital Hall",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Digital Delay",
+    "mix": 30,
+    "knobs": {
+     "Time": 135.0,
+     "Feedback": 25.0
+    }
+   },
+   {
+    "algorithm": "ShimmrVerb",
+    "mix": 35,
+    "knobs": {
+     "Decay": 3.66,
+     "Pitch A": 12,
+     "Pitch B": 12,
+     "Shimmer": 45
+    }
+   }
+  ]
+ },
+ {
+  "name": "Twilight Tones",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "WeedWackr",
+    "mix": 100,
+    "knobs": {
+     "Drive": 60,
+     "Tone": 50
+    }
+   },
+   {
+    "algorithm": "Digital Delay",
+    "mix": 30,
+    "knobs": {
+     "Time": 187.5,
+     "Feedback": 25.0,
+     "Ping-Pong": "On",
+     "Mod": 15
+    }
+   }
+  ]
+ },
+ {
+  "name": "Mosaic",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Digital Delay",
+    "mix": 40,
+    "knobs": {
+     "Time": 312.7,
+     "Feedback": 25.0
+    }
+   },
+   {
+    "algorithm": "Plate",
+    "mix": 28,
+    "knobs": {
+     "Decay": 2.81,
+     "Size": 55
+    }
+   }
+  ]
+ },
+ {
+  "name": "Red Room",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "WeedWackr",
+    "mix": 100,
+    "knobs": {
+     "Drive": 40,
+     "Tone": 50
+    }
+   },
+   {
+    "algorithm": "Room",
+    "mix": 25,
+    "knobs": {
+     "Decay": 0.43,
+     "Size": 45
+    }
+   }
+  ]
+ },
+ {
+  "name": "Reggaetoni",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "WeedWackr",
+    "mix": 100,
+    "knobs": {
+     "Drive": 40,
+     "Tone": 50
+    }
+   },
+   {
+    "algorithm": "Room",
+    "mix": 20,
+    "knobs": {
+     "Decay": 0.8
+    }
+   }
+  ]
+ },
+ {
+  "name": "Knife Drop",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 22.400000000000002,
+     "Mod": 30
+    }
+   },
+   {
+    "algorithm": "Off",
+    "mix": 0,
+    "knobs": {}
+   }
+  ]
+ },
+ {
+  "name": "Twin Pines",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Spring",
+    "mix": 30,
+    "knobs": {
+     "Decay": 2.28,
+     "Drip": 40
+    }
+   },
+   {
+    "algorithm": "Off",
+    "mix": 0,
+    "knobs": {}
+   }
+  ]
+ },
+ {
+  "name": "Standby",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Room",
+    "mix": 25,
+    "knobs": {
+     "Decay": 0.4,
+     "Size": 45
+    }
+   },
+   {
+    "algorithm": "Off",
+    "mix": 0,
+    "knobs": {}
+   }
+  ]
+ },
+ {
+  "name": "Stargazers",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "WeedWackr",
+    "mix": 100,
+    "knobs": {
+     "Drive": 40,
+     "Tone": 50
+    }
+   },
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 8,
+     "Mod": 30
+    }
+   }
+  ]
+ },
+ {
+  "name": "Lost City",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Polyphny",
+    "mix": 45,
+    "knobs": {
+     "Pitch A": 7,
+     "Pitch B": -5,
+     "Level B": 60
+    }
+   },
+   {
+    "algorithm": "Hall",
+    "mix": 35,
+    "knobs": {
+     "Decay": 6.06,
+     "Size": 70,
+     "Mod": 40
+    }
+   }
+  ]
+ },
+ {
+  "name": "Tippy Ambient",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Polyphny",
+    "mix": 45,
+    "knobs": {
+     "Pitch A": 7,
+     "Pitch B": -5,
+     "Level B": 60
+    }
+   },
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 31.5,
+     "Mod": 30
+    }
+   }
+  ]
+ },
+ {
+  "name": "Djentle Clean",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Digital Delay",
+    "mix": 30,
+    "knobs": {
+     "Time": 273.5,
+     "Feedback": 70.0
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 30,
+    "knobs": {
+     "Decay": 3.7920000000000003
+    }
+   }
+  ]
+ },
+ {
+  "name": "Tight Drive",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "WeedWackr",
+    "mix": 100,
+    "knobs": {
+     "Drive": 60,
+     "Tone": 50
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 30,
+    "knobs": {
+     "Decay": 4.216
+    }
+   }
+  ]
+ },
+ {
+  "name": "Bass Phase",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Phaser",
+    "mix": 50,
+    "knobs": {
+     "Rate": 1.51,
+     "Feedback": 50
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 22,
+    "knobs": {
+     "Decay": 1.6
+    }
+   }
+  ]
+ },
+ {
+  "name": "Celestial Chimes W",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Polyphny",
+    "mix": 45,
+    "knobs": {
+     "Pitch A": 7,
+     "Pitch B": 12,
+     "Level B": 60
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 22,
+    "knobs": {
+     "Decay": 1.6
+    }
+   }
+  ]
+ },
+ {
+  "name": "Rule The World",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Chorus",
+    "mix": 40,
+    "knobs": {}
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 25,
+    "knobs": {
+     "Decay": 1.5
+    }
+   }
+  ]
+ },
+ {
+  "name": "Water Wheel",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Phaser",
+    "mix": 50,
+    "knobs": {
+     "Rate": 1.31,
+     "Feedback": 50
+    }
+   },
+   {
+    "algorithm": "ShimmrVerb",
+    "mix": 35,
+    "knobs": {
+     "Decay": 4.96,
+     "Pitch A": 12,
+     "Pitch B": 12,
+     "Shimmer": 45
+    }
+   }
+  ]
+ },
+ {
+  "name": "Robocat",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "PtchFuzz",
+    "mix": 100,
+    "knobs": {
+     "Fuzz": 70,
+     "Pitch A": 0,
+     "Pitch B": 12,
+     "Pitch Mix": 30
+    }
+   },
+   {
+    "algorithm": "PolySynt",
+    "mix": 60,
+    "knobs": {
+     "Wave": "Square",
+     "Octave": 0
+    }
+   }
+  ]
+ },
+ {
+  "name": "Warm Embrace",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Chorus",
+    "mix": 50,
+    "knobs": {
+     "Depth": 50,
+     "Rate": 0.7
+    }
+   },
+   {
+    "algorithm": "Hall",
+    "mix": 35,
+    "knobs": {
+     "Decay": 8.45,
+     "Size": 70,
+     "Mod": 40
+    }
+   }
+  ]
+ },
+ {
+  "name": "Balance Era",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Plate",
+    "mix": 28,
+    "knobs": {
+     "Decay": 4.94,
+     "Size": 55
+    }
+   },
+   {
+    "algorithm": "Off",
+    "mix": 0,
+    "knobs": {}
+   }
+  ]
+ },
+ {
+  "name": "Andromeda",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Digital Delay",
+    "mix": 40,
+    "knobs": {
+     "Time": 162.0,
+     "Feedback": 25.0,
+     "Ping-Pong": "On",
+     "Mod": 15
+    }
+   },
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 8,
+     "Mod": 30
+    }
+   }
+  ]
+ },
+ {
+  "name": "Indie City",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Chorus",
+    "mix": 50,
+    "knobs": {
+     "Depth": 50,
+     "Rate": 0.7
+    }
+   },
+   {
+    "algorithm": "Hall",
+    "mix": 35,
+    "knobs": {
+     "Decay": 2.5,
+     "Size": 70,
+     "Mod": 40
+    }
+   }
+  ]
+ },
+ {
+  "name": "Bittersweet",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Chorus",
+    "mix": 50,
+    "knobs": {
+     "Depth": 50,
+     "Rate": 0.7
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 22,
+    "knobs": {
+     "Decay": 1.6
+    }
+   }
+  ]
+ },
+ {
+  "name": "Transcend",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "ShimmrVerb",
+    "mix": 35,
+    "knobs": {
+     "Decay": 9.86,
+     "Pitch A": 12,
+     "Pitch B": 12,
+     "Shimmer": 45
+    }
+   },
+   {
+    "algorithm": "Off",
+    "mix": 0,
+    "knobs": {}
+   }
+  ]
+ },
+ {
+  "name": "Asteroids",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Glitch",
+    "mix": 50,
+    "knobs": {}
+   },
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 35.4,
+     "Mod": 30
+    }
+   }
+  ]
+ },
+ {
+  "name": "Black Hold Son",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "WeedWackr",
+    "mix": 100,
+    "knobs": {
+     "Drive": 40,
+     "Tone": 50
+    }
+   },
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 10.2,
+     "Mod": 30
+    }
+   }
+  ]
+ },
+ {
+  "name": "Thieves",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 18.05,
+     "Mod": 30
+    }
+   },
+   {
+    "algorithm": "Off",
+    "mix": 0,
+    "knobs": {}
+   }
+  ]
+ },
+ {
+  "name": "Ambient Fields",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Hall",
+    "mix": 35,
+    "knobs": {
+     "Decay": 5.92,
+     "Size": 70,
+     "Mod": 40
+    }
+   },
+   {
+    "algorithm": "Off",
+    "mix": 0,
+    "knobs": {}
+   }
+  ]
+ },
+ {
+  "name": "Nova Waves",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "ShimmrVerb",
+    "mix": 35,
+    "knobs": {
+     "Decay": 8.99,
+     "Pitch A": 12,
+     "Pitch B": 19,
+     "Shimmer": 45
+    }
+   },
+   {
+    "algorithm": "Off",
+    "mix": 0,
+    "knobs": {}
+   }
+  ]
+ },
+ {
+  "name": "Deep Funk",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Aggravat3",
+    "mix": 100,
+    "knobs": {
+     "Drive": 8,
+     "Octave": 0,
+     "Envelope": 85,
+     "Env Q": 70,
+     "Level": -6
+    }
+   },
+   {
+    "algorithm": "Room",
+    "mix": 20,
+    "knobs": {
+     "Decay": 0.8
+    }
+   }
+  ]
+ },
+ {
+  "name": "Whip Around",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Flanger",
+    "mix": 50,
+    "knobs": {
+     "Rate": 0.3,
+     "Feedback": 55
+    }
+   },
+   {
+    "algorithm": "Hall",
+    "mix": 35,
+    "knobs": {
+     "Decay": 6.7,
+     "Size": 70,
+     "Mod": 40
+    }
+   }
+  ]
+ },
+ {
+  "name": "Cowboy Time",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 44.6,
+     "Mod": 30
+    }
+   },
+   {
+    "algorithm": "Off",
+    "mix": 0,
+    "knobs": {}
+   }
+  ]
+ },
+ {
+  "name": "Epic Steel",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "WeedWackr",
+    "mix": 100,
+    "knobs": {
+     "Drive": 40,
+     "Tone": 50
+    }
+   },
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 27.95,
+     "Mod": 30
+    }
+   }
+  ]
+ },
+ {
+  "name": "Pensive Fifths",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Polyphny",
+    "mix": 45,
+    "knobs": {
+     "Pitch A": 7,
+     "Pitch B": -5,
+     "Level B": 60
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 30,
+    "knobs": {
+     "Decay": 3.0
+    }
+   }
+  ]
+ },
+ {
+  "name": "Fading Fields",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Digital Delay",
+    "mix": 40,
+    "knobs": {
+     "Time": 375.1,
+     "Feedback": 24.55507644061153
+    }
+   },
+   {
+    "algorithm": "Hall",
+    "mix": 35,
+    "knobs": {
+     "Decay": 6.89,
+     "Size": 70,
+     "Mod": 40
+    }
+   }
+  ]
+ },
+ {
+  "name": "Space Spiral",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Digital Delay",
+    "mix": 30,
+    "knobs": {
+     "Time": 284.0,
+     "Feedback": 40.540111199364574
+    }
+   },
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 21.175,
+     "Mod": 30
+    }
+   }
+  ]
+ },
+ {
+  "name": "Space Waves",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Digital Delay",
+    "mix": 30,
+    "knobs": {
+     "Time": 1134.0,
+     "Feedback": 25.0
+    }
+   },
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 30.425,
+     "Mod": 30
+    }
+   }
+  ]
+ },
+ {
+  "name": "Lush Wah Delay",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Aggravat3",
+    "mix": 100,
+    "knobs": {
+     "Drive": 8,
+     "Octave": 0,
+     "Envelope": 85,
+     "Env Q": 70,
+     "Level": -6
+    }
+   },
+   {
+    "algorithm": "Chorus",
+    "mix": 50,
+    "knobs": {
+     "Depth": 50,
+     "Rate": 0.7
+    }
+   }
+  ]
+ },
+ {
+  "name": "Aura Projector",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Digital Delay",
+    "mix": 30,
+    "knobs": {
+     "Time": 166.7,
+     "Feedback": 25.0,
+     "Ping-Pong": "On",
+     "Mod": 15
+    }
+   },
+   {
+    "algorithm": "ShimmrVerb",
+    "mix": 35,
+    "knobs": {
+     "Decay": 5.33,
+     "Pitch A": 12,
+     "Pitch B": 12,
+     "Shimmer": 45
+    }
+   }
+  ]
+ },
+ {
+  "name": "Miso Soup",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "MultiTp",
+    "mix": 40,
+    "knobs": {
+     "Span": 594.9,
+     "Taps": 6,
+     "Feedback": 15
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 22,
+    "knobs": {
+     "Decay": 1.6
+    }
+   }
+  ]
+ },
+ {
+  "name": "Rewind Tape",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Reverse",
+    "mix": 45,
+    "knobs": {
+     "Time": 600,
+     "Feedback": 30
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 22,
+    "knobs": {
+     "Decay": 1.6
+    }
+   }
+  ]
+ },
+ {
+  "name": "Slap Drive",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "WeedWackr",
+    "mix": 100,
+    "knobs": {
+     "Drive": 40,
+     "Tone": 50
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 30,
+    "knobs": {
+     "Decay": 2.272
+    }
+   }
+  ]
+ },
+ {
+  "name": "Ghosts Chasing",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Reverse",
+    "mix": 45,
+    "knobs": {
+     "Time": 600,
+     "Feedback": 30
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 22,
+    "knobs": {
+     "Decay": 1.6
+    }
+   }
+  ]
+ },
+ {
+  "name": "Power 12",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Polyphny",
+    "mix": 45,
+    "knobs": {
+     "Pitch A": 12,
+     "Fine A": 6,
+     "Pitch B": 0,
+     "Fine B": -8,
+     "Level A": 70,
+     "Level B": 50
+    }
+   },
+   {
+    "algorithm": "Hall",
+    "mix": 35,
+    "knobs": {
+     "Decay": 9.24,
+     "Size": 70,
+     "Mod": 40
+    }
+   }
+  ]
+ },
+ {
+  "name": "Dark Pulse",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Chorus",
+    "mix": 40,
+    "knobs": {}
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 25,
+    "knobs": {
+     "Decay": 1.5
+    }
+   }
+  ]
+ },
+ {
+  "name": "Indigo Fog",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "WeedWackr",
+    "mix": 100,
+    "knobs": {
+     "Drive": 40,
+     "Tone": 50
+    }
+   },
+   {
+    "algorithm": "Hall",
+    "mix": 35,
+    "knobs": {
+     "Decay": 2.5,
+     "Size": 70,
+     "Mod": 40
+    }
+   }
+  ]
+ },
+ {
+  "name": "Heart Attack",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Tremolo",
+    "mix": 100,
+    "knobs": {
+     "Depth": 100,
+     "Rate": 9.96
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 22,
+    "knobs": {
+     "Decay": 1.6
+    }
+   }
+  ]
+ },
+ {
+  "name": "Wah Swim",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Aggravat3",
+    "mix": 100,
+    "knobs": {
+     "Drive": 8,
+     "Octave": 0,
+     "Envelope": 85,
+     "Env Q": 70,
+     "Level": -6
+    }
+   },
+   {
+    "algorithm": "Hall",
+    "mix": 35,
+    "knobs": {
+     "Decay": 5.18,
+     "Size": 70,
+     "Mod": 40
+    }
+   }
+  ]
+ },
+ {
+  "name": "Quadra Quant",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Chorus",
+    "mix": 40,
+    "knobs": {}
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 25,
+    "knobs": {
+     "Decay": 1.5
+    }
+   }
+  ]
+ },
+ {
+  "name": "Prism Vibe",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "PrismShft",
+    "mix": 55,
+    "knobs": {
+     "Rate": 3.3333333333333335,
+     "Delay": 300.0
+    }
+   },
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 36.974999999999994,
+     "Mod": 30
+    }
+   }
+  ]
+ },
+ {
+  "name": "Wobbly Ambient",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Tape Echo",
+    "mix": 40,
+    "knobs": {
+     "Time": 236.3,
+     "Feedback": 30.91620986687549
+    }
+   },
+   {
+    "algorithm": "Hall",
+    "mix": 35,
+    "knobs": {
+     "Decay": 2.5,
+     "Size": 70,
+     "Mod": 40
+    }
+   }
+  ]
+ },
+ {
+  "name": "Take the Van",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Polyphny",
+    "mix": 45,
+    "knobs": {
+     "Pitch A": 7,
+     "Pitch B": -5,
+     "Level B": 60
+    }
+   },
+   {
+    "algorithm": "SP2O16",
+    "mix": 30,
+    "knobs": {
+     "Decay": 1.8559999999999999
+    }
+   }
+  ]
+ },
+ {
+  "name": "Rusty Clav",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Aggravat3",
+    "mix": 100,
+    "knobs": {
+     "Drive": 55,
+     "Octave": 0,
+     "Envelope": 85,
+     "Env Q": 70,
+     "Level": -6
+    }
+   },
+   {
+    "algorithm": "Room",
+    "mix": 20,
+    "knobs": {
+     "Decay": 0.8
+    }
+   }
+  ]
+ },
+ {
+  "name": "Stone Morello",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "CrushStatn",
+    "mix": 100,
+    "knobs": {
+     "Drive": 75,
+     "Sag": 20,
+     "Comp": 50,
+     "Tone": 55
+    }
+   },
+   {
+    "algorithm": "Room",
+    "mix": 20,
+    "knobs": {
+     "Decay": 0.8
+    }
+   }
+  ]
+ },
+ {
+  "name": "Sticky Thumb",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Aggravat3",
+    "mix": 100,
+    "knobs": {
+     "Drive": 8,
+     "Octave": 0,
+     "Envelope": 85,
+     "Env Q": 70,
+     "Level": -6
+    }
+   },
+   {
+    "algorithm": "Room",
+    "mix": 20,
+    "knobs": {
+     "Decay": 0.8
+    }
+   }
+  ]
+ },
+ {
+  "name": "Dream Alley",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "WeedWackr",
+    "mix": 100,
+    "knobs": {
+     "Drive": 60,
+     "Tone": 50
+    }
+   },
+   {
+    "algorithm": "Chorus",
+    "mix": 50,
+    "knobs": {
+     "Depth": 50,
+     "Rate": 0.7
+    }
+   }
+  ]
+ },
+ {
+  "name": "Slasher Distortion",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "CrushStatn",
+    "mix": 100,
+    "knobs": {
+     "Drive": 75,
+     "Sag": 20,
+     "Comp": 50,
+     "Tone": 55
+    }
+   },
+   {
+    "algorithm": "Blackhol3",
+    "mix": 35,
+    "knobs": {
+     "Size": 80,
+     "Decay": 32.475,
+     "Mod": 30
+    }
+   }
+  ]
+ },
+ {
+  "name": "Dream Sequence W",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "Chorus",
+    "mix": 50,
+    "knobs": {
+     "Depth": 50,
+     "Rate": 0.7
+    }
+   },
+   {
+    "algorithm": "Digital Delay",
+    "mix": 40,
+    "knobs": {
+     "Time": 284.0,
+     "Feedback": 33.10734463276836
+    }
+   }
+  ]
+ },
+ {
+  "name": "Gentle Arps",
+  "parallel": false,
+  "slots": [
+   {
+    "algorithm": "HarPeggiatr",
+    "mix": 60,
+    "knobs": {
+     "Rate": 3.9984006397441023
+    }
+   },
+   {
+    "algorithm": "ShimmrVerb",
+    "mix": 35,
+    "knobs": {
+     "Decay": 9.1,
+     "Pitch A": 12,
+     "Pitch B": 19,
+     "Shimmer": 45
+    }
+   }
+  ]
+ }
+]
