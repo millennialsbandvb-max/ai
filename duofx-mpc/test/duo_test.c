@@ -18,6 +18,14 @@ enum { P_ALGO, P_OPEN, P_MIX, P_K, P_SLOT = 20, ROUTING = 40, OUTPUT = 41 };
 #define FS 44100
 #define N 128
 static int failures, nalgo;
+typedef struct { int32_t type, byteSize, deltaFrames, flags, noteLength, noteOffset; unsigned char midiData[4];
+                 char detune, noteOffVelocity, reserved1, reserved2; } VstMidiEvent;
+typedef struct { int32_t numEvents; intptr_t reserved; VstMidiEvent *events[2]; } VstEvents;
+static void send_midi(AEffect *e, int a, int b, int c) {
+    VstMidiEvent m = {1, (int32_t)sizeof m, 0, 0, 0, 0, {(unsigned char)a, (unsigned char)b, (unsigned char)c, 0}, 0, 0, 0, 0};
+    VstEvents ev = {1, 0, {&m, NULL}};
+    e->dispatcher(e, 25, 0, 0, &ev, 0);
+}
 static char names[64][64];
 #define CHECK(c, ...) do { if (!(c)) { printf("  FAIL  "); printf(__VA_ARGS__); printf("\n"); failures++; } } while (0)
 
@@ -330,6 +338,39 @@ int main(int argc, char **argv) {
             printf("  programs: %d played, %d bad\n", n, bad);
             CHECK(n >= 20 && !bad, "the programs");
             CHECK(routed, "Floating in Space didn't load two Blackhol3s in parallel");
+            e->dispatcher(e, effClose, 0, 0, NULL, 0);
+        }
+        {   /* MIDI: CC 81 bypasses A (the dry passes), CC 84 / Program Change load programs, CC 86 steps A's preset */
+            AEffect *e = one("Octaver", 1.0f);
+            set_by_text(e, 0, "Dry", "0%");
+            hz_in = 440;
+            float peak;
+            render(e, 2, g_sine, &peak);
+            const double before = tone_level(buf, FS, 2 * FS, 440);
+            send_midi(e, 0xb0, 81, 127);
+            render(e, 2, g_sine, &peak);
+            const double after = tone_level(buf, FS, 2 * FS, 440);
+            char t[64] = {0};
+            e->dispatcher(e, effGetParamDisplay, 52, 0, t, 0);
+            printf("  MIDI CC 81 = 127: A Bypass \"%s\", 440 Hz %.3f -> %.3f\n", t, before, after);
+            CHECK(!strcmp(t, "Bypassed") && after > 5 * before + 0.05, "CC 81 didn't bypass slot A");
+            send_midi(e, 0xb0, 81, 0);
+            e->dispatcher(e, effGetParamDisplay, 52, 0, t, 0);
+            CHECK(!strcmp(t, "On"), "CC 81 = 0 didn't turn slot A back on");
+            send_midi(e, 0xc0, 3, 0);
+            char p1[64] = {0}, p2[64] = {0};
+            e->dispatcher(e, effGetParamDisplay, 48, 0, p1, 0);
+            send_midi(e, 0xb0, 84, 127); send_midi(e, 0xb0, 84, 0);
+            e->dispatcher(e, effGetParamDisplay, 48, 0, p2, 0);
+            printf("  MIDI Program Change 3: \"%s\", then CC 84: \"%s\"\n", p1, p2);
+            CHECK(strcmp(p1, "-") && strcmp(p2, "-") && strcmp(p1, p2), "Program Change / CC 84 didn't load programs");
+            char a1[64] = {0}, a2[64] = {0};
+            send_midi(e, 0xb0, 86, 127); send_midi(e, 0xb0, 86, 0);
+            e->dispatcher(e, effGetParamDisplay, 42, 0, a1, 0);
+            send_midi(e, 0xb0, 86, 127);
+            e->dispatcher(e, effGetParamDisplay, 42, 0, a2, 0);
+            printf("  MIDI CC 86: A preset \"%s\", then \"%s\"\n", a1, a2);
+            CHECK(strcmp(a1, "-") && strcmp(a1, a2), "CC 86 didn't step A's preset");
             e->dispatcher(e, effClose, 0, 0, NULL, 0);
         }
         {   /* PtchFuzz: both voices an octave down, all pitch, little fuzz: the note an octave down */

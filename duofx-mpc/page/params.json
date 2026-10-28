@@ -51,6 +51,9 @@
     {"key": "b_preset_next", "name": "B Preset >", "options": ["Off", "On"], "momentary": true},
     {"key": "program", "name": "Program", "min": 0, "max": 1, "display": "string", "type": "stepper"},
     {"key": "program_prev", "name": "Program <", "options": ["Off", "On"], "momentary": true},
-    {"key": "program_next", "name": "Program >", "options": ["Off", "On"], "momentary": true}
+    {"key": "program_next", "name": "Program >", "options": ["Off", "On"], "momentary": true},
+    {"key": "bypass", "name": "Bypass", "options": ["On", "Bypassed"]},
+    {"key": "a_bypass", "name": "A Bypass", "options": ["On", "Bypassed"]},
+    {"key": "b_bypass", "name": "B Bypass", "options": ["On", "Bypassed"]}
   ]
 }

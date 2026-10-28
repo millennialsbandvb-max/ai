@@ -156,6 +156,10 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   test file for the user to record through the pedal (not done yet). That data also reshaped PtchFuzz (fuzz
   on two pitch voices + delay), Crystalz (delays to 2.5 s, a Reverb knob), Blackhol3 (Predelay), Shimmer (voices
   +4/-7 cents) and Hall/SP2O16 predelay (to 1 s).
+  Bypass (params 51..53: both, A, B; a bypassed slot hears nothing, its tail rings out, the dry passes) and MIDI
+  (effProcessEvents, canDo receiveVstMidiEvent; any channel): Program Change n = program n+1, CC 80/81/82 bypass
+  both/A/B (64+ = bypassed), CC 83/84 program down/up, 85/86 A preset, 87/88 B preset (on a press). Untested on the
+  device: whether MPC sends MIDI to an effect plugin at all (the bypasses are also params for MPC's MIDI Learn).
   Per slot a Preset stepper (params 42..47, after Output): < > step within the algorithm and on; an exact value (a
   project loading) only restores the name, never the knobs. The test plays every preset (8 s sound, 8 s silence). Each slot = algorithm (a `popup`, 56 options incl. Off; its `__open` flag param is ours to
   clear on a pick) + Mix + 8 knobs whose meaning comes from `ALGOS[].k[]` (name, map, range, default; choosing an

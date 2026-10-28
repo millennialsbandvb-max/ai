@@ -250,8 +250,16 @@ static const Algo ALGOS[kNumAlgos] = {
 
 /* ==== parameters (the order is the VST index: saved projects and Q-Links refer to them by it) ============== */
 enum { P_ALGO, P_OPEN, P_MIX, P_K, P_NAME = P_K + NK, P_INFO = P_NAME + NK, P_SLOT };   /* per slot */
-enum { kRouting = 2 * P_SLOT, kOutput, kPresetBase, kProgBase = kPresetBase + 6, kNumParams = kProgBase + 3 };
-/* per slot: Preset, Preset <, Preset >; then Program, Program <, Program > (both slots and the routing) */
+enum { kRouting = 2 * P_SLOT, kOutput, kPresetBase, kProgBase = kPresetBase + 6, kBypass = kProgBase + 3, kBypassA, kBypassB,
+       kNumParams };
+/* per slot: Preset, Preset <, Preset >; then Program, Program <, Program > (both slots and the routing); then
+ * Bypass (both), A Bypass, B Bypass. A bypassed slot hears nothing but lets its tail ring out, the dry sound passes. */
+
+/* MIDI (any channel), as on a pedal board: Program Change n loads program n+1; CC 80 / 81 / 82 bypass both / A / B
+ * (64-127 bypassed, 0-63 on); CC 83 / 84 program down / up, CC 85 / 86 A preset down / up, CC 87 / 88 B preset
+ * down / up (each on a value of 64 or more, after one below: a footswitch press). The bypasses are also plain
+ * parameters, for MPC's own MIDI Learn and Q-Links. */
+enum { CC_BYPASS = 80, CC_PROG_DOWN = 83, CC_PRESET_A_DOWN = 85, CC_PRESET_B_DOWN = 87, CC_LAST = 88 };
 
 static int option_of(float v, int n) { return (int)lrintf((v < 0 ? 0 : v > 1 ? 1 : v) * (float)(n - 1)); }
 static float lerp(float a, float b, float t) { return a + (b - a) * t; }
@@ -1413,6 +1421,8 @@ typedef struct {
     volatile uint64_t automate;     /* parameters to report back to MPC (bit = index), sent from process() */
     int preset[2];                  /* the preset each slot last loaded (-1: none) */
     int program;                    /* the program last loaded (-1: none) */
+    float byp_s[2];                 /* each slot's input, smoothed: 1 playing, 0 bypassed */
+    unsigned char cc_high[128];     /* the switch CCs' last state (a press = a value of 64+ after a lower one) */
 } Plugin;
 
 static void copy_str(void *dst, const char *src, size_t max) { const size_t n = strnlen(src, max - 1); memcpy(dst, src, n); ((char *)dst)[n] = 0; }
@@ -1504,6 +1514,7 @@ static void setParameter(AEffect *e, int32_t i, float v) {
     v = clampf(v, 0, 1);
     if (i == kRouting) { s->norm[i] = (float)option_of(v, 2); s->update_display = 1; return; }
     if (i == kOutput) { s->norm[i] = v; return; }
+    if (i >= kBypass) { s->norm[i] = v > 0.5f ? 1 : 0; s->update_display = 1; return; }
     if (i >= kProgBase) {   /* as a preset below, over the programs */
         const int w = i - kProgBase;
         if (w) {
@@ -1592,6 +1603,7 @@ static void fmt_knob(const Knob *k, float n, char *t) {
 static void param_display(Plugin *s, int i, char *t) {
     if (i == kRouting) { snprintf(t, 96, "%s", s->norm[i] > 0.5f ? "Parallel" : "Series"); return; }
     if (i == kOutput) { snprintf(t, 96, "%+.1f dB", lerp(-24, 12, s->norm[i])); return; }
+    if (i >= kBypass) { snprintf(t, 96, "%s", s->norm[i] > 0.5f ? "Bypassed" : "On"); return; }
     if (i >= kProgBase) {
         const int w = i - kProgBase;
         if (w) snprintf(t, 96, "%s", w == 1 ? "<" : ">");
@@ -1640,20 +1652,24 @@ static void process(AEffect *e, float **in, float **out, int32_t n) {
         for (int j = 0; j < NK; j++) sl->n[j] = s->norm[k * P_SLOT + P_K + j];
     }
     const int parallel = s->norm[kRouting] > 0.5f;
+    const float byp_t[2] = {s->norm[kBypass] > 0.5f || s->norm[kBypassA] > 0.5f ? 0.0f : 1.0f,
+                            s->norm[kBypass] > 0.5f || s->norm[kBypassB] > 0.5f ? 0.0f : 1.0f};
     const float og = db(lerp(-24, 12, s->norm[kOutput]));
     for (int k = 0; k < n; k++) {
         float l = il ? il[k] : 0, r = ir ? ir[k] : 0;
         if (!finite_bits(l) || l > 8 || l < -8) l = 0;   /* only clean audio in */
         if (!finite_bits(r) || r > 8 || r < -8) r = 0;
         float yl, yr;
+        for (int c = 0; c < 2; c++) s->byp_s[c] += 0.003f * (byp_t[c] - s->byp_s[c]);
         if (!parallel) {
             yl = l; yr = r;
             for (int c = 0; c < 2; c++) {
                 Slot *sl = &s->slot[c];
                 if (sl->algo == A_OFF) continue;
                 float wl, wr;
-                slot_run(sl, yl, yr, &wl, &wr);
-                const float m = sl->mix_s, dg = m < 0.5f ? 1 : 2 * (1 - m), wg = m > 0.5f ? 1 : 2 * m;
+                const float g = s->byp_s[c];   /* (bypassed: it hears nothing, its tail rings on, the dry passes) */
+                slot_run(sl, yl * g, yr * g, &wl, &wr);
+                const float m = sl->mix_s, dg = lerp(1, m < 0.5f ? 1 : 2 * (1 - m), g), wg = m > 0.5f ? 1 : 2 * m;
                 yl = yl * dg + wl * wg;
                 yr = yr * dg + wr * wg;
             }
@@ -1663,9 +1679,10 @@ static void process(AEffect *e, float **in, float **out, int32_t n) {
                 Slot *sl = &s->slot[c];
                 if (sl->algo == A_OFF) { dg += 0.5f; continue; }
                 float wl, wr;
-                slot_run(sl, l, r, &wl, &wr);
+                const float g = s->byp_s[c];
+                slot_run(sl, l * g, r * g, &wl, &wr);
                 const float m = sl->mix_s;
-                dg += 0.5f * (m < 0.5f ? 1 : 2 * (1 - m));
+                dg += 0.5f * lerp(1, m < 0.5f ? 1 : 2 * (1 - m), g);
                 const float wg = m > 0.5f ? 1 : 2 * m;
                 sum_l += wl * wg; sum_r += wr * wg;
             }
@@ -1688,6 +1705,26 @@ done:
     return;
 }
 
+typedef struct { int32_t type, byteSize, deltaFrames, flags, noteLength, noteOffset; unsigned char midiData[4];
+                 char detune, noteOffVelocity, reserved1, reserved2; } VstMidiEvent;
+typedef struct { int32_t numEvents; intptr_t reserved; VstMidiEvent *events[2]; } VstEvents;
+enum { effProcessEvents = 25 };
+
+static void set_reported(Plugin *s, int i, float v) { s->norm[i] = v; s->automate |= 1ull << i; s->update_display = 1; }
+static void midi(Plugin *s, const unsigned char *m) {   /* (from the host's thread, as setParameter) */
+    const int st = m[0] & 0xf0;
+    if (st == 0xc0) { if (m[1] < NPROGRAMS) load_program(s, m[1]); return; }
+    if (st != 0xb0 || m[1] < CC_BYPASS || m[1] > CC_LAST) return;
+    const int cc = m[1], high = m[2] >= 64, press = high && !s->cc_high[cc];
+    s->cc_high[cc] = (unsigned char)high;
+    if (cc < CC_PROG_DOWN) { set_reported(s, kBypass + cc - CC_BYPASS, (float)high); return; }
+    if (!press) return;
+    if (cc < CC_PRESET_A_DOWN) {
+        const int dir = cc == CC_PROG_DOWN ? -1 : 1;
+        load_program(s, s->program < 0 ? (dir < 0 ? NPROGRAMS - 1 : 0) : (s->program + dir + NPROGRAMS) % NPROGRAMS);
+    } else step_preset(s, cc >= CC_PRESET_B_DOWN, (cc - CC_PRESET_A_DOWN) % 2 ? 1 : -1);
+}
+
 static const char *const SLOT_PARAM_NAMES[P_SLOT] = {"Algorithm", "Algorithm List", "Mix", "Knob 1", "Knob 2", "Knob 3",
     "Knob 4", "Knob 5", "Knob 6", "Knob 7", "Knob 8", "Name 1", "Name 2", "Name 3", "Name 4", "Name 5", "Name 6",
     "Name 7", "Name 8", "Info"};
@@ -1702,7 +1739,8 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
             char t[40];
             const int w = idx % P_SLOT;
             const Knob *kn = idx < kRouting && w >= P_K && w < P_K + NK ? &ALGOS[algo_of(s, idx / P_SLOT)].k[w - P_K] : NULL;
-            if (idx >= kProgBase) snprintf(t, sizeof t, "Program%s", idx == kProgBase ? "" : idx == kProgBase + 1 ? " <" : " >");
+            if (idx >= kBypass) snprintf(t, sizeof t, "%sBypass", idx == kBypass ? "" : idx == kBypassA ? "A " : "B ");
+            else if (idx >= kProgBase) snprintf(t, sizeof t, "Program%s", idx == kProgBase ? "" : idx == kProgBase + 1 ? " <" : " >");
             else if (idx >= kPresetBase) snprintf(t, sizeof t, "%c Preset%s", (idx - kPresetBase) / 3 ? 'B' : 'A',
                                              (idx - kPresetBase) % 3 == 0 ? "" : (idx - kPresetBase) % 3 == 1 ? " <" : " >");
             else if (idx == kRouting) snprintf(t, sizeof t, "Routing");
@@ -1726,7 +1764,14 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
     case effSetSampleRate: if (opt > 1000 && fabsf(opt - s->fs) > 0.5f) setup(s, opt); return 1;
     case effSetBlockSize: return 1;
     case effMainsChanged: if (val) { slot_clear(&s->slot[0]); slot_clear(&s->slot[1]); } return 1;
-    case effCanDo: return -1;
+    case effProcessEvents: {
+        const VstEvents *ev = (const VstEvents *)p;
+        for (int k = 0; ev && k < ev->numEvents; k++)
+            if (ev->events[k] && ev->events[k]->type == 1) midi(s, ev->events[k]->midiData);
+        return 1;
+    }
+    case effCanDo:
+        return p && (!strcmp((const char *)p, "receiveVstEvents") || !strcmp((const char *)p, "receiveVstMidiEvent")) ? 1 : -1;
     default: return 0;
     }
 }
@@ -1745,6 +1790,7 @@ __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallbac
     s->norm[kOutput] = 24.0f / 36;                                       /* 0 dB */
     s->preset[0] = s->preset[1] = -1;
     s->program = -1;
+    s->byp_s[0] = s->byp_s[1] = 1;
     s->out_s = 1;
     setup(s, 44100);
     AEffect *e = &s->fx;
@@ -1795,7 +1841,10 @@ int main(void) {
     }
     printf("    {\"key\": \"program\", \"name\": \"Program\", \"min\": 0, \"max\": 1, \"display\": \"string\", \"type\": \"stepper\"},\n");
     printf("    {\"key\": \"program_prev\", \"name\": \"Program <\", \"options\": [\"Off\", \"On\"], \"momentary\": true},\n");
-    printf("    {\"key\": \"program_next\", \"name\": \"Program >\", \"options\": [\"Off\", \"On\"], \"momentary\": true}\n");
+    printf("    {\"key\": \"program_next\", \"name\": \"Program >\", \"options\": [\"Off\", \"On\"], \"momentary\": true},\n");
+    printf("    {\"key\": \"bypass\", \"name\": \"Bypass\", \"options\": [\"On\", \"Bypassed\"]},\n");
+    printf("    {\"key\": \"a_bypass\", \"name\": \"A Bypass\", \"options\": [\"On\", \"Bypassed\"]},\n");
+    printf("    {\"key\": \"b_bypass\", \"name\": \"B Bypass\", \"options\": [\"On\", \"Bypassed\"]}\n");
     printf("  ]\n}\n");
     return 0;
 }
