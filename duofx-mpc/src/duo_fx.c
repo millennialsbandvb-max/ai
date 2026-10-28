@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "vst2.h"
+#include "presets.h"
 
 #define PI 3.14159265358979f
 #define NK 8                        /* knobs per slot */
@@ -249,7 +250,7 @@ static const Algo ALGOS[kNumAlgos] = {
 
 /* ==== parameters (the order is the VST index: saved projects and Q-Links refer to them by it) ============== */
 enum { P_ALGO, P_OPEN, P_MIX, P_K, P_NAME = P_K + NK, P_INFO = P_NAME + NK, P_SLOT };   /* per slot */
-enum { kRouting = 2 * P_SLOT, kOutput, kNumParams };
+enum { kRouting = 2 * P_SLOT, kOutput, kPresetBase, kNumParams = kPresetBase + 6 };   /* per slot: Preset, Preset <, Preset > */
 
 static int option_of(float v, int n) { return (int)lrintf((v < 0 ? 0 : v > 1 ? 1 : v) * (float)(n - 1)); }
 static float lerp(float a, float b, float t) { return a + (b - a) * t; }
@@ -771,13 +772,13 @@ static void run_algo(Slot *s, const float in[2], float out[2]) {
             float y = 0;
             int n = 0;
             for (int h = 0; h < 3; h++) if (m & (1 << h)) { y += line_read(&s->dl[ch], base * (float)(h + 1) + mod); n++; }
-            if (n > 1) y *= 0.7f;
             y = hp(&s->op[ch][1], lp(&s->op[ch][0], y, c[20]), c[21]);
             if (tape) y += (rnd(s) - 0.5f) * PC(6) * 0.003f;
-            out[ch] = y;
+            out[ch] = n > 1 ? y * 0.7f : y;
             const float drive = 1 + sat * 3;
-            /* small-signal loop gain = Feedback x 1.05: past ~95% it runs away into the saturation, like a real one */
-            line_push(&s->dl[ch], in[ch] + tanh_fast(y * PC(tape ? 1 : 2) * 1.05f * drive) / drive);
+            /* small-signal loop gain = Feedback x 1.05 (the heads' average goes back, not their sum): past ~95% it
+             * runs away into the saturation, like a real one */
+            line_push(&s->dl[ch], in[ch] + tanh_fast(y / (float)n * PC(tape ? 1 : 2) * 1.05f * drive) / drive);
         }
         break;
     }
@@ -1399,6 +1400,7 @@ typedef struct {
     float out_s;
     volatile int update_display;
     volatile uint64_t automate;     /* parameters to report back to MPC (bit = index), sent from process() */
+    int preset[2];                  /* the preset each slot last loaded (-1: none) */
 } Plugin;
 
 static void copy_str(void *dst, const char *src, size_t max) { const size_t n = strnlen(src, max - 1); memcpy(dst, src, n); ((char *)dst)[n] = 0; }
@@ -1418,6 +1420,40 @@ static void load_defaults(Plugin *s, int k, int algo) {   /* an algorithm was ch
     }
 }
 
+/* presets (presets.h): a preset sets the slot's algorithm, Mix and knobs */
+static void load_preset(Plugin *s, int k, int idx) {
+    const int base = k * P_SLOT;
+    s->norm[base + P_ALGO] = (float)PRESETS[idx].algo / (float)(kNumAlgos - 1);
+    load_defaults(s, k, PRESETS[idx].algo);   /* (names, info, and every knob reported back) */
+    s->norm[base + P_MIX] = PRESETS[idx].mix;
+    for (int i = 0; i < NK; i++) s->norm[base + P_K + i] = PRESETS[idx].k[i];
+    s->preset[k] = idx;
+    s->norm[kPresetBase + k * 3] = (float)idx / (float)(NPRESETS - 1);
+    s->automate |= 1ull << (base + P_ALGO) | 1ull << (kPresetBase + k * 3);
+    s->update_display = 1;
+}
+/* the next / previous preset: within the slot's algorithm and on into the next one's; after the algorithm was
+ * changed by hand, the first (or last) preset of the new one */
+static void step_preset(Plugin *s, int k, int dir) {
+    const int algo = algo_of(s, k), cur = s->preset[k];
+    int idx;
+    if (cur >= 0 && PRESETS[cur].algo == algo) idx = (cur + dir + NPRESETS) % NPRESETS;
+    else {
+        idx = -1;
+        for (int i = 0; i < NPRESETS; i++) {
+            const int j = dir > 0 ? i : NPRESETS - 1 - i;
+            if (PRESETS[j].algo == algo) { idx = j; break; }
+        }
+        if (idx < 0)   /* no presets for this algorithm: the nearest algorithm's */
+            for (int i = 0; i < NPRESETS && idx < 0; i++) {
+                const int j = dir > 0 ? i : NPRESETS - 1 - i;
+                if (dir > 0 ? PRESETS[j].algo > algo : PRESETS[j].algo < algo) idx = j;
+            }
+        if (idx < 0) idx = dir > 0 ? 0 : NPRESETS - 1;
+    }
+    load_preset(s, k, idx);
+}
+
 static int setup(Plugin *s, float fs) {
     s->ready = 0;
     for (int k = 0; k < 2; k++) slot_free(&s->slot[k]);
@@ -1435,6 +1471,23 @@ static void setParameter(AEffect *e, int32_t i, float v) {
     v = clampf(v, 0, 1);
     if (i == kRouting) { s->norm[i] = (float)option_of(v, 2); s->update_display = 1; return; }
     if (i == kOutput) { s->norm[i] = v; return; }
+    if (i >= kPresetBase) {
+        const int k = (i - kPresetBase) / 3, w = (i - kPresetBase) % 3;
+        if (w) {   /* < or >: a momentary button */
+            if (v > 0.5f) step_preset(s, k, w == 1 ? -1 : 1);
+            s->norm[i] = 0;
+            s->automate |= 1ull << i;   /* (its light goes out) */
+            return;
+        }
+        /* the preset itself: a small move (a Q-Link nudge) steps one; an exact value (a project being loaded)
+         * only shows which preset it was, without overwriting the knobs saved with it */
+        const float pos = v * (float)(NPRESETS - 1), cur = s->preset[k] >= 0 ? (float)s->preset[k] : s->norm[i] * (float)(NPRESETS - 1);
+        if (fabsf(pos - roundf(pos)) > 0.001f && fabsf(pos - cur) < 1) { step_preset(s, k, pos > cur ? 1 : -1); return; }
+        s->preset[k] = (int)lrintf(pos);
+        s->norm[i] = v;
+        s->update_display = 1;
+        return;
+    }
     const int k = i / P_SLOT, w = i % P_SLOT;
     if (w >= P_NAME) return;   /* read-only */
     if (w == P_OPEN) { s->norm[i] = v > 0.5f ? 1 : 0; return; }
@@ -1488,6 +1541,13 @@ static void fmt_knob(const Knob *k, float n, char *t) {
 static void param_display(Plugin *s, int i, char *t) {
     if (i == kRouting) { snprintf(t, 96, "%s", s->norm[i] > 0.5f ? "Parallel" : "Series"); return; }
     if (i == kOutput) { snprintf(t, 96, "%+.1f dB", lerp(-24, 12, s->norm[i])); return; }
+    if (i >= kPresetBase) {
+        const int k = (i - kPresetBase) / 3, w = (i - kPresetBase) % 3, p = s->preset[k];
+        if (w) snprintf(t, 96, "%s", w == 1 ? "<" : ">");
+        else if (p >= 0 && p < NPRESETS && PRESETS[p].algo == algo_of(s, k)) snprintf(t, 96, "%s", PRESETS[p].name);
+        else snprintf(t, 96, "-");
+        return;
+    }
     const int k = i / P_SLOT, w = i % P_SLOT;
     const Algo *a = &ALGOS[algo_of(s, k)];
     if (w == P_ALGO) snprintf(t, 96, "%s", a->name);
@@ -1585,7 +1645,9 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
             char t[40];
             const int w = idx % P_SLOT;
             const Knob *kn = idx < kRouting && w >= P_K && w < P_K + NK ? &ALGOS[algo_of(s, idx / P_SLOT)].k[w - P_K] : NULL;
-            if (idx == kRouting) snprintf(t, sizeof t, "Routing");
+            if (idx >= kPresetBase) snprintf(t, sizeof t, "%c Preset%s", (idx - kPresetBase) / 3 ? 'B' : 'A',
+                                             (idx - kPresetBase) % 3 == 0 ? "" : (idx - kPresetBase) % 3 == 1 ? " <" : " >");
+            else if (idx == kRouting) snprintf(t, sizeof t, "Routing");
             else if (idx == kOutput) snprintf(t, sizeof t, "Output");
             else if (kn) snprintf(t, sizeof t, "%s", kn->name ? kn->name : "-");   /* the algorithm's own name for it */
             else if (w == P_MIX) snprintf(t, sizeof t, "Mix");
@@ -1623,6 +1685,7 @@ __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallbac
     s->automate = 0;
     s->norm[kRouting] = 0;
     s->norm[kOutput] = 24.0f / 36;                                       /* 0 dB */
+    s->preset[0] = s->preset[1] = -1;
     s->out_s = 1;
     setup(s, 44100);
     AEffect *e = &s->fx;
@@ -1664,7 +1727,35 @@ int main(void) {
         printf("    {\"key\": \"%c_info\", \"name\": \"%c Info\", \"min\": 0, \"max\": 1, \"display\": \"string\", \"type\": \"stepper\"},\n", s, S);
     }
     printf("    {\"key\": \"routing\", \"name\": \"Routing\", \"options\": [\"Series\", \"Parallel\"]},\n");
-    printf("    {\"key\": \"output\", \"name\": \"Output\", \"min\": -24, \"max\": 12, \"default\": 0, \"unit\": \"dB\"}\n  ]\n}\n");
+    printf("    {\"key\": \"output\", \"name\": \"Output\", \"min\": -24, \"max\": 12, \"default\": 0, \"unit\": \"dB\"},\n");
+    for (int k = 0; k < 2; k++) {
+        const char S = k ? 'B' : 'A', s = k ? 'b' : 'a';
+        printf("    {\"key\": \"%c_preset\", \"name\": \"%c Preset\", \"min\": 0, \"max\": 1, \"display\": \"string\", \"type\": \"stepper\"},\n", s, S);
+        printf("    {\"key\": \"%c_preset_prev\", \"name\": \"%c Preset <\", \"options\": [\"Off\", \"On\"], \"momentary\": true},\n", s, S);
+        printf("    {\"key\": \"%c_preset_next\", \"name\": \"%c Preset >\", \"options\": [\"Off\", \"On\"], \"momentary\": true}%s\n", s, S, k ? "" : ",");
+    }
+    printf("  ]\n}\n");
+    return 0;
+}
+#endif
+
+#ifdef DUO_FX_TABLE
+/* the algorithm table as JSON, for tools/presets.py:  cc -DDUO_FX_TABLE ... && ./a.out > table.json */
+int main(void) {
+    printf("[\n");
+    for (int a = 0; a < kNumAlgos; a++) {
+        printf("  {\"name\": \"%s\", \"group\": %d, \"mix\": %g, \"knobs\": [", ALGOS[a].name, ALGOS[a].group, ALGOS[a].mix);
+        for (int i = 0; i < NK; i++) {
+            const Knob *k = &ALGOS[a].k[i];
+            if (!k->name) { printf("%snull", i ? ", " : ""); continue; }
+            printf("%s{\"name\": \"%s\", \"map\": %d, \"lo\": %g, \"hi\": %g, \"def\": %g, \"unit\": \"%s\", \"choices\": [", i ? ", " : "",
+                   k->name, k->map, k->lo, k->hi, k->def, k->unit);
+            for (int c = 0; k->map == M_CHOICE && c <= (int)k->hi; c++) printf("%s\"%s\"", c ? ", " : "", k->choices[c]);
+            printf("]}");
+        }
+        printf("]}%s\n", a < kNumAlgos - 1 ? "," : "");
+    }
+    printf("]\n");
     return 0;
 }
 #endif

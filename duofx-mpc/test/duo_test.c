@@ -88,6 +88,7 @@ static float g_music(long t) {
     for (int h = 1; h <= 5; h++) v += sinf(2 * (float)M_PI * f * (float)h * (float)u / FS) / (float)h;
     return 0.35f * env * v + 0.01f * noise();
 }
+static float g_music8(long t) { return t < 8 * FS ? g_music(t) : 0; }   /* 8 s of it, then silence */
 static float g_zero(long t) { (void)t; return 0; }
 static float g_impulse(long t) { return t == 0 ? 1.0f : 0; }
 static float hz_in;
@@ -240,6 +241,58 @@ int main(int argc, char **argv) {
             CHECK(!strcmp(t, "375 ms"), "Digital Delay didn't load its default Time");
             e->dispatcher(e, effGetParamDisplay, 11, 0, t, 0);
             CHECK(!strcmp(t, "Time"), "knob 1's name isn't Time for Digital Delay");
+            e->dispatcher(e, effClose, 0, 0, NULL, 0);
+        }
+
+        {   /* presets: > on slot A loads the first of its algorithm's, a project's saved index doesn't touch knobs */
+            AEffect *e = make();
+            char t[64] = {0}, al[64] = {0};
+            e->dispatcher(e, effGetParamDisplay, P_ALGO, 0, al, 0);
+            e->setParameter(e, 44, 1);   /* A Preset > */
+            e->dispatcher(e, effGetParamDisplay, 42, 0, t, 0);
+            char al2[64] = {0};
+            e->dispatcher(e, effGetParamDisplay, P_ALGO, 0, al2, 0);
+            printf("  presets: %s, > gives \"%s\" (algorithm still %s)\n", al, t, al2);
+            CHECK(strcmp(t, "-") && !strcmp(al, al2), "Preset > didn't load one of the algorithm's presets");
+            const float k1 = e->getParameter(e, P_K);
+            e->setParameter(e, P_K, 0.123f);
+            e->setParameter(e, 42, e->getParameter(e, 42));   /* (as a project load sets it) */
+            CHECK(fabsf(e->getParameter(e, P_K) - 0.123f) < 1e-6f, "setting the preset index overwrote a knob");
+            (void)k1;
+            e->dispatcher(e, effClose, 0, 0, NULL, 0);
+        }
+        {   /* every preset: 8 s of sound, 8 s of silence: finite, under the ceiling, dying away (unless it holds) */
+            AEffect *e = make();
+            algo(e, 1, find("Off"));
+            algo(e, 0, 0);
+            int n = 0, bad = 0;
+            char first[64] = "", t[64];
+            for (;;) {
+                e->setParameter(e, 44, 1);
+                e->dispatcher(e, effGetParamDisplay, 42, 0, t, 0);
+                if (!strcmp(t, first)) break;
+                if (!n) strcpy(first, t);
+                n++;
+                e->dispatcher(e, effMainsChanged, 0, 1, NULL, 0);   /* (each from silence) */
+                float peak;
+                const int ok = render(e, 16, g_music8, &peak);
+                char al[64] = {0};
+                e->dispatcher(e, effGetParamDisplay, P_ALGO, 0, al, 0);
+                const double end = rms(buf, 15 * FS, 16 * FS), before = rms(buf, 12 * FS, 13 * FS);
+                int holds = 0;   /* a Decay / Feedback at full: meant to hold */
+                for (int k = 0; k < 8; k++) {
+                    char kn[64] = {0};
+                    e->dispatcher(e, effGetParamName, P_K + k, 0, kn, 0);
+                    if ((!strcmp(kn, "Decay") || !strcmp(kn, "Feedback")) && e->getParameter(e, P_K + k) > 0.999f) holds = 1;
+                }
+                if (!ok || peak >= 3.99f || !(holds || end < 0.003 || end < 0.85 * before)) {
+                    printf("  FAIL  preset %s / %s: %s (peak %.2f, end %.4f, before %.4f)\n", al, t, !ok ? "not finite" : peak >= 3.99f ? "hits the ceiling" : "doesn't die away", peak, end, before);
+                    bad++;
+                }
+                if (n > 2000) break;
+            }
+            printf("  presets: %d played, %d bad\n", n, bad);
+            CHECK(n > 500 && !bad, "the presets");
             e->dispatcher(e, effClose, 0, 0, NULL, 0);
         }
 

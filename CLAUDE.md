@@ -139,7 +139,12 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   quality is only set when not already tiny (setting it every time made it rebuffer). run.sh: autoplay needs a gesture.
 - **Duo FX** (v2, 55 algorithms): our own versions of the H90's algorithm types. The user asked for near-miss
   names for personal use (Blackhol3, Crystalz, UltraTp, ...; the test finds algorithms by these names). Algorithm 41
-  of 56 options, TricraChrs, is the Tri Chorus plugin's sound (Vibrato forces Mix to 100%). Each slot = algorithm (a `popup`, 56 options incl. Off; its `__open` flag param is ours to
+  of 56 options, TricraChrs, is the Tri Chorus plugin's sound (Vibrato forces Mix to 100%).
+  Presets: 655 of our versions of the H90's factory algorithm presets (`src/presets.h`, made by
+  `presets/make_presets.py` from `presets/h90_preset_names.json`, which `presets/parse_manual.py` pulled from the H90
+  manual's Algorithm Guide: names only, so settings are guessed from each name over the algorithm's defaults).
+  Per slot a Preset stepper (params 42..47, after Output): < > step within the algorithm and on; an exact value (a
+  project loading) only restores the name, never the knobs. The test plays every preset (8 s sound, 8 s silence). Each slot = algorithm (a `popup`, 56 options incl. Off; its `__open` flag param is ours to
   clear on a pick) + Mix + 8 knobs whose meaning comes from `ALGOS[].k[]` (name, map, range, default; choosing an
   algorithm loads its defaults and reports them with audioMasterAutomate from process()). effGetParamName returns
   the algorithm's knob names: MPC draws knob names live from it (not baked), so they follow the algorithm. The
