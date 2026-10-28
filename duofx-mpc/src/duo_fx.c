@@ -120,9 +120,9 @@ static const Algo ALGOS[kNumAlgos] = {
     [A_CRUSH] = {"CrushStatn", G_DIST, 100, "Drive into compression, with power-supply sag",
         {PCT("Drive", 55), PCT("Sag", 30), PCT("Comp", 40), PCT("Tone", 55), LIN("Bass", -12, 12, 0, "dB"),
          LIN("Level", -24, 6, -6, "dB"), LIN("Gate", -90, -30, -90, "dB"), NONE}},
-    [A_FUZZDLY] = {"PtchFuzz", G_DIST, 100, "Fuzz feeding two detuned delays",
-        {PCT("Fuzz", 60), PCT("Tone", 50), LIN("Level", -24, 6, -6, "dB"), MS("Delay A", 20, 1000, 180),
-         MS("Delay B", 20, 1000, 300), PCT("Feedback", 35), INT("Detune", 0, 50, 12, "c"), PCT("Delay Mix", 40)}},
+    [A_FUZZDLY] = {"PtchFuzz", G_DIST, 100, "Fuzz on two pitch-shifted voices, with a delay",
+        {PCT("Fuzz", 60), PCT("Tone", 50), LIN("Level", -24, 6, -6, "dB"), ST("Pitch A", -12), ST("Pitch B", 12),
+         MS("Delay", 1, 1000, 1), PCT("Feedback", 0), PCT("Pitch Mix", 50)}},
     [A_BANDDRIVE] = {"Sculpt3", G_DIST, 100, "Lows and highs driven separately, then blended",
         {HZ("Split", 100, 2000, 400), PCT("Low Drive", 30), PCT("High Drive", 60), LIN("Low Level", -24, 6, 0, "dB"),
          LIN("High Level", -24, 6, -3, "dB"), HZ("Filter", 1000, 16000, 7000), PCT("Comp", 30), NONE}},
@@ -130,9 +130,9 @@ static const Algo ALGOS[kNumAlgos] = {
         {PCT("Drive", 45), PCT("Tone", 50), LIN("Level", -24, 12, -3, "dB"), HZ("Mid", 400, 1600, 720), LIN("Bass", -12, 6, -3, "dB"),
          CHO("Hard Clip", ONOFF, 0), PCT("Blend", 100), NONE}},
 
-    [A_REVSHIFT] = {"Crystalz", G_PITCH, 45, "Reversed, pitch-shifted delays that cascade upwards",
-        {ST("Pitch A", 12), ST("Pitch B", 7), MS("Delay A", 150, 1500, 500), MS("Delay B", 150, 1500, 750), PCT("Feedback", 45),
-         PCT("Tone", 55), PCT("Mod", 10), PCT("Width", 100)}},
+    [A_REVSHIFT] = {"Crystalz", G_PITCH, 45, "Reversed, pitch-shifted delays into a reverb",
+        {ST("Pitch A", 12), ST("Pitch B", 7), MS("Delay A", 150, 2500, 500), MS("Delay B", 150, 2500, 750), PCT("Feedback", 45),
+         PCT("Tone", 55), PCT("Mod", 10), PCT("Reverb", 30)}},
     [A_DIATONIC] = {"Diatonik", G_PITCH, 50, "Two voices that follow your notes in a key and scale",
         {CHO("Key", KEYS, 0), CHO("Scale", SCALES, 0), CHO("Voice 1", DEGREES, 9), CHO("Voice 2", DEGREES, 11),
          PCT("Level 1", 80), PCT("Level 2", 60), MS("Delay", 1, 500, 1), PCT("Width", 60)}},
@@ -203,7 +203,7 @@ static const Algo ALGOS[kNumAlgos] = {
          PCT("Shimmer", 0), CHO("Shim Pitch", SHIM_PITCHES, 3), CHO("Mode", CHORUS_MODES, 0)}},
 
     [A_HALL] = {"Hall", G_REVERB, 35, "Large, smooth concert hall",
-        {PCT("Size", 65), EXPK("Decay", 0.5f, 20, 3, "s"), MS("Predelay", 1, 300, 20), PCT("Tone", 55), LIN("Low", -12, 6, 0, "dB"),
+        {PCT("Size", 65), EXPK("Decay", 0.5f, 20, 3, "s"), MS("Predelay", 1, 1000, 20), PCT("Tone", 55), LIN("Low", -12, 6, 0, "dB"),
          PCT("Mod", 30), PCT("Early", 30), NONE}},
     [A_ROOM] = {"Room", G_REVERB, 30, "A small to medium room",
         {PCT("Size", 40), EXPK("Decay", 0.2f, 5, 0.8f, "s"), MS("Predelay", 1, 100, 5), PCT("Tone", 50), PCT("Early", 50),
@@ -219,9 +219,9 @@ static const Algo ALGOS[kNumAlgos] = {
          PCT("Mod", 30), NONE}},
     [A_ABYSS] = {"Blackhol3", G_REVERB, 50, "Enormous dark space; full Decay holds forever",
         {PCT("Size", 75), EXPK("Decay", 3, 100, 20, "s"), PCT("Swell", 0), PCT("Tone", 45), LIN("Low", -12, 6, 0, "dB"),
-         PCT("Mod", 50), HZ("Rate", 0.05f, 4, 0.3f), NONE}},
+         PCT("Mod", 50), HZ("Rate", 0.05f, 4, 0.3f), MS("Predelay", 1, 2000, 1)}},
     [A_CLASSIC] = {"SP2O16", G_REVERB, 35, "80s studio reverb: early reflections, smooth tail",
-        {PCT("Size", 55), EXPK("Decay", 0.3f, 15, 2.5f, "s"), MS("Predelay", 1, 300, 30), PCT("Position", 50), PCT("Diffusion", 70),
+        {PCT("Size", 55), EXPK("Decay", 0.3f, 15, 2.5f, "s"), MS("Predelay", 1, 1000, 30), PCT("Position", 50), PCT("Diffusion", 70),
          PCT("Tone", 55), LIN("Low", -12, 6, 0, "dB"), NONE}},
     [A_CRUSHVERB] = {"MangldVerb", G_REVERB, 40, "Reverb pushed into distortion",
         {PCT("Size", 60), EXPK("Decay", 0.5f, 15, 3, "s"), MS("Predelay", 1, 300, 20), PCT("Distortion", 50), CHO("Order", PREPOST, 1),
@@ -250,7 +250,8 @@ static const Algo ALGOS[kNumAlgos] = {
 
 /* ==== parameters (the order is the VST index: saved projects and Q-Links refer to them by it) ============== */
 enum { P_ALGO, P_OPEN, P_MIX, P_K, P_NAME = P_K + NK, P_INFO = P_NAME + NK, P_SLOT };   /* per slot */
-enum { kRouting = 2 * P_SLOT, kOutput, kPresetBase, kNumParams = kPresetBase + 6 };   /* per slot: Preset, Preset <, Preset > */
+enum { kRouting = 2 * P_SLOT, kOutput, kPresetBase, kProgBase = kPresetBase + 6, kNumParams = kProgBase + 3 };
+/* per slot: Preset, Preset <, Preset >; then Program, Program <, Program > (both slots and the routing) */
 
 static int option_of(float v, int n) { return (int)lrintf((v < 0 ? 0 : v > 1 ? 1 : v) * (float)(n - 1)); }
 static float lerp(float a, float b, float t) { return a + (b - a) * t; }
@@ -582,11 +583,13 @@ static void slot_control(Slot *s) {
     case A_FUZZOCT: c[20] = lp_coef(lerp(1200, 9000, PC(2)), fs); c[21] = db(V(3)); break;
     case A_CRUSH: c[20] = lp_coef(lerp(1500, 12000, PC(3)), fs); c[21] = db(V(5)); c[22] = db(V(4)) - 1; c[23] = lp_coef(200, fs);
         c[24] = db(V(6)); break;
-    case A_FUZZDLY: c[20] = lp_coef(lerp(1500, 9000, PC(1)), fs); c[21] = db(V(2)); c[22] = powf(2, V(6) / 1200); break;
+    case A_FUZZDLY: c[20] = lp_coef(lerp(1500, 9000, PC(1)), fs); c[21] = db(V(2)); c[22] = powf(2, V(3) / 12); c[23] = powf(2, V(4) / 12); break;
     case A_BANDDRIVE: c[20] = lp_coef(V(0), fs); c[21] = db(V(3)); c[22] = db(V(4)); c[23] = lp_coef(V(5), fs); break;
     case A_MIDDRIVE: c[21] = lp_coef(lerp(1500, 8000, PC(1)), fs); c[22] = db(V(2)); c[23] = db(V(4));
         c[24] = lp_coef(V(3) * 0.4f, fs); break;
-    case A_REVSHIFT: c[20] = lp_coef(tone_cut(V(5)), fs); c[21] = powf(2, V(0) / 12); c[22] = powf(2, V(1) / 12); break;
+    case A_REVSHIFT:   /* (and a plain reverb after the delays) */
+        vc = (VerbCfg){1.6f, 3, 9000, 0, 0.0015f, 0.4f, 4, 1.2f, 0.65f};
+        verb_control(s, &vc); c[20] = lp_coef(tone_cut(V(5)), fs); c[21] = powf(2, V(0) / 12); c[22] = powf(2, V(1) / 12); break;
     case A_VSHIFTER: c[20] = lp_coef(tone_cut(V(4)), fs); c[21] = powf(2, V(0) / 12); c[22] = powf(2, V(5) / 1200); break;
     case A_PMODHARM: c[20] = lp_coef(tone_cut(V(6)), fs); c[21] = powf(2, V(0) / 12); c[22] = powf(2, V(1) / 12); break;
     case A_MICRO: c[20] = lp_coef(tone_cut(V(4)), fs); c[21] = powf(2, V(0) / 1200); break;
@@ -638,12 +641,17 @@ static void slot_control(Slot *s) {
     }
     case A_SHIMMER:
         vc = (VerbCfg){lerp(0.8f, 2.6f, PC(0)), V(1), lerp(2500, 16000, PC(5)), 0, lerp(0, 0.003f, PC(6)), 0.3f, 4, 1.3f, 0.65f};
-        verb_control(s, &vc); c[16] = powf(2, V(2) / 12); c[17] = powf(2, V(3) / 12); c[18] = PC(4) * 0.7f;
+        /* (the two voices a few cents apart, as in the H90's own Shimmer presets: +1204 / +1193 cents) */
+        verb_control(s, &vc); c[16] = powf(2, V(2) / 12 + 4.0f / 1200); c[17] = powf(2, V(3) / 12 - 7.0f / 1200); c[18] = PC(4) * 0.7f;
         break;
     case A_ABYSS: {
         const int frozen = V(1) >= 99.5f;
         vc = (VerbCfg){lerp(1.5f, 4.0f, PC(0)), frozen ? 1e6f : V(1), lerp(700, 12000, PC(3)), frozen ? 0 : V(4), lerp(0, 0.006f, PC(5)), V(6), 6, 2.5f, 0.7f};
         verb_control(s, &vc); c[20] = PC(2); c[21] = (float)frozen;
+        /* a small space with a long Decay stores far more than the default one (Size 75%, 20 s) and built up past
+         * the ceiling (the H90's Shoegazer: Size 0, ~23 s): its input is scaled down by that, never up */
+        const float g = powf(10, -3 * 0.0474f * vc.size / vc.rt60), gref = powf(10, -3 * 0.0474f * 3.375f / 20);
+        c[22] = frozen ? 1 : fminf(1, sqrtf((1 - g * g) / (1 - gref * gref)));
         break;
     }
     case A_CLASSIC:
@@ -816,8 +824,8 @@ static void run_algo(Slot *s, const float in[2], float out[2]) {
     case A_REVDLY: case A_REVSHIFT: {   /* grains read backwards: the read head runs back while the write head runs on */
         const int rs = s->algo == A_REVSHIFT;
         for (int ch = 0; ch < 2; ch++) {
-            const float grain = clampf((rs ? V(2 + ch) : V(0)) * ms, 0.05f * fs, 1.5f * fs);
-            const float ratio = rs ? (ch ? c[22] : c[21]) : 1;
+            const float ratio = rs ? (ch ? c[22] : c[21]) : 1;   /* (the read head goes back up to grain * (1 + ratio)) */
+            const float grain = clampf((rs ? V(2 + ch) : V(0)) * ms, 0.05f * fs, fminf(2.5f * fs, ((float)s->dl[ch].mask - 0.03f * fs) / (1 + ratio)));
             float *ph = &s->st[ch][1];
             *ph += 1 / grain;
             *ph -= floorf(*ph);
@@ -832,7 +840,7 @@ static void run_algo(Slot *s, const float in[2], float out[2]) {
             out[ch] = y;
             line_push(&s->dl[ch], in[ch] + tanh_fast(y * PC(rs ? 4 : 1) * 0.9f));
         }
-        if (rs) { const float mid = (out[0] + out[1]) * 0.5f; out[0] = lerp(mid, out[0], PC(7)); out[1] = lerp(mid, out[1], PC(7)); }
+        if (rs && PC(7) > 0.001f) { float l, r; verb_run(s, out[0], out[1], &l, &r, 0); out[0] += l * PC(7); out[1] += r * PC(7); }
         break;
     }
     case A_TAPCLOUD: {
@@ -905,16 +913,17 @@ static void run_algo(Slot *s, const float in[2], float out[2]) {
         }
         break;
     }
-    case A_FUZZDLY: {
+    case A_FUZZDLY: {   /* each voice (you, Pitch A, Pitch B) fuzzed on its own, so the intervals stay clear */
+        const float g = 1 + PC(0) * 80;
         for (int ch = 0; ch < 2; ch++) {
-            float y = softclip(in[ch] * (1 + PC(0) * 80));
-            y = lp(&s->op[ch][0], hp(&s->op[ch][1], y, 0.004f), c[20]) * c[21];
-            const float da = line_read(&s->dl[ch], slew(&s->st[ch][0], V(3) * ms));
-            const float dbv = line_read(&s->dl2[ch], slew(&s->st[ch][1], V(4) * ms));
-            const float ra = shift_s(&s->sh[ch][0], da, ch ? 1 / c[22] : c[22], 0.03f * fs, 1);
-            line_push(&s->dl[ch], y + tanh_fast(dbv * PC(5) * 0.95f));
-            line_push(&s->dl2[ch], y + tanh_fast(ra * PC(5) * 0.95f));
-            out[ch] = tanh_fast((y + (ra + dbv) * 0.5f * PC(7)) / 3) * 3;   /* (fuzz + full repeats: kept under the ceiling) */
+            const float x = in[ch];
+            const float a = shift_s(&s->sh[ch][0], x, c[22] * (ch ? 1.0012f : 1), 0.03f * fs, 1);
+            const float b = shift_s(&s->sh[ch][1], x, c[23] * (ch ? 1 : 1.0012f), 0.03f * fs, 1);
+            const float voices = (softclip(a * g) + softclip(b * g)) * 0.5f;
+            const float d = line_read(&s->dl[ch], slew(&s->st[ch][0], V(5) * ms));
+            line_push(&s->dl[ch], voices + tanh_fast(d * PC(6) * 0.95f));
+            const float y = lerp(softclip(x * g), d, PC(7));
+            out[ch] = tanh_fast(lp(&s->op[ch][0], hp(&s->op[ch][1], y, 0.004f), c[20]) * c[21] / 3) * 3;   /* (under the ceiling) */
         }
         break;
     }
@@ -1269,7 +1278,8 @@ static void run_algo(Slot *s, const float in[2], float out[2]) {
     }
     case A_SHIMMER: verb_run(s, in[0], in[1], &out[0], &out[1], 0); break;   /* (the shifting is inside the loop) */
     case A_ABYSS: {
-        float x[2] = {in[0], in[1]};
+        for (int ch = 0; ch < 2; ch++) line_push(&s->dl2[ch], in[ch]);
+        float x[2] = {line_read(&s->dl2[0], V(7) * ms), line_read(&s->dl2[1], V(7) * ms)};
         if (c[20] > 0.01f) {   /* Swell: the reverb hears less of you while you play, so it blooms after */
             const float lvl = fmaxf(fabsf(in[0]), fabsf(in[1]));
             s->env[0] += (lvl > s->env[0] ? 0.005f : 0.0002f) * (lvl - s->env[0]);
@@ -1277,6 +1287,7 @@ static void run_algo(Slot *s, const float in[2], float out[2]) {
             x[0] *= g; x[1] *= g;
         }
         if (c[21] > 0.5f) { x[0] *= 0.02f; x[1] *= 0.02f; }   /* frozen: it keeps what it has */
+        x[0] *= c[22]; x[1] *= c[22];
         verb_run(s, x[0], x[1], &out[0], &out[1], 0);
         out[0] *= 0.7f; out[1] *= 0.7f;
         break;
@@ -1401,6 +1412,7 @@ typedef struct {
     volatile int update_display;
     volatile uint64_t automate;     /* parameters to report back to MPC (bit = index), sent from process() */
     int preset[2];                  /* the preset each slot last loaded (-1: none) */
+    int program;                    /* the program last loaded (-1: none) */
 } Plugin;
 
 static void copy_str(void *dst, const char *src, size_t max) { const size_t n = strnlen(src, max - 1); memcpy(dst, src, n); ((char *)dst)[n] = 0; }
@@ -1454,6 +1466,27 @@ static void step_preset(Plugin *s, int k, int dir) {
     load_preset(s, k, idx);
 }
 
+/* programs (presets.h, PROGRAMS[]): the H90 factory programs found in a backup, as both slots + the routing */
+static void load_program(Plugin *s, int idx) {
+    for (int k = 0; k < 2; k++) {
+        const ProgSlot *ps = &PROGRAMS[idx].s[k];
+        const int base = k * P_SLOT;
+        s->norm[base + P_ALGO] = (float)ps->algo / (float)(kNumAlgos - 1);
+        load_defaults(s, k, ps->algo);
+        s->norm[base + P_MIX] = ps->mix;
+        for (int i = 0; i < NK; i++) s->norm[base + P_K + i] = ps->k[i];
+        s->preset[k] = -1;   /* (the preset stepper shows the slot's preset by name, if we have it) */
+        for (int i = 0; i < NPRESETS; i++) if (PRESETS[i].algo == ps->algo && !strcmp(PRESETS[i].name, ps->name)) { s->preset[k] = i; break; }
+        if (s->preset[k] >= 0) s->norm[kPresetBase + k * 3] = (float)s->preset[k] / (float)(NPRESETS - 1);
+        s->automate |= 1ull << (base + P_ALGO) | 1ull << (kPresetBase + k * 3);
+    }
+    s->norm[kRouting] = (float)PROGRAMS[idx].parallel;
+    s->program = idx;
+    s->norm[kProgBase] = (float)idx / (float)(NPROGRAMS - 1);
+    s->automate |= 1ull << kRouting | 1ull << kProgBase;
+    s->update_display = 1;
+}
+
 static int setup(Plugin *s, float fs) {
     s->ready = 0;
     for (int k = 0; k < 2; k++) slot_free(&s->slot[k]);
@@ -1471,6 +1504,24 @@ static void setParameter(AEffect *e, int32_t i, float v) {
     v = clampf(v, 0, 1);
     if (i == kRouting) { s->norm[i] = (float)option_of(v, 2); s->update_display = 1; return; }
     if (i == kOutput) { s->norm[i] = v; return; }
+    if (i >= kProgBase) {   /* as a preset below, over the programs */
+        const int w = i - kProgBase;
+        if (w) {
+            if (v > 0.5f) load_program(s, s->program < 0 ? (w == 1 ? NPROGRAMS - 1 : 0) : (s->program + (w == 1 ? -1 : 1) + NPROGRAMS) % NPROGRAMS);
+            s->norm[i] = 0;
+            s->automate |= 1ull << i;
+            return;
+        }
+        const float pos = v * (float)(NPROGRAMS - 1), cur = s->program >= 0 ? (float)s->program : s->norm[i] * (float)(NPROGRAMS - 1);
+        if (fabsf(pos - roundf(pos)) > 0.001f && fabsf(pos - cur) < 1) {
+            load_program(s, ((int)lrintf(cur) + (pos > cur ? 1 : -1) + NPROGRAMS) % NPROGRAMS);
+            return;
+        }
+        s->program = (int)lrintf(pos);
+        s->norm[i] = v;
+        s->update_display = 1;
+        return;
+    }
     if (i >= kPresetBase) {
         const int k = (i - kPresetBase) / 3, w = (i - kPresetBase) % 3;
         if (w) {   /* < or >: a momentary button */
@@ -1541,6 +1592,12 @@ static void fmt_knob(const Knob *k, float n, char *t) {
 static void param_display(Plugin *s, int i, char *t) {
     if (i == kRouting) { snprintf(t, 96, "%s", s->norm[i] > 0.5f ? "Parallel" : "Series"); return; }
     if (i == kOutput) { snprintf(t, 96, "%+.1f dB", lerp(-24, 12, s->norm[i])); return; }
+    if (i >= kProgBase) {
+        const int w = i - kProgBase;
+        if (w) snprintf(t, 96, "%s", w == 1 ? "<" : ">");
+        else snprintf(t, 96, "%s", s->program >= 0 && s->program < NPROGRAMS ? PROGRAMS[s->program].name : "-");
+        return;
+    }
     if (i >= kPresetBase) {
         const int k = (i - kPresetBase) / 3, w = (i - kPresetBase) % 3, p = s->preset[k];
         if (w) snprintf(t, 96, "%s", w == 1 ? "<" : ">");
@@ -1645,7 +1702,8 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
             char t[40];
             const int w = idx % P_SLOT;
             const Knob *kn = idx < kRouting && w >= P_K && w < P_K + NK ? &ALGOS[algo_of(s, idx / P_SLOT)].k[w - P_K] : NULL;
-            if (idx >= kPresetBase) snprintf(t, sizeof t, "%c Preset%s", (idx - kPresetBase) / 3 ? 'B' : 'A',
+            if (idx >= kProgBase) snprintf(t, sizeof t, "Program%s", idx == kProgBase ? "" : idx == kProgBase + 1 ? " <" : " >");
+            else if (idx >= kPresetBase) snprintf(t, sizeof t, "%c Preset%s", (idx - kPresetBase) / 3 ? 'B' : 'A',
                                              (idx - kPresetBase) % 3 == 0 ? "" : (idx - kPresetBase) % 3 == 1 ? " <" : " >");
             else if (idx == kRouting) snprintf(t, sizeof t, "Routing");
             else if (idx == kOutput) snprintf(t, sizeof t, "Output");
@@ -1686,6 +1744,7 @@ __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallbac
     s->norm[kRouting] = 0;
     s->norm[kOutput] = 24.0f / 36;                                       /* 0 dB */
     s->preset[0] = s->preset[1] = -1;
+    s->program = -1;
     s->out_s = 1;
     setup(s, 44100);
     AEffect *e = &s->fx;
@@ -1732,8 +1791,11 @@ int main(void) {
         const char S = k ? 'B' : 'A', s = k ? 'b' : 'a';
         printf("    {\"key\": \"%c_preset\", \"name\": \"%c Preset\", \"min\": 0, \"max\": 1, \"display\": \"string\", \"type\": \"stepper\"},\n", s, S);
         printf("    {\"key\": \"%c_preset_prev\", \"name\": \"%c Preset <\", \"options\": [\"Off\", \"On\"], \"momentary\": true},\n", s, S);
-        printf("    {\"key\": \"%c_preset_next\", \"name\": \"%c Preset >\", \"options\": [\"Off\", \"On\"], \"momentary\": true}%s\n", s, S, k ? "" : ",");
+        printf("    {\"key\": \"%c_preset_next\", \"name\": \"%c Preset >\", \"options\": [\"Off\", \"On\"], \"momentary\": true},\n", s, S);
     }
+    printf("    {\"key\": \"program\", \"name\": \"Program\", \"min\": 0, \"max\": 1, \"display\": \"string\", \"type\": \"stepper\"},\n");
+    printf("    {\"key\": \"program_prev\", \"name\": \"Program <\", \"options\": [\"Off\", \"On\"], \"momentary\": true},\n");
+    printf("    {\"key\": \"program_next\", \"name\": \"Program >\", \"options\": [\"Off\", \"On\"], \"momentary\": true}\n");
     printf("  ]\n}\n");
     return 0;
 }

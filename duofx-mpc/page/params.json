@@ -48,6 +48,9 @@
     {"key": "a_preset_next", "name": "A Preset >", "options": ["Off", "On"], "momentary": true},
     {"key": "b_preset", "name": "B Preset", "min": 0, "max": 1, "display": "string", "type": "stepper"},
     {"key": "b_preset_prev", "name": "B Preset <", "options": ["Off", "On"], "momentary": true},
-    {"key": "b_preset_next", "name": "B Preset >", "options": ["Off", "On"], "momentary": true}
+    {"key": "b_preset_next", "name": "B Preset >", "options": ["Off", "On"], "momentary": true},
+    {"key": "program", "name": "Program", "min": 0, "max": 1, "display": "string", "type": "stepper"},
+    {"key": "program_prev", "name": "Program <", "options": ["Off", "On"], "momentary": true},
+    {"key": "program_next", "name": "Program >", "options": ["Off", "On"], "momentary": true}
   ]
 }

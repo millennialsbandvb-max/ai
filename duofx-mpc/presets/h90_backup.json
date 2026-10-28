@@ -1,0 +1,1156 @@
+[
+ {
+  "name": "Clean Ambient",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "Ambient Delay",
+   "algorithm": "Digital Delay",
+   "params": {
+    "bypa_normal": 0.3137100338935852,
+    "dlya": 0.0,
+    "dlyb": 10.26000308990479,
+    "dmix": 100.0,
+    "fbka": 0.0,
+    "fbkb": 51.0,
+    "fltr": 0.0,
+    "mdpt": 0.0,
+    "mmix": 21.41312599182129,
+    "mspd": 0.9400001764297485,
+    "preset_mix": 0.3137100338935852,
+    "repeat": 0.0,
+    "tmpv": 188.5599975585938,
+    "tsyn": false,
+    "xfad": 3.0
+   }
+  },
+  "B": {
+   "preset": "Empty Auditorium",
+   "algorithm": "SP2016 Reverb",
+   "params": {
+    "mmix": 30.0,
+    "algo": 3,
+    "decy": 3.01,
+    "pstn": 100.0,
+    "dffn": 0,
+    "pdly": 49.0,
+    "eqlf": 350.0,
+    "eqls": 1.0,
+    "eqhf": 5000.0,
+    "eqhs": 0
+   }
+  }
+ },
+ {
+  "name": "Clean Ambient",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "Ambient Delay",
+   "algorithm": "Digital Delay",
+   "params": {
+    "bypa_normal": 0.3137100338935852,
+    "dlya": 0.0,
+    "dlyb": 10.26000308990479,
+    "dmix": 100.0,
+    "fbka": 0.0,
+    "fbkb": 51.0,
+    "fltr": 0.0,
+    "mdpt": 0.0,
+    "mmix": 21.41312599182129,
+    "mspd": 0.9400001764297485,
+    "preset_mix": 0.3137100338935852,
+    "repeat": 0.0,
+    "tmpv": 188.5599975585938,
+    "tsyn": false,
+    "xfad": 3.0
+   }
+  },
+  "B": {
+   "preset": "Empty Auditorium",
+   "algorithm": "SP2016 Reverb",
+   "params": {
+    "mmix": 30.0,
+    "algo": 3,
+    "decy": 3.01,
+    "pstn": 100.0,
+    "dffn": 0,
+    "pdly": 49.0,
+    "eqlf": 350.0,
+    "eqls": 1.0,
+    "eqhf": 5000.0,
+    "eqhs": 0
+   }
+  }
+ },
+ {
+  "name": "Recital Hall",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "RW Tank",
+   "algorithm": "Spring",
+   "params": {
+    "bypa_normal": 0.4721668362617493,
+    "dcay": 4.322620391845703,
+    "hdmp": 28.63999938964844,
+    "ldmp": 43.79000091552734,
+    "mmix": 31.8498477935791,
+    "mod_": 0.0,
+    "nspr": 3.0,
+    "preset_mix": 0.4721668362617493,
+    "reso": 43.79000091552734,
+    "styp": 0.0,
+    "tint": 0.0,
+    "tmpv": 120,
+    "tnsn": 51.2288818359375,
+    "trpp": 0.0,
+    "tspd": 3.759999752044678,
+    "tsyn": false
+   }
+  },
+  "B": {
+   "preset": "Empty Auditorium",
+   "algorithm": "SP2016 Reverb",
+   "params": {
+    "mmix": 70.0,
+    "algo": 3,
+    "decy": 0.75,
+    "pstn": 100.0,
+    "dffn": 0,
+    "pdly": 1.0,
+    "eqlf": 350.0,
+    "eqls": 3.0,
+    "eqhf": 5000.0,
+    "eqhs": 0
+   }
+  }
+ },
+ {
+  "name": "Blackhole",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "Blackhole",
+   "algorithm": "Blackhole",
+   "params": {
+    "bypa_normal": 0.4692369401454926,
+    "fdbk": 17.77000045776367,
+    "grav": 190.5700073242188,
+    "hilv": 0.0,
+    "lolv": 1.0,
+    "mdpt": 0.0,
+    "mmix": 30.54999351501465,
+    "mrat": 35.58000183105469,
+    "pdly": 0.0,
+    "preset_mix": 0.4692369401454926,
+    "reso": 0.0,
+    "size": 92.47000122070312,
+    "tmpv": 120,
+    "tsyn": true
+   }
+  },
+  "B": null
+ },
+ {
+  "name": "Stargazers",
+  "factory": true,
+  "parallel": true,
+  "tempo": 116.33913,
+  "A": {
+   "preset": "Classic Crystals",
+   "algorithm": "Crystals",
+   "params": {
+    "bypa_normal": 0.6077149510383606,
+    "dlya": 1373.267211914062,
+    "dlyb": 2077.99951171875,
+    "fbka": 68.93170166015625,
+    "fbkb": 60.16287994384766,
+    "mmix": 100.0000076293945,
+    "pcha": 1199.0,
+    "pchb": 1202.7197265625,
+    "perfknob": 0.0,
+    "pmix": 52.0,
+    "preset_mix": 0.6077149510383606,
+    "tmpv": 135.0200042724609,
+    "tsyn": false,
+    "vdcy": 2.947695016860962,
+    "vmix": 60.83998870849609
+   }
+  },
+  "B": {
+   "preset": "Shimmer",
+   "algorithm": "Shimmer",
+   "params": {
+    "apch": 1204.0,
+    "bpch": 1193.0,
+    "bypa_normal": 0.5608393549919128,
+    "dcay": 100.0,
+    "dlay": 72.86565399169922,
+    "hdcy": 61.48387908935547,
+    "instrument": 0.0,
+    "ldcy": 36.19791030883789,
+    "mdcy": 100.0,
+    "mmix": 100.0000076293945,
+    "pdcy": 89.11849975585938,
+    "preset_mix": 0.5608393549919128,
+    "size": 69.8256607055664,
+    "tmpv": 120,
+    "tsyn": true
+   }
+  }
+ },
+ {
+  "name": "TDrive Delay",
+  "factory": true,
+  "parallel": true,
+  "tempo": 119.02884,
+  "A": {
+   "preset": "WeedWacker",
+   "algorithm": "WeedWacker",
+   "params": {
+    "mix": 100.0,
+    "gateThr": -75.0,
+    "drive1": 52.7,
+    "tone1Control": 0,
+    "midEQLvl1": 0,
+    "level1Out": 0,
+    "stage2bypass": 0,
+    "drive2": 50.0,
+    "tone2Control": 0,
+    "midEQLvl2": 0,
+    "level2Out": -2.0
+   }
+  },
+  "B": {
+   "preset": "Vintage Stereo",
+   "algorithm": "SP2016 Reverb",
+   "params": {
+    "mmix": 50.0,
+    "algo": 0,
+    "decy": 3.99,
+    "pstn": 9.0,
+    "dffn": 100.0,
+    "pdly": 37.0,
+    "eqlf": 200.0,
+    "eqls": 0,
+    "eqhf": 5000.0,
+    "eqhs": 0
+   }
+  }
+ },
+ {
+  "name": "Fading Fields",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "ModEchoVerb",
+   "algorithm": "ModEchoVerb",
+   "params": {
+    "bypa_normal": 1,
+    "dcay": 17.35174179077148,
+    "efbk": 59.20010375976562,
+    "eton": -39.26406097412109,
+    "fxmx": 116.7876815795898,
+    "hilv": 15.66272926330566,
+    "lolv": -2.47035026550293,
+    "mmix": 89.72896575927734,
+    "mrat": 50.15000152587891,
+    "pdly": 12.36810970306396,
+    "preset_mix": 1,
+    "size": 61.97011947631836,
+    "tmpv": 154,
+    "tsyn": false
+   }
+  },
+  "B": {
+   "preset": "Barrel Roll",
+   "algorithm": "Flanger",
+   "params": {
+    "brake": 0.0,
+    "bypa_normal": 0.9976767301559448,
+    "dlbs": 67.58283233642578,
+    "dmod": 0.0,
+    "dpth": 17.29999160766602,
+    "itsy": 8.670003890991211,
+    "mrat": 0.0,
+    "msrc": 6.523699760437012,
+    "pedal": 0.0,
+    "preset_mix": 0.9976767301559448,
+    "shpe": 3.249800443649292,
+    "smod": 56.36999893188477,
+    "sped": 0.2998529970645905,
+    "tmpv": 120,
+    "tsyn": false,
+    "type": 0.2256912291049957
+   }
+  }
+ },
+ {
+  "name": "Floating in Space",
+  "factory": true,
+  "parallel": true,
+  "tempo": 120.0,
+  "A": {
+   "preset": "Blackhole",
+   "algorithm": "Blackhole",
+   "params": {
+    "bypa_normal": 0.4692369401454926,
+    "fdbk": 17.77000045776367,
+    "grav": 127.8948059082031,
+    "hilv": 16.94124984741211,
+    "lolv": 16.0184268951416,
+    "mdpt": 0.0,
+    "mmix": 39.58618927001953,
+    "mrat": 35.58000183105469,
+    "pdly": 0.0,
+    "preset_mix": 0.4692369401454926,
+    "reso": 24.9915943145752,
+    "size": 85.42195129394531,
+    "tmpv": 120,
+    "tsyn": true
+   }
+  },
+  "B": {
+   "preset": "Blackhole",
+   "algorithm": "Blackhole",
+   "params": {
+    "bypa_normal": 0.4692369401454926,
+    "fdbk": 32.88069915771484,
+    "grav": 48.5775032043457,
+    "hilv": 28.46461486816406,
+    "lolv": -2.366167306900024,
+    "mdpt": 83.35376739501953,
+    "mmix": 100.0000076293945,
+    "mrat": 59.63491058349609,
+    "pdly": 6.787511348724365,
+    "preset_mix": 0.4692369401454926,
+    "reso": 56.79902267456055,
+    "size": 64.76622009277344,
+    "tmpv": 120,
+    "tsyn": true
+   }
+  }
+ },
+ {
+  "name": "Zero Gravity",
+  "factory": true,
+  "parallel": true,
+  "tempo": 169.87494,
+  "A": {
+   "preset": "PolyRhythm",
+   "algorithm": "Polyphony",
+   "params": {
+    "Mix": 50.0,
+    "LevelA": 100.0,
+    "LevelB": 100.0,
+    "Shift1": 22,
+    "Detune1": 0,
+    "Shift2": 20,
+    "Detune2": 0,
+    "DelayA": 0,
+    "DelayB": 0,
+    "Fdbk1": 29.9,
+    "Fdbk2": 39.6,
+    "Pan1": -98.0,
+    "Pan2": 100.0,
+    "InstType": 0,
+    "FeedbackSwitch": 0,
+    "AutoEQAmount": 10.0
+   }
+  },
+  "B": {
+   "preset": "Shimmer",
+   "algorithm": "Shimmer",
+   "params": {
+    "apch": 1204.0,
+    "bpch": 1193.0,
+    "bypa_normal": 0.5608393549919128,
+    "dcay": 97.5429916381836,
+    "dlay": 1.0,
+    "hdcy": 79.86000061035156,
+    "instrument": 0.0,
+    "ldcy": 100.0,
+    "mdcy": 100.0,
+    "mmix": 100.0000076293945,
+    "pdcy": 37.21664428710938,
+    "preset_mix": 0.5608393549919128,
+    "size": 29.80999946594238,
+    "tmpv": 120,
+    "tsyn": true
+   }
+  }
+ },
+ {
+  "name": "working man bass",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "Working Man Bass",
+   "algorithm": "PitchFuzz",
+   "params": {
+    "bypa": false,
+    "bypa_normal": 1,
+    "dlya": 10.49409961700439,
+    "dlya_denormalized_pretaper": 108.8276977539062,
+    "dlyb": 13.00220012664795,
+    "dlyb_denormalized_pretaper": 134.8376312255859,
+    "fbck": 16.24979972839355,
+    "fbck_denormalized_pretaper": 7.352850437164307,
+    "fuzz": 100.0,
+    "fuzz_denormalized_pretaper": 100,
+    "fztn": -58.93746566772461,
+    "fztn_denormalized_pretaper": -58.93746566772461,
+    "gthr": -36.69999694824219,
+    "instrument": 0.0,
+    "ldly": 0.0,
+    "ldly_denormalized_pretaper": 0,
+    "lpit": 3.0,
+    "lpit_denormalized_pretaper": 3,
+    "pita": 25.50355339050293,
+    "pita_denormalized_pretaper": 25.50355339050293,
+    "pitb": 25.76933860778809,
+    "pitb_denormalized_pretaper": 26.53000068664551,
+    "pitc": 39.00769424438477,
+    "pitc_denormalized_pretaper": 39.00769424438477,
+    "preset_mix": 1,
+    "routing_type": 0,
+    "tmpv": 110,
+    "tsyn": true
+   }
+  },
+  "B": {
+   "preset": "AmeSpring",
+   "algorithm": "Spring",
+   "params": {
+    "bypa_normal": 0.5160151124000549,
+    "dcay": 6.330000877380371,
+    "hdmp": 0.0,
+    "ldmp": 0.0,
+    "mmix": 34.82999801635742,
+    "mod_": 23.23000144958496,
+    "nspr": 3.0,
+    "preset_mix": 0.5160151124000549,
+    "reso": 0.0,
+    "styp": 0.0,
+    "tint": 74.58000183105469,
+    "tmpv": 120,
+    "tnsn": 100.0,
+    "trpp": 0.0,
+    "tspd": 4.260000228881836,
+    "tsyn": false
+   }
+  }
+ },
+ {
+  "name": "Recital Hall",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "RW Tank",
+   "algorithm": "Spring",
+   "params": {
+    "bypa_normal": 0.4721668362617493,
+    "dcay": 4.322620391845703,
+    "hdmp": 28.63999938964844,
+    "ldmp": 43.79000091552734,
+    "mmix": 31.8498477935791,
+    "mod_": 0.0,
+    "nspr": 3.0,
+    "preset_mix": 0.4721668362617493,
+    "reso": 43.79000091552734,
+    "styp": 0.0,
+    "tint": 0.0,
+    "tmpv": 120,
+    "tnsn": 51.2288818359375,
+    "trpp": 0.0,
+    "tspd": 3.759999752044678,
+    "tsyn": false
+   }
+  },
+  "B": {
+   "preset": "Empty Auditorium",
+   "algorithm": "SP2016 Reverb",
+   "params": {
+    "mmix": 70.0,
+    "algo": 3,
+    "decy": 0.75,
+    "pstn": 100.0,
+    "dffn": 0,
+    "pdly": 1.0,
+    "eqlf": 350.0,
+    "eqls": 3.0,
+    "eqhf": 5000.0,
+    "eqhs": 0
+   }
+  }
+ },
+ {
+  "name": "Bedroom Vibes",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "Even-Vibe",
+   "algorithm": "Even-Vibe",
+   "params": {
+    "mix": 50.0,
+    "speed": 3.86,
+    "intensity": 3.0,
+    "Width": 0,
+    "EnvSpeed": 0,
+    "EnvInten": 0,
+    "softclip": 0
+   }
+  },
+  "B": {
+   "preset": "Bedroom",
+   "algorithm": "SP2016 Reverb",
+   "params": {
+    "mmix": 18.0,
+    "algo": 2,
+    "decy": 1.27,
+    "pstn": 15.0,
+    "dffn": 22.0,
+    "pdly": 30.0,
+    "eqlf": 250.0,
+    "eqls": 0,
+    "eqhf": 5500.0,
+    "eqhs": 0
+   }
+  }
+ },
+ {
+  "name": "Shoegazer",
+  "factory": true,
+  "parallel": false,
+  "tempo": 126.89163,
+  "A": {
+   "preset": "WeedWacker",
+   "algorithm": "WeedWacker",
+   "params": {
+    "mix": 100.0,
+    "gateThr": -75.0,
+    "drive1": 80.49999,
+    "tone1Control": 0,
+    "midEQLvl1": 0,
+    "level1Out": 0,
+    "stage2bypass": 0,
+    "drive2": 50.0,
+    "tone2Control": 0,
+    "midEQLvl2": 0,
+    "level2Out": -2.0
+   }
+  },
+  "B": {
+   "preset": "Blackhole",
+   "algorithm": "Blackhole",
+   "params": {
+    "bypa_normal": 0.4692369401454926,
+    "fdbk": 46.75,
+    "grav": 190.5700073242188,
+    "hilv": 31.43955421447754,
+    "lolv": 1.0,
+    "mdpt": 0.0,
+    "mmix": 36.37992095947266,
+    "mrat": 35.58000183105469,
+    "pdly": 11.35713863372803,
+    "preset_mix": 0.4692369401454926,
+    "reso": 0.0,
+    "size": 0.0,
+    "tmpv": 120,
+    "tsyn": true
+   }
+  }
+ },
+ {
+  "name": "Shimmer",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "Shimmer",
+   "algorithm": "Shimmer",
+   "params": {
+    "apch": 1204.0,
+    "bpch": 1193.0,
+    "bypa_normal": 0.5608393549919128,
+    "dcay": 96.97000122070312,
+    "dlay": 1.0,
+    "hdcy": 79.86000061035156,
+    "instrument": 0.0,
+    "ldcy": 100.0,
+    "mdcy": 100.0,
+    "mmix": 39.20000457763672,
+    "pdcy": 37.05999374389648,
+    "preset_mix": 0.5608393549919128,
+    "size": 29.80999946594238,
+    "tmpv": 120,
+    "tsyn": true
+   }
+  },
+  "B": null
+ },
+ {
+  "name": "Sky Scraper",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "Hidden Pillars",
+   "algorithm": "Band Delay",
+   "params": {
+    "bypa_normal": 0.5463743805885315,
+    "dlya": 14.03999996185303,
+    "dlyb": 16.27714157104492,
+    "dmix": 60.22000122070312,
+    "fbka": 77.0,
+    "fbkb": 69.0,
+    "ftyp": 0.5,
+    "mdpt": 10.0,
+    "mmix": 66.29096221923828,
+    "mspd": 0.04999999329447746,
+    "preset_mix": 0.5463743805885315,
+    "repeat": 0.0,
+    "reso": 5.289999961853027,
+    "tmpv": 120,
+    "tsyn": false
+   }
+  },
+  "B": {
+   "preset": "Empty Streets",
+   "algorithm": "DualVerb",
+   "params": {
+    "abmx": 47.72000122070312,
+    "adcy": 9.000000953674316,
+    "apdy": 9.693907737731934,
+    "aton": 32.00000381469727,
+    "bdcy": 12.62760448455811,
+    "bpdy": 12.75925922393799,
+    "bton": 83.00000762939453,
+    "bypa_normal": 0.6157776117324829,
+    "mmix": 100.0000076293945,
+    "preset_mix": 0.6157776117324829,
+    "reso": 35.61999893188477,
+    "size": 22.20999908447266,
+    "tmpv": 120,
+    "tsyn": true
+   }
+  }
+ },
+ {
+  "name": "Hard Grunge",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "Scuttle Butter",
+   "algorithm": "CrushStation",
+   "params": {
+    "bass": 43.38270568847656,
+    "bypa": false,
+    "bypa_normal": 1,
+    "cntr": 31.46701240539551,
+    "drve": 34.04780197143555,
+    "gthr": -96.19999694824219,
+    "instrument": 0.0,
+    "mfrq": 2999.3125,
+    "mids": 57.09823226928711,
+    "mmix": 100.0,
+    "nmgn": -22.70000076293945,
+    "octv": 0.0,
+    "preset_mix": 1,
+    "routing_type": 0,
+    "ssag": 0.0,
+    "sstn": 38.75239944458008,
+    "tmpv": 120,
+    "trbl": -5.38477897644043,
+    "tsyn": true
+   }
+  },
+  "B": {
+   "preset": "Chorus Lap",
+   "algorithm": "TriceraChorus",
+   "params": {
+    "Swirl": 0.0,
+    "bypa": false,
+    "bypa_normal": 0.08926711976528168,
+    "cdep": 0.0,
+    "cdep_denormalized_pretaper": 0.0,
+    "cmix": 20.08510208129883,
+    "cmix_denormalized_pretaper": 4.017020225524902,
+    "ddep": 473.2355041503906,
+    "ddep_denormalized_pretaper": 473.2355041503906,
+    "dmin": 2.185735464096069,
+    "dmin_denormalized_pretaper": 97.89173126220703,
+    "dtmx": 31.96479988098145,
+    "dtmx_denormalized_pretaper": 7.991199970245361,
+    "enve": 101.25,
+    "enve_denormalized_pretaper": 26.24273490905762,
+    "envm": 0.0,
+    "envr": 0.0,
+    "ldep": 67.03630065917969,
+    "ldep_denormalized_pretaper": 13.40725994110107,
+    "preset_mix": 0.08926711976528168,
+    "rate": 1.550384044647217,
+    "rate_denormalized_pretaper": 92.20563507080078,
+    "rdep": 50.63539505004883,
+    "rdep_denormalized_pretaper": 10.12707901000977,
+    "routing_type": 0.0,
+    "tmpv": 120.0,
+    "tone": 0.0,
+    "tone_denormalized_pretaper": 11.00000095367432,
+    "tsyn": false
+   }
+  }
+ },
+ {
+  "name": "Quadra Quant",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "Banjo Strummer",
+   "algorithm": "Quadravox",
+   "params": {
+    "Quant": 1.0,
+    "bypa_normal": 0.8533426523208618,
+    "dlyg": 20.0,
+    "dlyl": 325.9999694824219,
+    "instrument": 0.0,
+    "key_": 0.006365716457366943,
+    "mmix": 100.0,
+    "pcha": 19.15999984741211,
+    "pchb": 11.241379737854,
+    "pchc": 5.268815994262695,
+    "pchd": -6.966444969177246,
+    "perfknob": 0.0,
+    "pmix": 52.09999847412109,
+    "preset_mix": 0.8533426523208618,
+    "scal": 0.0,
+    "tmpv": 500,
+    "tsyn": false
+   }
+  },
+  "B": {
+   "preset": "Dessert Plate",
+   "algorithm": "SP2016 Reverb",
+   "params": {
+    "mmix": 23.0,
+    "algo": 5,
+    "decy": 7.71,
+    "pstn": 70.0,
+    "dffn": 81.0,
+    "pdly": 999.0,
+    "eqlf": 250.0,
+    "eqls": 0,
+    "eqhf": 4000.0,
+    "eqhs": 0
+   }
+  }
+ },
+ {
+  "name": "Green Tides",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "WeedWacker",
+   "algorithm": "WeedWacker",
+   "params": {
+    "mix": 100.0,
+    "gateThr": -86.29996,
+    "drive1": 69.59998,
+    "tone1Control": 2.0,
+    "midEQLvl1": 0,
+    "level1Out": 0,
+    "stage2bypass": 0,
+    "drive2": 100.0,
+    "tone2Control": 57.0,
+    "midEQLvl2": 0,
+    "level2Out": -0.4
+   }
+  },
+  "B": {
+   "preset": "Lux Space",
+   "algorithm": "Room",
+   "params": {
+    "bypa_normal": 0.4500131607055664,
+    "dcay": 3.0,
+    "diff": 73.62398529052734,
+    "ermx": 49.22262573242188,
+    "hifq": 1549.609985351562,
+    "hilv": 70.27999877929688,
+    "lolv": 45.25999450683594,
+    "mmix": 21.7652416229248,
+    "mod_": 97.06999969482422,
+    "pdly": 0.0,
+    "preset_mix": 0.4500131607055664,
+    "size": 42.59145736694336,
+    "tmpv": 122.9300003051758,
+    "tsyn": false
+   }
+  }
+ },
+ {
+  "name": "Stank Spirit",
+  "factory": true,
+  "parallel": false,
+  "tempo": 95.85428,
+  "A": {
+   "preset": "Stank Drive",
+   "algorithm": "WeedWacker",
+   "params": {
+    "mix": 100.0,
+    "gateThr": -82.4,
+    "drive1": 27.10001,
+    "tone1Control": 51.0,
+    "midEQLvl1": 0,
+    "level1Out": 0,
+    "stage2bypass": 1,
+    "drive2": 86.99999,
+    "tone2Control": 43.0,
+    "midEQLvl2": 0,
+    "level2Out": -2.0
+   }
+  },
+  "B": {
+   "preset": "Lush Life",
+   "algorithm": "TriceraChorus",
+   "params": {
+    "Swirl": 0.0,
+    "bypa": false,
+    "bypa_normal": 0.2107155323028564,
+    "cdep": 35.37990188598633,
+    "cdep_denormalized_pretaper": 7.075980186462402,
+    "cmix": 0.0,
+    "cmix_denormalized_pretaper": 9.482198715209961,
+    "ddep": 512.6433715820312,
+    "ddep_denormalized_pretaper": 422.3263854980469,
+    "dmin": 10.85927963256836,
+    "dmin_denormalized_pretaper": 0.0,
+    "dtmx": 0.0,
+    "dtmx_denormalized_pretaper": 6.46666431427002,
+    "enve": 101.25,
+    "enve_denormalized_pretaper": 10.26881980895996,
+    "envm": 0.0,
+    "envr": 0.0,
+    "ldep": 81.81778717041016,
+    "ldep_denormalized_pretaper": 16.36355781555176,
+    "preset_mix": 0.2107155323028564,
+    "rate": 5.092235088348389,
+    "rate_denormalized_pretaper": 57.91299057006836,
+    "rdep": 16.23536109924316,
+    "rdep_denormalized_pretaper": 3.247072219848633,
+    "routing_type": 0.0,
+    "tmpv": 120.0,
+    "tone": 9.5367431640625e-06,
+    "tone_denormalized_pretaper": 11.00000095367432,
+    "tsyn": false
+   }
+  }
+ },
+ {
+  "name": "ModEchoVerb",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "ModEchoVerb",
+   "algorithm": "ModEchoVerb",
+   "params": {
+    "bypa_normal": 1,
+    "dcay": 10.0,
+    "efbk": 0.2000000029802322,
+    "eton": -29.0,
+    "fxmx": 185.760009765625,
+    "hilv": 75.0,
+    "lolv": -8.0,
+    "mmix": 100.0000076293945,
+    "mrat": 50.15000152587891,
+    "pdly": 0.0,
+    "preset_mix": 1,
+    "size": 89.73999786376953,
+    "tmpv": 154,
+    "tsyn": false
+   }
+  },
+  "B": null
+ },
+ {
+  "name": "Entanglements",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "UltraSwell",
+   "algorithm": "UltraTap",
+   "params": {
+    "bypa_normal": 0.9996212124824524,
+    "chop": 0.0,
+    "fdbk": 0.0,
+    "lnth": 1954.999877929688,
+    "mmix": 100.0000076293945,
+    "pdly": 0.0,
+    "pedal": 0.0,
+    "preset_mix": 0.9996212124824524,
+    "rate": 1.000227451324463,
+    "slrm": 100.0,
+    "sprd": 41.99999618530273,
+    "tapr": -50.0,
+    "taps": 64.0,
+    "tmpv": 120,
+    "tone": -12.0,
+    "tsyn": false,
+    "wdth": 100.0
+   }
+  },
+  "B": {
+   "preset": "Splitter Verb",
+   "algorithm": "TremoloVerb",
+   "params": {
+    "bypa_normal": 0.8582321405410767,
+    "dcay": 5.190000534057617,
+    "dpth": 200.0,
+    "hifq": 6079.9990234375,
+    "hilv": 100.0,
+    "lolv": 10.00000190734863,
+    "mmix": 66.3233413696289,
+    "pdly": 239.9999847412109,
+    "pedal": 0.0,
+    "preset_mix": 0.8582321405410767,
+    "shap": 0.9399999976158142,
+    "size": 60.02000045776367,
+    "sped": 10.58020496368408,
+    "tmpv": 120,
+    "tsyn": false
+   }
+  }
+ },
+ {
+  "name": "Cinematrick",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "Arpeggiate",
+   "algorithm": "PitchFuzz",
+   "params": {
+    "bypa": false,
+    "bypa_normal": 0.2199999988079071,
+    "dlya": 10.12349987030029,
+    "dlya_denormalized_pretaper": 104.9844436645508,
+    "dlyb": 13.32830047607422,
+    "dlyb_denormalized_pretaper": 138.2194061279297,
+    "fbck": 195.8045806884766,
+    "fbck_denormalized_pretaper": 78.82329559326172,
+    "fuzz": 11.99999809265137,
+    "fuzz_denormalized_pretaper": 22,
+    "fztn": 23.05780601501465,
+    "fztn_denormalized_pretaper": -9.94219970703125,
+    "gthr": -65.0,
+    "instrument": 0.0,
+    "ldly": 151.2348022460938,
+    "ldly_denormalized_pretaper": 75.24119567871094,
+    "lpit": 3.0,
+    "lpit_denormalized_pretaper": 3,
+    "nmgn": -5.0,
+    "pita": 13.43739986419678,
+    "pita_denormalized_pretaper": 13.43739986419678,
+    "pitb": 34.0,
+    "pitb_denormalized_pretaper": 34,
+    "pitc": 41.02669906616211,
+    "pitc_denormalized_pretaper": 41.02669906616211,
+    "preset_mix": 0.2199999988079071,
+    "routing_type": 0,
+    "tmpv": 125,
+    "tsyn": true
+   }
+  },
+  "B": {
+   "preset": "Demon Call",
+   "algorithm": "Shimmer",
+   "params": {
+    "apch": -2409.75,
+    "bpch": 2409.75,
+    "bypa_normal": 0.604071319103241,
+    "dcay": 15.73999977111816,
+    "dlay": 1000.0,
+    "hdcy": 95.01000213623047,
+    "instrument": 0.0,
+    "ldcy": 73.51000213623047,
+    "mdcy": 51.0,
+    "mmix": 43.68000030517578,
+    "pdcy": 3.859999656677246,
+    "preset_mix": 0.604071319103241,
+    "size": 86.05549621582031,
+    "tmpv": 120,
+    "tsyn": false
+   }
+  }
+ },
+ {
+  "name": "Black Hold Son",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "WeedWacker",
+   "algorithm": "WeedWacker",
+   "params": {
+    "mix": 100.0,
+    "gateThr": -89.89996,
+    "drive1": 75.70001,
+    "tone1Control": 5.0,
+    "midEQLvl1": 0,
+    "level1Out": -7.0,
+    "stage2bypass": 0,
+    "drive2": 27.8,
+    "tone2Control": 0,
+    "midEQLvl2": 0,
+    "level2Out": -2.0
+   }
+  },
+  "B": {
+   "preset": "Blackhole",
+   "algorithm": "Blackhole",
+   "params": {
+    "bypa_normal": 0.4692369401454926,
+    "fdbk": 17.77000045776367,
+    "grav": 190.5700073242188,
+    "hilv": 0.0,
+    "lolv": 1.0,
+    "mdpt": 0.0,
+    "mmix": 30.54999351501465,
+    "mrat": 35.58000183105469,
+    "pdly": 0.0,
+    "preset_mix": 0.4692369401454926,
+    "reso": 0.0,
+    "size": 92.47000122070312,
+    "tmpv": 120,
+    "tsyn": true
+   }
+  }
+ },
+ {
+  "name": "Planetarium1",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "Planetarium1",
+   "algorithm": "ModEchoVerb",
+   "params": {
+    "bypa_normal": 0.830920398235321,
+    "dcay": 6.079998970031738,
+    "efbk": 84.08000183105469,
+    "eton": 100.0,
+    "fxmx": 152.6900024414062,
+    "hilv": 4.0,
+    "lolv": 1.0,
+    "mmix": 72.13999938964844,
+    "mrat": 81.0999984741211,
+    "pdly": 925.2201538085938,
+    "preset_mix": 0.830920398235321,
+    "size": 71.41000366210938,
+    "tmpv": 120,
+    "tsyn": false
+   }
+  },
+  "B": null
+ },
+ {
+  "name": "Sound Check",
+  "factory": true,
+  "parallel": false,
+  "tempo": 120.0,
+  "A": {
+   "preset": "Light n Bright",
+   "algorithm": "WeedWacker",
+   "params": {
+    "mix": 100.0,
+    "gateThr": -75.0,
+    "drive1": 52.7,
+    "tone1Control": 26.0,
+    "midEQLvl1": 0,
+    "level1Out": 0,
+    "stage2bypass": 0,
+    "drive2": 50.0,
+    "tone2Control": 0,
+    "midEQLvl2": 0,
+    "level2Out": -2.0
+   }
+  },
+  "B": {
+   "preset": "Empty Auditorium",
+   "algorithm": "SP2016 Reverb",
+   "params": {
+    "mmix": 70.0,
+    "algo": 3,
+    "decy": 1.96,
+    "pstn": 100.0,
+    "dffn": 1.0,
+    "pdly": 1.0,
+    "eqlf": 350.0,
+    "eqls": 3.0,
+    "eqhf": 5000.0,
+    "eqhs": 0
+   }
+  }
+ },
+ {
+  "name": "Cowboy Time",
+  "factory": true,
+  "parallel": false,
+  "tempo": 242.17105,
+  "A": {
+   "preset": "TremoloVerb",
+   "algorithm": "TremoloVerb",
+   "params": {
+    "bypa_normal": 0.6657092571258545,
+    "dcay": 13.1875638961792,
+    "dpth": 161.3800201416016,
+    "hifq": 1689.8798828125,
+    "hilv": 19.0000057220459,
+    "lolv": -8.231300354003906,
+    "mmix": 52.25989532470703,
+    "pdly": 10.40439510345459,
+    "pedal": 0.0,
+    "preset_mix": 0.6657092571258545,
+    "shap": 0.0,
+    "size": 89.8501968383789,
+    "sped": 18.6345386505127,
+    "tmpv": 120,
+    "tsyn": false
+   }
+  },
+  "B": {
+   "preset": "Vintage Vocal",
+   "algorithm": "Vintage Delay",
+   "params": {
+    "bits": 10.56800079345703,
+    "bypa_normal": 0.420060396194458,
+    "dlya": 12.73331928253174,
+    "dlyb": 0.4428569376468658,
+    "dmix": 1.0,
+    "fbka": 56.0,
+    "fbkb": 6.0,
+    "fltr": 0.0,
+    "mdpt": 4.098000049591064,
+    "mmix": 51.92768096923828,
+    "mspd": 0.02894034050405025,
+    "preset_mix": 0.420060396194458,
+    "repeat": 0.0,
+    "tmpv": 130.2799987792969,
+    "tsyn": true
+   }
+  }
+ }
+]

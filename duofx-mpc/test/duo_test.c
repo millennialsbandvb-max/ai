@@ -296,6 +296,57 @@ int main(int argc, char **argv) {
             e->dispatcher(e, effClose, 0, 0, NULL, 0);
         }
 
+        {   /* every program (both slots + routing): as the presets; and a known one's routing */
+            AEffect *e = make();
+            int n = 0, bad = 0, routed = 0;
+            char first[64] = "", t[64];
+            for (;;) {
+                e->setParameter(e, 50, 1);   /* Program > */
+                e->dispatcher(e, effGetParamDisplay, 48, 0, t, 0);
+                if (!strcmp(t, first)) break;
+                if (!n) strcpy(first, t);
+                n++;
+                char rt[64] = {0}, a0[64] = {0}, a1[64] = {0};
+                e->dispatcher(e, effGetParamDisplay, ROUTING, 0, rt, 0);
+                e->dispatcher(e, effGetParamDisplay, P_ALGO, 0, a0, 0);
+                e->dispatcher(e, effGetParamDisplay, P_SLOT + P_ALGO, 0, a1, 0);
+                if (!strcmp(t, "Floating in Space")) routed = !strcmp(rt, "Parallel") && !strcmp(a0, "Blackhol3") && !strcmp(a1, "Blackhol3");
+                e->dispatcher(e, effMainsChanged, 0, 1, NULL, 0);
+                float peak;
+                const int ok = render(e, 16, g_music8, &peak);
+                const double end = rms(buf, 15 * FS, 16 * FS), before = rms(buf, 12 * FS, 13 * FS);
+                int holds = 0;
+                for (int k = 0; k < 16; k++) {
+                    char kn[64] = {0};
+                    const int idx = (k / 8) * P_SLOT + P_K + k % 8;
+                    e->dispatcher(e, effGetParamName, idx, 0, kn, 0);
+                    if ((!strcmp(kn, "Decay") || !strcmp(kn, "Feedback")) && e->getParameter(e, idx) > 0.999f) holds = 1;
+                }
+                const int good = ok && peak < 3.99f && (holds || end < 0.003 || end < 0.85 * before);
+                printf("  %s program %-18s %s: %s + %s, peak %.2f, end %.4f\n", good ? "    " : "FAIL", t, rt, a0, a1, peak, end);
+                bad += !good;
+                if (n > 200) break;
+            }
+            printf("  programs: %d played, %d bad\n", n, bad);
+            CHECK(n >= 20 && !bad, "the programs");
+            CHECK(routed, "Floating in Space didn't load two Blackhol3s in parallel");
+            e->dispatcher(e, effClose, 0, 0, NULL, 0);
+        }
+        {   /* PtchFuzz: both voices an octave down, all pitch, little fuzz: the note an octave down */
+            AEffect *e = one("PtchFuzz", 1.0f);
+            set_by_text(e, 0, "Fuzz", "0%");
+            set_by_text(e, 0, "Pitch A", "-12 st");
+            set_by_text(e, 0, "Pitch B", "-12 st");
+            set_by_text(e, 0, "Pitch Mix", "100%");
+            hz_in = 440;
+            float peak;
+            render(e, 3, g_sine, &peak);
+            const double f = peak_hz(buf, FS, 3 * FS, 100, 1000);
+            printf("  PtchFuzz, both voices -12 st on 440 Hz: strongest %.1f Hz\n", f);
+            CHECK(fabs(f - 220) < 4, "PtchFuzz's voices aren't an octave down");
+            e->dispatcher(e, effClose, 0, 0, NULL, 0);
+        }
+
         printf("CPU (128-frame blocks, this machine)\n");
         for (int a = 0; a < nalgo; a++) {
             AEffect *e = one(names[a], 0.5f);

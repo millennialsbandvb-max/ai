@@ -143,6 +143,14 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   Presets: 655 of our versions of the H90's factory algorithm presets (`src/presets.h`, made by
   `presets/make_presets.py` from `presets/h90_preset_names.json`, which `presets/parse_manual.py` pulled from the H90
   manual's Algorithm Guide: names only, so settings are guessed from each name over the algorithm's defaults).
+  Real settings: the user's H90 backup (Eventide Control "Backup", .h90; a FlatBuffers file, base64 JSON for H9-family
+  algorithms) is read by `presets/h90_backup.py` into `h90_backup.json`; `h90_convert.py` maps each H90 algorithm's
+  settings onto ours (units partly worked out from the play-through video's audio: H9 delay values under 60 are
+  2.45*v^2 ms; PitchFuzz pitch 25 = unison). make_presets.py (4th arg) overwrites/adds those presets and writes
+  PROGRAMS[] (24 factory programs: both slots + routing; Program stepper params 48..50 on the PROGRAM tab). The
+  routing flag is a guess (header byte 3 = parallel, from "Floating in Space"). That data also reshaped PtchFuzz (fuzz
+  on two pitch voices + delay), Crystalz (delays to 2.5 s, a Reverb knob), Blackhol3 (Predelay), Shimmer (voices
+  +4/-7 cents) and Hall/SP2O16 predelay (to 1 s).
   Per slot a Preset stepper (params 42..47, after Output): < > step within the algorithm and on; an exact value (a
   project loading) only restores the name, never the knobs. The test plays every preset (8 s sound, 8 s silence). Each slot = algorithm (a `popup`, 56 options incl. Off; its `__open` flag param is ours to
   clear on a pick) + Mix + 8 knobs whose meaning comes from `ALGOS[].k[]` (name, map, range, default; choosing an
