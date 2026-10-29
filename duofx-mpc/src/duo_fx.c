@@ -1,5 +1,5 @@
 /* Duo FX: an H90-style dual multi-effect for MPC OS (VST2, stereo). Two slots, A and B, in series (A then B) or
- * in parallel, each running one of 55 algorithms in six groups (delay, distortion, pitch, modulation, reverb,
+ * in parallel, each running one of 56 algorithms in six groups (delay, distortion, pitch, modulation, reverb,
  * granular), named after the H90 algorithms they imitate (near-miss spellings: this is a personal build). Each
  * algorithm has up to 8 knobs of its own (names, ranges, defaults in ALGOS[]); the slot's eight
  * knob parameters take those meanings, and eight read-only "name" parameters tell the page what each knob is.
@@ -60,12 +60,39 @@ static const char *const VOICE_N[] = {"Single", "Dual"};
 static const char *const SHIM_PITCHES[] = {"-12 st", "-5 st", "+7 st", "+12 st", "+19 st", "+24 st"};
 static const float SHIM_ST[] = {-12, -5, 7, 12, 19, 24};
 static const char *const CHORUS_MODES[] = {"Chorus", "Vibrato"};
+/* DrivPdls: ten classic drive pedals, our own models of their kinds of circuit (near-miss names, personal use) */
+static const char *const PEDALS[] = {"Tube Scrmr", "Klone", "Rodent", "Big Muf", "Fuz Face", "Blues Drvr", "DS-l",
+                                     "Timmie", "0CD", "Guvnr"};
+enum { CL_SOFT, CL_HARD, CL_ASYM, CL_MUFF, CL_MOSFET, CL_FACE };   /* clipping */
+enum { TN_LP, TN_SCOOP, TN_TILT };                                  /* tone circuit */
+typedef struct {
+    float pre_hp;        /* input coupling (Hz): how much bass gets in */
+    float mid_hp;        /* > 0: only the part above it is driven, the lows pass clean (the TS mid hump) */
+    float gain_lo, gain_hi;   /* drive range (dB) */
+    float bw_lo, bw_hi;  /* the gain stage's bandwidth (Hz), at no drive and at full (op-amps darken as they gain) */
+    int clip, tone;
+    float tone_lo, tone_hi;   /* TN_LP: the lowpass sweep (Hz) */
+    float clean;         /* clean signal kept inside the pedal (the Klon's blend), at no drive */
+    float trim;          /* output trim (dB): the pedals about as loud as each other */
+} PedalDef;
+static const PedalDef PEDAL_DEFS[10] = {
+    {30, 720, 0, 40, 9000, 6000, CL_SOFT, TN_LP, 700, 5000, 0, -1},        /* green screamer: mids, smooth */
+    {80, 300, 6, 42, 10000, 8000, CL_ASYM, TN_TILT, 0, 0, 0.6f, -2.7f},     /* the transparent-ish gold one: clean blend */
+    {60, 0, 12, 64, 20000, 2500, CL_HARD, TN_LP, 600, 16000, 0, -2.2f},       /* rodent: op-amp into hard diodes */
+    {100, 0, 24, 56, 6000, 5000, CL_MUFF, TN_SCOOP, 0, 0, 0, 1.4f},          /* big fuzz: two stages, scooped mids */
+    {20, 0, 16, 48, 9000, 7000, CL_FACE, TN_LP, 2500, 8000, 0, -1.1f},        /* round fuzz: biased, sputtering */
+    {40, 0, 0, 44, 12000, 9000, CL_ASYM, TN_TILT, 0, 0, 0, -1.6f},            /* blue driver: wide, amp-like */
+    {100, 0, 14, 54, 16000, 6000, CL_HARD, TN_SCOOP, 0, 0, 0, 1.3f},          /* orange distortion: hard, scooped */
+    {40, 0, 0, 34, 16000, 12000, CL_SOFT, TN_LP, 2000, 14000, 0.15f, -2.9f},   /* the transparent one */
+    {50, 0, 6, 50, 10000, 7000, CL_MOSFET, TN_LP, 1500, 9000, 0, -2.9f},      /* the obsessive one: MOSFET clipping */
+    {60, 450, 10, 50, 12000, 7000, CL_HARD, TN_TILT, 0, 0, 0, -2.3f},          /* amp-in-a-box British crunch */
+};
 
 /* ==== the algorithms ========================================================================================= */
 enum {   /* in the pop-up's order */
     /* delay */ A_BAND, A_BBD, A_DIGITAL, A_DUCKED, A_FPONG, A_HEADS, A_MODDLY, A_MULTITAP, A_REVDLY, A_TAPE, A_TAPCLOUD,
     A_VINTAGE,
-    /* distortion */ A_FUZZOCT, A_CRUSH, A_FUZZDLY, A_BANDDRIVE, A_MIDDRIVE,
+    /* distortion */ A_FUZZOCT, A_CRUSH, A_FUZZDLY, A_BANDDRIVE, A_MIDDRIVE, A_PEDALS,
     /* pitch */ A_REVSHIFT, A_DIATONIC, A_VSHIFTER, A_PMODHARM, A_ARP, A_MICRO, A_OCTAVER, A_BEND, A_POLYBEND, A_POLYSHIFT,
     A_SYNTH, A_STEPSHIFT, A_QUAD, A_RESONATOR, A_VOCAL, A_CORRECT,
     /* modulation */ A_CHORUS, A_FLANGER, A_TREMOLO, A_PHASER, A_VIBE, A_SFLANGER, A_SPHASER, A_TRICHORUS,
@@ -126,6 +153,9 @@ static const Algo ALGOS[kNumAlgos] = {
     [A_BANDDRIVE] = {"Sculpt3", G_DIST, 100, "Lows and highs driven separately, then blended",
         {HZ("Split", 100, 2000, 400), PCT("Low Drive", 30), PCT("High Drive", 60), LIN("Low Level", -24, 6, 0, "dB"),
          LIN("High Level", -24, 6, -3, "dB"), HZ("Filter", 1000, 16000, 7000), PCT("Comp", 30), NONE}},
+    [A_PEDALS] = {"DrivPdls", G_DIST, 100, "Ten classic overdrive, distortion and fuzz pedals",
+        {CHO("Pedal", PEDALS, 0), PCT("Drive", 50), PCT("Tone", 50), LIN("Level", -24, 6, -6, "dB"), LIN("Bass", -12, 12, 0, "dB"),
+         PCT("Blend", 0), NONE, NONE}},
     [A_MIDDRIVE] = {"WeedWackr", G_DIST, 100, "Mid-hump overdrive in the classic green-pedal style",
         {PCT("Drive", 45), PCT("Tone", 50), LIN("Level", -24, 12, -3, "dB"), HZ("Mid", 400, 1600, 720), LIN("Bass", -12, 6, -3, "dB"),
          CHO("Hard Clip", ONOFF, 0), PCT("Blend", 100), NONE}},
@@ -593,6 +623,22 @@ static void slot_control(Slot *s) {
         c[24] = db(V(6)); break;
     case A_FUZZDLY: c[20] = lp_coef(lerp(1500, 9000, PC(1)), fs); c[21] = db(V(2)); c[22] = powf(2, V(3) / 12); c[23] = powf(2, V(4) / 12); break;
     case A_BANDDRIVE: c[20] = lp_coef(V(0), fs); c[21] = db(V(3)); c[22] = db(V(4)); c[23] = lp_coef(V(5), fs); break;
+    case A_PEDALS: {
+        const PedalDef *pd = &PEDAL_DEFS[(int)V(0)];
+        c[20] = lp_coef(pd->pre_hp, fs);
+        c[21] = pd->mid_hp > 0 ? lp_coef(pd->mid_hp, fs) : 0;
+        c[22] = db(lerp(pd->gain_lo, pd->gain_hi, PC(1)));
+        c[23] = lp_coef(lerp(pd->bw_lo, pd->bw_hi, PC(1)), 2 * fs);   /* (the gain stage runs at 2x) */
+        c[24] = pd->tone == TN_LP ? lp_coef(expmap(pd->tone_lo, pd->tone_hi, PC(2)), fs) : pd->tone == TN_SCOOP ? lp_coef(650, fs) : lp_coef(1000, fs);
+        c[25] = pd->tone == TN_SCOOP ? lp_coef(1100, fs) : db(lerp(-12, 9, PC(2)));
+        c[26] = db(V(3) + pd->trim);
+        c[27] = db(V(4)) - 1; c[28] = lp_coef(180, fs);
+        c[29] = pd->clean * (1 - PC(1));
+        c[30] = lp_coef(11000, 2 * fs);   /* the 2x stream's anti-alias filter (two poles) */
+        c[31] = lp_coef(12, fs);          /* DC: asymmetric clipping leaves some */
+        c[32] = (float)pd->clip; c[33] = (float)pd->tone;
+        break;
+    }
     case A_MIDDRIVE: c[21] = lp_coef(lerp(1500, 8000, PC(1)), fs); c[22] = db(V(2)); c[23] = db(V(4));
         c[24] = lp_coef(V(3) * 0.4f, fs); break;
     case A_REVSHIFT:   /* (and a plain reverb after the delays) */
@@ -944,6 +990,56 @@ static void run_algo(Slot *s, const float in[2], float out[2]) {
             const float yl = tanh_fast(lo * (1 + PC(1) * 30)) * c[21];
             const float yh = softclip(hi * (1 + PC(2) * 60)) * c[22];
             out[ch] = lp(&s->op[ch][1], (yl + yh) * comp, c[23]);
+        }
+        break;
+    }
+    case A_PEDALS: {
+        const int clip = (int)c[32], tone = (int)c[33];
+        for (int ch = 0; ch < 2; ch++) {
+            float *st = s->st[ch];
+            OnePole *op = s->op[ch];
+            const float x = hp(&op[0], in[ch], c[20]);
+            float lows = 0, drv = x;
+            if (c[21] > 0) { lows = lp(&op[1], x, c[21]); drv = x - lows; }   /* the mid hump: lows pass clean */
+            /* the gain stage and clipper at twice the rate (two half-steps), then filtered back down */
+            float y = 0;
+            for (int h = 0; h < 2; h++) {
+                const float u = (h ? drv : 0.5f * (st[0] + drv)) * c[22];
+                float v = lp(&op[2], u, c[23]);
+                switch (clip) {
+                case CL_SOFT: v = tanh_fast(v); break;
+                case CL_HARD: v = clampf(v, -1, 1); v = v - v * v * v * 0.15f; break;
+                case CL_ASYM: v = v > 0 ? tanh_fast(v) : tanh_fast(v * 1.5f) * 0.7f; break;
+                case CL_MOSFET: {   /* open top, harder bottom */
+                    const float b = clampf(v, -0.85f, 0);
+                    v = v > 0 ? tanh_fast(v * 0.8f) * 1.15f : b * (1 - 0.1f * b * b);
+                    break;
+                }
+                case CL_MUFF: {   /* two clipping stages with a coupling cap between them */
+                    v = tanh_fast(v);
+                    st[1] += 0.02f * (v - st[1]);
+                    v = tanh_fast((v - st[1]) * 6);
+                    break;
+                }
+                default: {   /* the round fuzz: biased, so one side clips first and it gates when soft */
+                    const float b = 0.35f;
+                    v = tanh_fast(v + b) - tanh_fast(b);
+                    v = v > 0 ? v : v * 1.3f;
+                    v = clampf(v, -0.9f, 0.9f);
+                    break;
+                }
+                }
+                y = lp(&op[4], lp(&op[3], v, c[30]), c[30]);
+            }
+            st[0] = drv;
+            y += lows * 0.9f + x * c[29];
+            st[2] += c[31] * (y - st[2]);   /* DC out */
+            y -= st[2];
+            if (tone == TN_LP) y = lp(&op[5], y, c[24]);
+            else if (tone == TN_SCOOP) { const float lo = lp(&op[5], y, c[24]), hi = y - lp(&op[6], y, c[25]); y = lerp(lo, hi, PC(2)) * 1.5f; }
+            else { const float lo = lp(&op[5], y, c[24]); y = lo + (y - lo) * c[25]; }
+            y += lp(&op[7], y, c[28]) * c[27];   /* Bass */
+            out[ch] = lerp(y * c[26], in[ch], PC(5) * 0.999f);   /* Blend: some of your clean signal */
         }
         break;
     }

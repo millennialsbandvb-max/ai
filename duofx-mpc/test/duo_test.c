@@ -161,8 +161,8 @@ int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: %s <Duo-FX.so> [algorithm]\n", argv[0]); return 2; }
     void *h = dlopen(argv[1], RTLD_NOW);
     if (!h || !(*(void **)&entry = dlsym(h, "VSTPluginMain"))) { fprintf(stderr, "can't load %s\n", argv[1]); return 1; }
-    {   /* the algorithm names, from the plugin (56 options: the last is Off) */
-        nalgo = 56;
+    {   /* the algorithm names, from the plugin (57 options: the last is Off) */
+        nalgo = 57;
         AEffect *e = make();
         for (int a = 0; a < nalgo; a++) {
             e->setParameter(e, P_ALGO, (float)a / (float)(nalgo - 1));
@@ -372,6 +372,30 @@ int main(int argc, char **argv) {
             printf("  MIDI CC 86: A preset \"%s\", then \"%s\"\n", a1, a2);
             CHECK(strcmp(a1, "-") && strcmp(a1, a2), "CC 86 didn't step A's preset");
             e->dispatcher(e, effClose, 0, 0, NULL, 0);
+        }
+        {   /* DrivPdls: every pedal distorts (harmonics), stays finite, and they're about as loud as each other */
+            static const char *const PED[] = {"Tube Scrmr", "Klone", "Rodent", "Big Muf", "Fuz Face", "Blues Drvr", "DS-l",
+                                              "Timmie", "0CD", "Guvnr"};
+            double lo = 1e9, hi = -1e9;
+            for (int pdl = 0; pdl < 10; pdl++) {
+                AEffect *e = one("DrivPdls", 1.0f);
+                set_by_text(e, 0, "Pedal", PED[pdl]);
+                set_by_text(e, 0, "Drive", "50%");
+                hz_in = 220;
+                float peak;
+                const int ok = render(e, 2, g_sine, &peak);
+                const double f1 = tone_level(buf, FS / 2, 2 * FS, 220), h2 = tone_level(buf, FS / 2, 2 * FS, 440),
+                             h3 = tone_level(buf, FS / 2, 2 * FS, 660), lvl = 20 * log10(rms(buf, FS / 2, 2 * FS) + 1e-9);
+                const double thd = sqrt(h2 * h2 + h3 * h3) / (f1 + 1e-9);
+                printf("  %-11s level %+5.1f dB, harmonics %.0f%%, peak %.2f\n", PED[pdl], lvl, 100 * thd, peak);
+                CHECK(ok && peak < 3.99f, "a pedal isn't finite or hits the ceiling");
+                CHECK(thd > 0.03, "a pedal doesn't distort");
+                if (lvl < lo) lo = lvl;
+                if (lvl > hi) hi = lvl;
+                e->dispatcher(e, effClose, 0, 0, NULL, 0);
+            }
+            printf("  pedal levels within %.1f dB of each other\n", hi - lo);
+            CHECK(hi - lo < 6, "the pedals' levels are too far apart");
         }
         {   /* PtchFuzz: both voices an octave down, all pitch, little fuzz: the note an octave down */
             AEffect *e = one("PtchFuzz", 1.0f);
