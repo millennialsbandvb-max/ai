@@ -249,8 +249,10 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   "look" (tools/pedal_looks.h: the palette and, in the plugins, which look each algorithm / DrivPdls pedal /
   Ambient machine takes; duo_look, amb_look); a tab's `looks key=<param>` line becomes one full-page art line per
   look with when=<param>:<n> (tools/pedal_looks.py, which also patches shadow_skin to draw mode images in layout
-  order so the colour lies under frames). Look backgrounds are smooth (texture doesn't compress). Sizes: Quad Rig
-  page ~19 MB, Duo ~8 MB. Device-untested: the look switching live (when= is device-proven for popups/modes).
+  order so the colour lies under frames). Look backgrounds are smooth (texture doesn't compress; 64 colours).
+  **Space:** the Hakai 3.10.0 rootfs has 85.4 MB free and patch_image.sh wants twice what it adds, so the bundle
+  (work/extra: plugins + pages) must stay under ~39.6 MB; the pedal look first came to 43 MB and failed.
+  png_shrink.py also writes TUI.json unindented (Quad Rig's 5.5 MB -> 1.5 MB). Device-untested: the look switching live (when= is device-proven for popups/modes).
 - `server/test_page.js` (run by build.sh) loads the page and fails on script errors: a top-level error once shipped
   and stopped the whole page from connecting.
 - The remote's typing is a virtual USB keyboard (uinput, "MPC Remote Keyboard"), made the first time the page types;
