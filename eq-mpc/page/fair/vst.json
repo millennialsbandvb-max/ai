@@ -1,0 +1,9 @@
+{
+  "name": "Fairchyld 670",
+  "vendor": "Other Things",
+  "uid": "F670",
+  "version": 1000,
+  "so": "Fairchyld-670.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}

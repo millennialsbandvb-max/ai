@@ -1,0 +1,14 @@
+{
+  "name": "Fairchyld 670",
+  "params": [
+    {"key": "input", "name": "Input", "min": -20, "max": 20, "default": 0, "unit": "dB"},
+    {"key": "threshold", "name": "Threshold", "min": 0, "max": 10, "default": 5},
+    {"key": "time", "name": "Time", "min": 1, "max": 6, "default": 2},
+    {"key": "bias", "name": "Bias", "min": 0, "max": 10, "default": 5},
+    {"key": "output", "name": "Output", "min": -20, "max": 20, "default": 0, "unit": "dB"},
+    {"key": "mix", "name": "Mix", "min": 0, "max": 100, "default": 100, "unit": "%"},
+    {"key": "mode", "name": "Mode", "options": ["Linked", "Dual", "Lat/Vert"], "default": 0},
+    {"key": "comp", "name": "Comp", "options": ["Off", "On"], "default": 1},
+    {"key": "gr", "name": "GR", "min": 0, "max": 20, "default": 0, "unit": "dB"}
+  ]
+}

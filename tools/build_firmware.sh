@@ -50,7 +50,7 @@ echo "== Ambient Lab"
 (cd "$REPO/ambient-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
 echo "== Quad Rig (four effects + a NAM amp)"
 (cd "$REPO/quadrig-mpc" && ./build.sh host >/dev/null && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
-echo "== EQs (GQ31 Graphic, X-Para EQ)"
+echo "== EQs and dynamics (31 Smashly, X-Para EQ, Fairchyld 670)"
 (cd "$REPO/eq-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
 echo "== MPC Browser (the browser's page on the MPC's screen)"
 (cd "$REPO/browser-mpc" && ./build.sh bundle >/dev/null 2>&1)

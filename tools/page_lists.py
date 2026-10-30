@@ -164,6 +164,28 @@ patch('''def build(layout_path, params, skin_dir, art_bin, png_from_ppm):''', ''
     out.save(path)
 
 
+def vu_strip(path, w, h):
+    """A VU meter's needle (tools/vu_meter.py has the face and the same geometry): FRAMES - 1 frames, frame k = GR
+    20 * k / (that - 1) dB, transparent but for the needle and the pivot's cover."""
+    import math
+    from PIL import Image, ImageDraw
+    S, nf = 3, FRAMES - 1
+    px, py, r = w * S / 2, h * S * 1.18, h * S * 0.98
+    out = Image.new("RGBA", (w, h * nf), (0, 0, 0, 0))
+    for k in range(nf):
+        gr = 20.0 * k / (nf - 1)
+        a = math.radians(-46 + 92 * (1 - (gr / 20) ** 0.6))
+        f = Image.new("RGBA", (w * S, h * S), (0, 0, 0, 0))
+        d = ImageDraw.Draw(f)
+        x1, y1 = px + r * 0.93 * math.sin(a), py - r * 0.93 * math.cos(a)
+        x0, y0 = px + r * 0.30 * math.sin(a), py - r * 0.30 * math.cos(a)
+        d.line((x0 + 2 * S, y0 + 2 * S, x1 + 2 * S, y1 + 2 * S), fill=(0, 0, 0, 70), width=2 * S)   # shadow
+        d.line((x0, y0, x1, y1), fill=(20, 18, 16, 255), width=2 * S)
+        d.rectangle((6 * S, h * S * 0.84, w * S - 6 * S, h * S - 6 * S), fill=(40, 38, 34, 255))   # the pivot's cover
+        out.paste(f.resize((w, h), Image.LANCZOS), (0, k * h))
+    out.save(path)
+
+
 def build(layout_path, params, skin_dir, art_bin, png_from_ppm):''')
 
 patch('''OPEN_SUFFIX = "__open"''', '''PICK_KEYS = ["pick_%d" % (r + 1) for r in range(24)] + ["pick_prev", "pick_next", "pick_close", "pick_title"]
@@ -177,16 +199,17 @@ OPEN_SUFFIX = "__open"''')
 patch('''            elif kind in ("slider_v", "slider_h"):
                 sw_, sh_ = w["w"], w["h"]''', '''            elif kind == "slider_v" and w.get("narrow"):
                 sw_, sh_ = w["w"], w["h"]
-                img = "sh_fader_%dx%d" % (sw_, sh_)
+                vu = bool(w.get("vu"))   # (a VU needle over a printed face: tools/vu_meter.py; no touches)
+                img = "sh_%s_%dx%d" % ("vu" if vu else "fader", sw_, sh_)
                 if not os.path.exists(os.path.join(skin_dir, img + ".png")):
-                    fader_strip(os.path.join(skin_dir, img + ".png"), sw_, sh_)
-                key = "shSliderN_%dx%d" % (sw_, sh_)
-                defs.setdefault(key, _local(key, [_action("Mouse Down", "Q-Link")], [
+                    (vu_strip if vu else fader_strip)(os.path.join(skin_dir, img + ".png"), sw_, sh_)
+                key = "shSlider%s_%dx%d" % ("VU" if vu else "N", sw_, sh_)
+                defs.setdefault(key, _local(key, [] if vu else [_action("Mouse Down", "Q-Link")], [
                     _focus(sw_, sh_),
                     _sub("Knob", {"version": 5, "knobType": "FilmStrip", "filmStrip": img + ".png", "numFrames": FRAMES - 1,
                                   "invert": False, "dragOrientation": "Vertical", "handleName": "Data"},
                          _bounds(0, 0, sw_, sh_), "Slider")]))
-                kids.append(_placed(key, name, i, w["cx"] - sw_ // 2, w["cy"] - sh_ // 2, sw_, sh_))
+                kids.append(_placed(key, name, i, w["cx"] - sw_ // 2, w["cy"] - sh_ // 2, sw_, sh_, focus="No" if vu else "Yes"))
             elif kind in ("slider_v", "slider_h"):
                 sw_, sh_ = w["w"], w["h"]''')
 patch('''    if not lab or k in ("knob", "toggle", "slider_v", "slider_h"):
