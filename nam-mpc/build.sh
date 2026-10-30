@@ -79,9 +79,12 @@ skin() {
   [ -x "$B/shadow_art" ] || gcc -O2 -I"$mv/tools/vendor/force-shadow/tools" -o "$B/shadow_art" "$mv/tools/shadow_art.c" -lm
   # a copy of the generator with every text size scaled up (skin/text_scale.py); frame titles in Titillium Bold
   rm -rf "$tools" && cp -a "$mv/tools" "$tools"
+  python3 "$HERE/../tools/page_lists.py" "$tools/shadow_skin.py"   # steppers with a list open it (tools/picklist.h)
   python3 "$HERE/skin/text_scale.py" "$tools/shadow_skin.py" "${TEXT_SCALE:-1.35}"
   mkdir -p "$B/port/build"
-  cp "$HERE/vst.json" "$HERE/params.json" "$HERE/layout.conf" "$B/port/"
+  cp "$HERE/vst.json" "$HERE/layout.conf" "$B/port/"
+  python3 "$HERE/../tools/pick_params.py" "$HERE/params.json" folder="Model Folders" model=Models ir_folder="IR Folders" ir=IRs \
+    > "$B/port/params.json"   # + the full-page lists (src/nam_mpc.cpp LISTS)
   cp "$B/shadow_art" "$B/port/build/"
   (cd "$B/port" && SHADOW_TITLE_FONT="$mv/tools/html_art/fonts/TitilliumWeb-Bold.ttf" python3 "$tools/gen_vst.py" vst.json)
   rm -rf "$B/skin" && cp -a "$B/port/build/skin" "$B/skin"

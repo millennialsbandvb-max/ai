@@ -8,7 +8,7 @@
  * Building blocks (lines, filters, FDN reverb, pitch tracker) from vocal-mpc/src/vocal_core.h. Our own code.
  * Safety, as in every plugin here: input cleaned, reset if the output goes bad or past +36 dB, output capped at
  * +12 dB (one NaN reaching MPC's mixer silences it until restart). */
-#include "vocal_core.h"
+#include "vocal_core.h"   /* (and tools/picklist.h) */
 
 #define NK 8
 /* ==== knob meanings (as in Duo FX) ========================================================================= */
@@ -726,7 +726,22 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
     }
 }
 
-__attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallback master) {
+/* the full-page list of the presets (tools/picklist.h; Quad Rig calls this for its slots' engines too) */
+int amb_pick(AEffect *e, int list, int op, int i, char *out, int max) {
+    Plugin *s = (Plugin *)e->object;
+    (void)list;
+    if (op == PL_COUNT) return NPRESETS;
+    if (op == PL_CURRENT) return s->preset >= 0 && s->preset < NPRESETS && PRESETS[s->preset].machine == option_of(s->norm[kMachine], kNumMachines) ? s->preset : -1;
+    if (i < 0 || i >= NPRESETS) return 0;
+    if (op == PL_NAME) snprintf(out, (size_t)max, "%s", PRESETS[i].name);
+    else if (op == PL_CHOOSE) load_preset(s, i);
+    return 0;
+}
+static const char *const LIST_KEYS[] = {"preset"};
+static const char *const LIST_TITLES[] = {"Presets"};
+static const PickLists LISTS = {1, LIST_KEYS, LIST_TITLES, amb_pick};
+
+static AEffect *make(audioMasterCallback master) {
     Plugin *s = calloc(1, sizeof *s);
     if (!s) return NULL;
     s->master = master;
@@ -754,6 +769,13 @@ __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallbac
     e->version = 1000;
     return e;
 }
+__attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallback master) {
+#ifdef PICKLIST_OFF
+    return make(master);
+#else
+    return pl_wrap(master, make, &LISTS);
+#endif
+}
 
 #ifdef AMB_PARAMS
 /* the page's parameter list (params.json), from the tables above */
@@ -769,8 +791,9 @@ int main(void) {
     printf("    {\"key\": \"preset\", \"name\": \"Preset\", \"min\": 0, \"max\": 1, \"display\": \"string\", \"type\": \"stepper\"},\n");
     printf("    {\"key\": \"preset_prev\", \"name\": \"Preset <\", \"options\": [\"Off\", \"On\"], \"momentary\": true},\n");
     printf("    {\"key\": \"preset_next\", \"name\": \"Preset >\", \"options\": [\"Off\", \"On\"], \"momentary\": true},\n");
-    printf("    {\"key\": \"output\", \"name\": \"Output\", \"min\": -24, \"max\": 12, \"default\": 0, \"unit\": \"dB\"}\n");
-    printf("  ]\n}\n");
+    printf("    {\"key\": \"output\", \"name\": \"Output\", \"min\": -24, \"max\": 12, \"default\": 0, \"unit\": \"dB\"}");
+    pl_params_json(&LISTS, stdout);
+    printf("\n  ]\n}\n");
     return 0;
 }
 #endif

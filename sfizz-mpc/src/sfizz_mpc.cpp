@@ -31,6 +31,7 @@
 
 #include "sfizz.h"
 #include "vst2.h"
+#include "../../tools/picklist.h"
 
 namespace fs = std::filesystem;
 
@@ -540,7 +541,22 @@ static fs::path plugin_dir() {
     return {};
 }
 
-extern "C" __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallback master) {
+/* the full-page list of the instruments (tools/picklist.h) */
+static int sfz_pick(AEffect *e, int, int op, int i, char *out, int max) {
+    Plugin *s = P(e);
+    if (op == PL_CHOOSE) { s->post([&] { s->pick = i; }); return 0; }   /* (the worker loads it) */
+    std::lock_guard<std::mutex> l(s->lib_mutex);
+    const int n = (int)s->files.size();
+    if (op == PL_COUNT) return n;
+    if (op == PL_CURRENT) return s->current;
+    if (op == PL_NAME && i >= 0 && i < n) copy_str(out, s->files[i].stem().string().c_str(), (size_t)max);
+    return 0;
+}
+static const char *const LIST_KEYS[] = {"instrument"};
+static const char *const LIST_TITLES[] = {"Instruments"};
+static const PickLists LISTS = {1, LIST_KEYS, LIST_TITLES, sfz_pick};
+
+static AEffect *make(audioMasterCallback master) {
     Plugin *s = new (std::nothrow) Plugin();
     if (!s) return nullptr;
     s->master = master;
@@ -571,4 +587,7 @@ extern "C" __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMa
     e->version = PLUG_VERSION;
     e->object = s;
     return e;
+}
+extern "C" __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallback master) {
+    return pl_wrap(master, make, &LISTS);
 }

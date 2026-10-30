@@ -18,6 +18,7 @@
 #include <string.h>
 
 #include "vst2.h"
+#include "../../tools/picklist.h"
 
 #define PI 3.14159265358979f
 #define VC_VENDOR "Other Things"
@@ -83,7 +84,8 @@ static void pdisplay(const ParamDef *p, float n, char *t) {   /* (not K_PRESET: 
     else snprintf(t, 24, fabsf(v) >= 10 ? "%.1f %s" : "%.2f %s", v, p->unit);
 }
 /* params.json for the page kit, from the table */
-static void write_params_json(const char *plugin, const ParamDef *P, int n) {
+/* (pl: the plugin's full-page lists, tools/picklist.h, or NULL) */
+static void write_params_json(const char *plugin, const ParamDef *P, int n, const PickLists *pl) {
     printf("{\n  \"name\": \"%s\",\n  \"params\": [\n", plugin);
     for (int i = 0; i < n; i++) {
         const ParamDef *p = &P[i];
@@ -97,9 +99,10 @@ static void write_params_json(const char *plugin, const ParamDef *P, int n) {
         else if (p->kind == K_PRESET) printf(", \"min\": 0, \"max\": 1, \"display\": \"string\", \"type\": \"stepper\"");
         else printf(", \"min\": %g, \"max\": %g, \"default\": %g%s%s%s", p->lo, p->hi, p->def, p->unit[0] ? ", \"unit\": \"" : "",
                     p->unit, p->unit[0] ? "\"" : "");
-        printf("}%s\n", i < n - 1 ? "," : "");
+        printf("}%s", i < n - 1 ? ",\n" : "");
     }
-    printf("  ]\n}\n");
+    if (pl) pl_params_json(pl, stdout);
+    printf("\n  ]\n}\n");
 }
 
 /* ==== building blocks ======================================================================================= */

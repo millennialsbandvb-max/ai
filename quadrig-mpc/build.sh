@@ -34,9 +34,9 @@ objects() {   # objects <cc> <c++> <obj dir> <flags...>: the engines and Quad Ri
     if [ ${#pids[@]} -ge "$JOBS" ]; then wait "${pids[0]}"; pids=("${pids[@]:1}"); fi
   done
   for f in "${pids[@]}"; do wait "$f"; done
-  "$cxx" -std=c++20 "$@" "${NINC[@]}" "${NDEFS[@]}" -DVSTPluginMain=nam_entry -c "$REPO/nam-mpc/src/nam_mpc.cpp" -o "$obj/nam_mpc.o"
-  "$cc" "$@" -DVSTPluginMain=duo_entry -I"$REPO/nam-mpc/src" -c "$REPO/duofx-mpc/src/duo_fx.c" -o "$obj/duo_fx.o"
-  "$cc" "$@" -Wno-unused-function -DVSTPluginMain=amb_entry -I"$REPO/vocal-mpc/src" -I"$REPO/nam-mpc/src" \
+  "$cxx" -std=c++20 "$@" "${NINC[@]}" "${NDEFS[@]}" -DVSTPluginMain=nam_entry -DPICKLIST_OFF -c "$REPO/nam-mpc/src/nam_mpc.cpp" -o "$obj/nam_mpc.o"
+  "$cc" "$@" -DVSTPluginMain=duo_entry -DPICKLIST_OFF -I"$REPO/nam-mpc/src" -c "$REPO/duofx-mpc/src/duo_fx.c" -o "$obj/duo_fx.o"
+  "$cc" "$@" -Wno-unused-function -DVSTPluginMain=amb_entry -DPICKLIST_OFF -I"$REPO/vocal-mpc/src" -I"$REPO/nam-mpc/src" \
     -c "$REPO/ambient-mpc/src/ambient.c" -o "$obj/ambient.o"
   "$cc" "$@" -Wall -Wextra -I"$REPO/nam-mpc/src" -c "$HERE/src/quad_rig.c" -o "$obj/quad_rig.o"
 }

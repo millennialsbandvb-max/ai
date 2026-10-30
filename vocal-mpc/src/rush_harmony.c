@@ -148,5 +148,5 @@ __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallbac
 }
 
 #ifdef VC_PARAMS
-int main(void) { write_params_json("HedRush Harmony", P, kNumParams); return 0; }
+int main(void) { write_params_json("HedRush Harmony", P, kNumParams, NULL); return 0; }
 #endif

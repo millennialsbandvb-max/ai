@@ -43,6 +43,7 @@ namespace iplug { static constexpr double PI = 3.14159265358979323846; }
 #include "ResamplingContainer/ResamplingContainer.h"
 
 #include "vst2.h"
+#include "../../tools/picklist.h"
 
 namespace fs = std::filesystem;
 
@@ -801,7 +802,34 @@ static fs::path plugin_dir() {
     return {};
 }
 
-extern "C" __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallback master) {
+/* the full-page lists (tools/picklist.h): 0 the model folders, 1 the models in the chosen folder, 2 the IR
+ * folders, 3 the IRs in theirs, numbered as the Folder / Model / IR Folder / IR parameters count them.
+ * (Quad Rig calls this for its amp too.) */
+extern "C" int nam_pick(AEffect *e, int list, int op, int i, char *out, int max) {
+    Plugin *s = P(e);
+    if (op == PL_CHOOSE) {   /* (the worker loads it) */
+        s->post([&] {
+            if (list == 0) s->mfolder.pick = i;
+            else if (list == 1) s->model_pick = i;
+            else if (list == 2) s->ifolder.pick = i;
+            else s->ir_pick = i;
+        });
+        return 0;
+    }
+    std::lock_guard<std::mutex> l(s->lib_mutex);
+    const Library &lib = list < 2 ? s->models : s->irs;
+    const bool folders = list == 0 || list == 2;
+    const int n = folders ? (int)lib.folders.size() : (int)lib.view.size();
+    if (op == PL_COUNT) return n;
+    if (op == PL_CURRENT) return folders ? folder_index(lib) : view_pos(lib);
+    if (op == PL_NAME && i >= 0 && i < n) copy_str(out, folders ? lib.folders[i].c_str() : lib.files[lib.view[i]].stem().string().c_str(), (size_t)max);
+    return 0;
+}
+static const char *const LIST_KEYS[] = {"folder", "model", "ir_folder", "ir"};
+static const char *const LIST_TITLES[] = {"Model Folders", "Models", "IR Folders", "IRs"};
+static const PickLists LISTS = {4, LIST_KEYS, LIST_TITLES, nam_pick};
+
+static AEffect *make(audioMasterCallback master) {
     static std::once_flag once;
     std::call_once(once, [] { nam::activations::Activation::enable_fast_tanh(); });
     Plugin *s = new (std::nothrow) Plugin();
@@ -836,4 +864,11 @@ extern "C" __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMa
     e->version = PLUG_VERSION;
     e->object = s;
     return e;
+}
+extern "C" __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallback master) {
+#ifdef PICKLIST_OFF
+    return make(master);
+#else
+    return pl_wrap(master, make, &LISTS);
+#endif
 }

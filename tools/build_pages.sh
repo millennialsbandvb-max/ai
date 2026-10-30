@@ -12,6 +12,7 @@ mv="$DEPS/mpc-vst-plugins-main" tools="$W/skin-tools"
 mkdir -p "$DEPS"
 [ -d "$mv" ] || unzip -q "$REPO/mpc-vst-plugins-main.zip" -d "$DEPS"
 rm -rf "$tools" && cp -a "$mv/tools" "$tools"
+python3 "$REPO/tools/page_lists.py" "$tools/shadow_skin.py"   # steppers with a list open it, not the knob menu
 python3 "$REPO/nam-mpc/skin/text_scale.py" "$tools/shadow_skin.py" "${TEXT_SCALE:-1.35}" >/dev/null
 patch() {   # patch <file> <old> <new>: exactly one match, or stop
   [ "$(grep -cF -- "$2" "$1")" = 1 ] || { echo "page patch no longer applies to $1: $2" >&2; exit 1; }

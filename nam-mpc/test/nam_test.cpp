@@ -92,7 +92,7 @@ int main(int argc, char **argv) {
     AEffect *e = open(lib);
     CHECK(e && e->magic == VST_MAGIC, "AEffect magic 'VstP'");
     if (!e) return 1;
-    CHECK(e->numInputs == 2 && e->numOutputs == 2 && e->numParams == kNumParams, "2 in / 2 out, %d params", e->numParams);
+    CHECK(e->numInputs == 2 && e->numOutputs == 2 && e->numParams == kNumParams + 4 + 28 /* + the full-page lists, tools/picklist.h */, "2 in / 2 out, %d params", e->numParams);
     CHECK(e->dispatcher(e, effGetPlugCategory, 0, 0, nullptr, 0) == kPlugCategEffect, "category: effect");
     CHECK((e->flags & effFlagsProgramChunks) != 0, "saves state as a chunk");
     for (int i = 0; i < e->numParams; i++) {

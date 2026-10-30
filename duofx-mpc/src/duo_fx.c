@@ -14,6 +14,7 @@
 
 #include "vst2.h"
 #include "presets.h"
+#include "../../tools/picklist.h"
 
 #define PI 3.14159265358979f
 #define NK 8                        /* knobs per slot */
@@ -1872,7 +1873,38 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
     }
 }
 
-__attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallback master) {
+/* the full-page lists (tools/picklist.h): A's and B's presets (those of the slot's algorithm) and the programs.
+ * (Quad Rig calls this for its slots' Duo FX engines too.) */
+int duo_pick(AEffect *e, int list, int op, int i, char *out, int max) {
+    Plugin *s = (Plugin *)e->object;
+    if (list == 2) {
+        if (op == PL_COUNT) return NPROGRAMS;
+        if (op == PL_CURRENT) return s->program;
+        if (i < 0 || i >= NPROGRAMS) return 0;
+        if (op == PL_NAME) snprintf(out, (size_t)max, "%s", PROGRAMS[i].name);
+        else if (op == PL_CHOOSE) load_program(s, i);
+        return 0;
+    }
+    const int k = list, algo = algo_of(s, k);
+    int n = 0, cur = -1, at = -1;
+    for (int j = 0; j < NPRESETS; j++) {
+        if (PRESETS[j].algo != algo) continue;
+        if (j == s->preset[k]) cur = n;
+        if (n == i) at = j;
+        n++;
+    }
+    if (op == PL_COUNT) return n;
+    if (op == PL_CURRENT) return cur;
+    if (at < 0) return 0;
+    if (op == PL_NAME) snprintf(out, (size_t)max, "%s", PRESETS[at].name);
+    else if (op == PL_CHOOSE) load_preset(s, k, at);
+    return 0;
+}
+static const char *const LIST_KEYS[] = {"a_preset", "b_preset", "program"};
+static const char *const LIST_TITLES[] = {"A Presets", "B Presets", "Programs"};
+static const PickLists LISTS = {3, LIST_KEYS, LIST_TITLES, duo_pick};
+
+static AEffect *make(audioMasterCallback master) {
     sine_init();
     Plugin *s = calloc(1, sizeof *s);
     if (!s) return NULL;
@@ -1903,6 +1935,13 @@ __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallbac
     e->uniqueID = 0x44554f46;   /* 'DUOF' */
     e->version = 2000;
     return e;
+}
+__attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallback master) {
+#ifdef PICKLIST_OFF
+    return make(master);
+#else
+    return pl_wrap(master, make, &LISTS);
+#endif
 }
 
 #ifdef DUO_FX_PARAMS
@@ -1940,8 +1979,9 @@ int main(void) {
     printf("    {\"key\": \"program_next\", \"name\": \"Program >\", \"options\": [\"Off\", \"On\"], \"momentary\": true},\n");
     printf("    {\"key\": \"bypass\", \"name\": \"Bypass\", \"options\": [\"On\", \"Bypassed\"]},\n");
     printf("    {\"key\": \"a_bypass\", \"name\": \"A Bypass\", \"options\": [\"On\", \"Bypassed\"]},\n");
-    printf("    {\"key\": \"b_bypass\", \"name\": \"B Bypass\", \"options\": [\"On\", \"Bypassed\"]}\n");
-    printf("  ]\n}\n");
+    printf("    {\"key\": \"b_bypass\", \"name\": \"B Bypass\", \"options\": [\"On\", \"Bypassed\"]}");
+    pl_params_json(&LISTS, stdout);
+    printf("\n  ]\n}\n");
     return 0;
 }
 #endif

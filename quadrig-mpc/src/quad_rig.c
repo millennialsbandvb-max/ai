@@ -15,12 +15,16 @@
 #include <string.h>
 
 #include "vst2.h"
+#include "../../tools/picklist.h"
 
 enum { audioMasterVersion = 1 };
 
 AEffect *duo_entry(audioMasterCallback);
 AEffect *amb_entry(audioMasterCallback);
 AEffect *nam_entry(audioMasterCallback);
+int duo_pick(AEffect *, int, int, int, char *, int);   /* their full-page lists (tools/picklist.h) */
+int amb_pick(AEffect *, int, int, int, char *, int);
+int nam_pick(AEffect *, int, int, int, char *, int);
 
 #define NS 4
 /* the engines' own parameter numbers we use */
@@ -358,7 +362,21 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
     }
 }
 
-__attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallback master) {
+/* the full-page lists (tools/picklist.h): each slot's presets (its engine's), then the amp's folders, models, IR
+ * folders and IRs (NAM's) */
+static int quad_pick(AEffect *e, int list, int op, int i, char *out, int max) {
+    Plugin *s = (Plugin *)e->object;
+    if (list >= NS) return nam_pick(s->nam, list - NS, op, i, out, max);
+    if (s->kind[list] == 0) return duo_pick(s->duo[list], 0, op, i, out, max);
+    if (s->kind[list] == 1) return amb_pick(s->amb[list], 0, op, i, out, max);
+    return op == PL_CURRENT ? -1 : 0;   /* (Off: no presets) */
+}
+static const char *const LIST_KEYS[] = {"f1_preset", "f2_preset", "f3_preset", "f4_preset", "amp_folder", "amp_model", "amp_ir_folder", "amp_ir"};
+static const char *const LIST_TITLES[] = {"FX 1 Presets", "FX 2 Presets", "FX 3 Presets", "FX 4 Presets", "Model Folders", "Models",
+                                          "IR Folders", "IRs"};
+static const PickLists LISTS = {8, LIST_KEYS, LIST_TITLES, quad_pick};
+
+static AEffect *make(audioMasterCallback master) {
     fill_fx_names();
     Plugin *s = calloc(1, sizeof *s);
     if (!s) return NULL;
@@ -406,6 +424,7 @@ __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallbac
     e->version = 1000;
     return e;
 }
+__attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallback master) { return pl_wrap(master, make, &LISTS); }
 
 #ifdef QR_PARAMS
 /* the page's parameter list (params.json), with the effect names from the engines themselves
@@ -465,7 +484,8 @@ int main(int argc, char **argv) {
             q = end;
         }
     }
-    printf("  ]\n}\n");
+    pl_params_json(&LISTS, stdout);
+    printf("\n  ]\n}\n");
     return count == NAM_N ? 0 : 1;
 }
 #endif

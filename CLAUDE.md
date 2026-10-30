@@ -46,7 +46,7 @@ Tools needed: arm-linux-gnueabihf-gcc/g++, cmake, ninja, qemu-arm, python3 + PIL
 | `ambient-mpc/` | **Ambient Lab** (our own DSP, `src/ambient.c`, using `vocal-mpc/src/vocal_core.h`): 11 machines after ambient pedals (Mikrocosm granular looper, Moodd MK2 micro-looper, Partikle granular delay, Tensr tape stretch, NiteSky sequenced-filter shimmer, Cloudbrst swell/ensemble reverb, Polym00n cascading delays, Hedr4 3-voice pitched delay, Aftrneath delay swarm, Rainbow Mchn warbling shifter, Data Korrupt subharmonic synth); 8 knobs per machine (`MACHINES[]`, names live via effGetParamName), Hold (freeze; MIDI CC 64), 35 presets; `test/ambient_test.c` | ours |
 | `quadrig-mpc/` | **Quad Rig** (`src/quad_rig.c`): four effect slots (each any Duo FX algorithm or Ambient Lab machine, or Off) + a NAM MPC amp at a movable position; it hosts the real engines (duo_fx.c, ambient.c, nam_mpc.cpp compiled with VSTPluginMain renamed duo_entry / amb_entry / nam_entry) and passes parameters through; page RIG / FX 1-4 / AMP; `test/quad_test.c` | ours |
 | `browser-mpc/` | **MPC Browser** plugin: its page's lower area is painted `OVERLAY_MARKER`; the browser shows there on the MPC's own screen (see `mpc-remote/overlay.h`) | ours |
-| `tools/` | `build_firmware.sh`, `build_pages.sh` (shared page style: 1.35x text), `vst_test.c` (generic plugin test) | |
+| `tools/` | `build_firmware.sh`, `build_pages.sh` (shared page style: 1.35x text), `vst_test.c` (generic plugin test), `picklist.h` + `page_lists.py` + `pick_test.c` (full-page lists for steppers) | |
 | repo root zips | source the user provided (NAM, AudioDSPTools, Eigen, DPF, Dragonfly, sfizz, mpc-vst-plugins page tools) | |
 
 Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` (pages), `bundle`.
@@ -211,6 +211,19 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   order). Effect popup: 68 entries need cols=5 and a 240 px field (the list's column width is the field's).
   Adding a Duo algorithm or Ambient machine: update DUO_NALGO / AMB_NMACH (and the test's 67 / 68).
   CPU: the starting board (drive, chorus, A2 amp, tape echo, hall) ~10% of a PC core; untested on the device.
+- **Full-page lists** (the user disliked MPC's round knob menu on a stepper's name): tapping any stepper's name
+  (presets, Duo programs, NAM/Quad folders/models/IRs, SFZ instruments, VoxLive styles) opens a list over the
+  whole plugin area (title, Close, < Page / Page >, 24 rows in 3 columns; the current entry marked "> "). Plugin
+  side `tools/picklist.h`: `pl_wrap` puts an AEffect in front of the plugin (its host calls are re-sent under the
+  wrapper's AEffect, which is the one JUCE knows via resvd2) and appends `<key>__list` flags + pick_1..24,
+  pick_prev/next/close/title after the plugin's own params (indices of old params unchanged); each plugin answers
+  one function (PL_COUNT/NAME/CURRENT/CHOOSE: duo_pick, amb_pick, nam_pick are also called by Quad Rig, whose
+  engines are built -DPICKLIST_OFF). Rows rest at 0 (a tap's Toggle Switch makes 1; a project restore never picks)
+  and are re-reported (tiny value, then 0) when their text changes so MPC repaints. Page side `tools/page_lists.py`
+  patches the kit's stepper (build_pages.sh and nam-mpc's skin run it): a stepper whose `<key>__list` exists gets a
+  Toggle Switch field and an on-top panel (the popup pattern), no knob overlay. Static params.json: append with
+  `tools/pick_params.py`. Test: `tools/pick_test.c` (opens, pages, picks, checks the pick took). Device-untested:
+  the panel and rows on MPC (field pattern = the device-proven popups'), and the repaint of row text.
 - `server/test_page.js` (run by build.sh) loads the page and fails on script errors: a top-level error once shipped
   and stopped the whole page from connecting.
 - The remote's typing is a virtual USB keyboard (uinput, "MPC Remote Keyboard"), made the first time the page types;

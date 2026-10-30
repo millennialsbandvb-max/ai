@@ -332,7 +332,22 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
     }
 }
 
-__attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallback master) {
+/* the full-page list of the presets (tools/picklist.h) */
+static int rack_pick(AEffect *e, int list, int op, int i, char *out, int max) {
+    Plugin *s = (Plugin *)e->object;
+    (void)list;
+    if (op == PL_COUNT) return NPRESETS;
+    if (op == PL_CURRENT) return s->preset;
+    if (i < 0 || i >= NPRESETS) return 0;
+    if (op == PL_NAME) snprintf(out, (size_t)max, "%s", PRESETS[i].name);
+    else if (op == PL_CHOOSE) load_preset(s, i);
+    return 0;
+}
+static const char *const LIST_KEYS[] = {"preset"};
+static const char *const LIST_TITLES[] = {"Presets"};
+static const PickLists LISTS = {1, LIST_KEYS, LIST_TITLES, rack_pick};
+
+static AEffect *make(audioMasterCallback master) {
     hann_init();
     Plugin *s = calloc(1, sizeof *s);
     if (!s) return NULL;
@@ -357,6 +372,14 @@ __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallbac
     return e;
 }
 
+__attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallback master) {
+#ifdef PICKLIST_OFF
+    return make(master);
+#else
+    return pl_wrap(master, make, &LISTS);
+#endif
+}
+
 #ifdef VC_PARAMS
-int main(void) { write_params_json("Vocal Rack", P, kNumParams); return 0; }
+int main(void) { write_params_json("Vocal Rack", P, kNumParams, &LISTS); return 0; }
 #endif
