@@ -136,4 +136,29 @@ patch('''                kids.append(_placed(key, name, i, w["cx"] - cw // 2, w[
 patch('''OPEN_SUFFIX = "__open"''', '''PICK_KEYS = ["pick_%d" % (r + 1) for r in range(24)] + ["pick_prev", "pick_next", "pick_close", "pick_title"]
 OPEN_SUFFIX = "__open"''')
 
+# narrow vertical sliders (slider_v ... narrow=1, the GQ31 graphic's 31 bands): the stock slider is a 130+ px wide
+# component (square filmstrip frames, live name and value text under it), so side by side they'd overlap and a touch
+# could move the next band. This one is exactly the slider's own width (the square filmstrip hangs over both sides and
+# is clipped to it), no live text; its label is printed under it instead.
+patch('''            elif kind in ("slider_v", "slider_h"):
+                sw_, sh_ = w["w"], w["h"]''', '''            elif kind == "slider_v" and w.get("narrow"):
+                sw_, sh_ = w["w"], w["h"]
+                img = "sh_%s_%dx%d%s" % (kind, sw_, sh_, sfx)
+                sliders.add((img, sw_, sh_, 1, lid))
+                sq = max(sw_, sh_)
+                key = "shSliderN_%dx%d%s" % (sw_, sh_, sfx)
+                defs.setdefault(key, _local(key, [_action("Mouse Down", "Q-Link")], [
+                    _focus(sw_, sh_),
+                    _sub("Knob", {"version": 5, "knobType": "FilmStrip", "filmStrip": img + ".png", "numFrames": FRAMES - 1,
+                                  "invert": False, "dragOrientation": "Vertical", "handleName": "Data"},
+                         _bounds((sw_ - sq) // 2, (sh_ - sq) // 2, sq, sq), "Slider")]))
+                kids.append(_placed(key, name, i, w["cx"] - sw_ // 2, w["cy"] - sh_ // 2, sw_, sh_))
+            elif kind in ("slider_v", "slider_h"):
+                sw_, sh_ = w["w"], w["h"]''')
+patch('''    if not lab or k in ("knob", "toggle", "slider_v", "slider_h"):
+        return []''', '''    if lab and k == "slider_v" and w.get("narrow"):   # (page_lists.py: a narrow slider's label, printed)
+        return ["text|%d|%d|%s|%s|%s" % (w["cx"], w["cy"] + w["h"] // 2 + 18, 0.95, INK, lab)]
+    if not lab or k in ("knob", "toggle", "slider_v", "slider_h"):
+        return []''')
+
 open(path, "w").write(s)

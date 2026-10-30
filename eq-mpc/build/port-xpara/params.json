@@ -1,0 +1,25 @@
+{
+  "name": "X-Para EQ",
+  "params": [
+    {"key": "low_cut", "name": "Low Cut", "options": ["Off", "On"], "default": 0},
+    {"key": "low_cut_hz", "name": "Low Cut Freq", "min": 20, "max": 400, "default": 80, "unit": "Hz"},
+    {"key": "eq", "name": "EQ", "options": ["Off", "On"], "default": 1},
+    {"key": "b1_type", "name": "1 Type", "options": ["LCut", "LShv", "PEQ", "VEQ", "HShv", "HCut"], "default": 1},
+    {"key": "b1_freq", "name": "1 Freq", "min": 20, "max": 20000, "default": 100, "unit": "Hz"},
+    {"key": "b1_gain", "name": "1 Gain", "min": -15, "max": 15, "default": 0, "unit": "dB"},
+    {"key": "b1_q", "name": "1 Q", "min": 0.3, "max": 10, "default": 2},
+    {"key": "b2_type", "name": "2 Type", "options": ["LCut", "LShv", "PEQ", "VEQ", "HShv", "HCut"], "default": 2},
+    {"key": "b2_freq", "name": "2 Freq", "min": 20, "max": 20000, "default": 500, "unit": "Hz"},
+    {"key": "b2_gain", "name": "2 Gain", "min": -15, "max": 15, "default": 0, "unit": "dB"},
+    {"key": "b2_q", "name": "2 Q", "min": 0.3, "max": 10, "default": 2},
+    {"key": "b3_type", "name": "3 Type", "options": ["LCut", "LShv", "PEQ", "VEQ", "HShv", "HCut"], "default": 2},
+    {"key": "b3_freq", "name": "3 Freq", "min": 20, "max": 20000, "default": 2000, "unit": "Hz"},
+    {"key": "b3_gain", "name": "3 Gain", "min": -15, "max": 15, "default": 0, "unit": "dB"},
+    {"key": "b3_q", "name": "3 Q", "min": 0.3, "max": 10, "default": 2},
+    {"key": "b4_type", "name": "4 Type", "options": ["LCut", "LShv", "PEQ", "VEQ", "HShv", "HCut"], "default": 4},
+    {"key": "b4_freq", "name": "4 Freq", "min": 20, "max": 20000, "default": 10000, "unit": "Hz"},
+    {"key": "b4_gain", "name": "4 Gain", "min": -15, "max": 15, "default": 0, "unit": "dB"},
+    {"key": "b4_q", "name": "4 Q", "min": 0.3, "max": 10, "default": 2},
+    {"key": "output", "name": "Output", "min": -24, "max": 12, "default": 0, "unit": "dB"}
+  ]
+}
