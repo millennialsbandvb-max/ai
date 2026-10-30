@@ -89,6 +89,7 @@ skin() {
   local art_env=()   # the pedal look (tools/pedal_look.*), as tools/build_pages.sh does it
   if [ "${PEDAL_LOOK:-1}" = 1 ] && "${PEDAL_PY:-/usr/bin/python3}" -c "import playwright, PIL" 2>/dev/null; then
     python3 "$HERE/../tools/pedal_look.py" "$tools/html_art.py"
+    python3 "$HERE/../tools/pedal_looks.py" patch "$tools/shadow_skin.py"
     printf '#!/bin/sh\nexec %s %s "$@"\n' "${PEDAL_PY:-/usr/bin/python3}" "$tools/html_art.py" > "$B/html_art_run"
     chmod +x "$B/html_art_run"
     art_env=(SHADOW_ART="$B/html_art_run" PW_CHROMIUM="${PW_CHROMIUM:-$( [ -e /opt/pw-browsers/chromium ] && echo /opt/pw-browsers/chromium)}")

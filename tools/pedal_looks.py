@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Per-effect enclosure colours for the Duo FX / Quad Rig pages (the colours: tools/pedal_looks.h).
-   pedal_looks.py patch <shadow_skin.py>          mode images drawn in layout order (art first = under the frames)
+   pedal_looks.py patch <shadow_skin.py>          mode images drawn in layout order (art first = under the frames),
+                                                  and no Q-Link frame (MPC's orange box) on the page
    pedal_looks.py layout <layout.conf> <out dir>  writes <out dir>/layout.conf with every "looks key=<param>" line
                                                   replaced by one full-page art line per look (when=<param>:<n>)
                                                   and the look SVGs (look_<n>.svg) beside it
@@ -31,7 +32,19 @@ def patch(path):
                 script += baked_cmds(w, TITLE_FONT, base_dir)'''
     if s.count(old) != 1:
         raise SystemExit("pedal_looks.py: no longer applies to %s" % path)
-    open(path, "w").write(s.replace(old, new))
+    s = s.replace(old, new)
+    # no orange Q-Link frame on our pages (the user's ask): an empty list, as Akai's own SP1200 / MPC3000 / MPC60
+    # pages have it
+    old = '''"qlinkBoundsData": [qlink_bounds(tab, keys)]'''
+    if s.count(old) != 1:
+        raise SystemExit("pedal_looks.py: no longer applies to %s" % path)
+    open(path, "w").write(s.replace(old, '''"qlinkBoundsData": []'''))
+    studio = os.path.join(os.path.dirname(path), "studio.py")   # (its previews outline the frame: none now)
+    s = open(studio).read()
+    old = '''tab["qlinkBoundsData"][0].split()'''
+    if s.count(old) != 1:
+        raise SystemExit("pedal_looks.py: no longer applies to %s" % studio)
+    open(studio, "w").write(s.replace(old, '''(tab["qlinkBoundsData"] or ["0 0 0 0"])[0].split()'''))
 
 
 def layout(src, out):
