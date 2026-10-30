@@ -222,8 +222,13 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   and are re-reported (tiny value, then 0) when their text changes so MPC repaints. Page side `tools/page_lists.py`
   patches the kit's stepper (build_pages.sh and nam-mpc's skin run it): a stepper whose `<key>__list` exists gets a
   Toggle Switch field and an on-top panel (the popup pattern), no knob overlay. Static params.json: append with
-  `tools/pick_params.py`. Test: `tools/pick_test.c` (opens, pages, picks, checks the pick took). Device-untested:
-  the panel and rows on MPC (field pattern = the device-proven popups'), and the repaint of row text.
+  `tools/pick_params.py`. Test: `tools/pick_test.c` (opens, pages, picks, checks the pick took; extra args
+  "<param>=<text>" set things first). Choice knobs (DrivPdls' Pedal, Ambient Speed/Pitch/...): Duo, Ambient and Quad
+  have a list per knob slot (PL_COUNT -1 = not a choice now: it stays shut; PL_HEADING names it, "A Pedal"); the
+  kit's knob then opens it on a double tap (actions on a "List" handle mapped to `<key>__list`, instead of the knob
+  overlay) and on a tap of its value text (a clear field over it). Lists share one panel picture. Device-untested:
+  the panel and rows on MPC (field pattern = the device-proven popups'), the repaint of row text, and whether an
+  action's handleName other than Data works (the value-text tap is the fallback).
 - `server/test_page.js` (run by build.sh) loads the page and fails on script errors: a top-level error once shipped
   and stopped the whole page from connecting.
 - The remote's typing is a virtual USB keyboard (uinput, "MPC Remote Keyboard"), made the first time the page types;

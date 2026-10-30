@@ -22,8 +22,10 @@
 #include "../nam-mpc/src/vst2.h"
 
 #define PL_ROWS 24
-#define PL_MAX 64
-enum { PL_COUNT, PL_NAME, PL_CURRENT, PL_CHOOSE };
+#define PL_MAX 128
+/* PL_COUNT < 0: no list there now (a knob that isn't a choice): it doesn't open. PL_HEADING: a title for now into out
+ * (left empty: the PickLists one). */
+enum { PL_COUNT, PL_NAME, PL_CURRENT, PL_CHOOSE, PL_HEADING };
 typedef int (*pl_fn)(AEffect *e, int list, int op, int i, char *out, int max);
 typedef struct {
     int n;
@@ -68,7 +70,10 @@ static intptr_t pl_host(AEffect *e, int32_t op, int32_t idx, intptr_t val, void 
     return pl_real_master ? pl_real_master(e, op, idx, val, p, opt) : 0;   /* (while the plugin is being made) */
 }
 
-static int pl_count(PickWrap *w) { return w->open < 0 ? 0 : w->pl->fn(w->in, w->open, PL_COUNT, 0, NULL, 0); }
+static int pl_count(PickWrap *w) {
+    const int n = w->open < 0 ? 0 : w->pl->fn(w->in, w->open, PL_COUNT, 0, NULL, 0);
+    return n > 0 ? n : 0;
+}
 static int pl_pages(PickWrap *w) { const int n = pl_count(w); return n > 0 ? (n + PL_ROWS - 1) / PL_ROWS : 1; }
 static void pl_set(PickWrap *w, int j, float v) { w->norm[j] = v; w->report[j] = 1; }
 static void pl_rows_changed(PickWrap *w) {   /* new text: reported as a change, so MPC repaints the rows */
@@ -88,6 +93,7 @@ static void pl_setParameter(AEffect *e, int32_t i, float v) {
     if (j >= pl_nparams(w->pl)) return;
     const int press = v > 0.5f;
     if (j < n) {   /* a list's open flag (the stepper's field toggles it) */
+        if (press && w->pl->fn(w->in, j, PL_COUNT, 0, NULL, 0) < 0) { pl_set(w, j, 0); return; }   /* (nothing to list) */
         if (press) {
             if (w->open >= 0 && w->open != j) pl_set(w, w->open, 0);
             w->open = j;
@@ -159,9 +165,12 @@ static void pl_display(PickWrap *w, int j, char *t, int max) {
     if (r == PL_CLOSE) { pl_copy(t, "Close", max); return; }
     if (w->open < 0) { pl_copy(t, " ", max); return; }
     const int np = pl_pages(w);
-    if (pl_count(w) == 0) snprintf(t, (size_t)max, "%s: none", w->pl->titles[w->open]);
-    else if (np > 1) snprintf(t, (size_t)max, "%s  %d/%d", w->pl->titles[w->open], w->page + 1, np);
-    else pl_copy(t, w->pl->titles[w->open], max);
+    char title[64] = {0};
+    w->pl->fn(w->in, w->open, PL_HEADING, 0, title, sizeof title);
+    const char *ti = title[0] ? title : w->pl->titles[w->open];
+    if (pl_count(w) == 0) snprintf(t, (size_t)max, "%s: none", ti);
+    else if (np > 1) snprintf(t, (size_t)max, "%s  %d/%d", ti, w->page + 1, np);
+    else pl_copy(t, ti, max);
 }
 
 static intptr_t pl_dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t v, void *p, float o) {

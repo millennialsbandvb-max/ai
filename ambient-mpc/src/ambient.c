@@ -726,10 +726,28 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
     }
 }
 
-/* the full-page list of the presets (tools/picklist.h; Quad Rig calls this for its slots' engines too) */
+/* the full-page lists (tools/picklist.h; Quad Rig calls this for its slots' engines too): the presets, then the
+ * eight knobs (lists 1..8: a knob that is a choice lists its choices; any other doesn't open) */
 int amb_pick(AEffect *e, int list, int op, int i, char *out, int max) {
     Plugin *s = (Plugin *)e->object;
-    (void)list;
+    if (list >= 1) {
+        const int idx = kK + list - 1;
+        const Knob *kn = &MACHINES[option_of(s->norm[kMachine], kNumMachines)].k[list - 1];
+        if (!kn->name || kn->map != M_CHOICE) return op == PL_COUNT ? -1 : op == PL_CURRENT ? -1 : 0;
+        const int n = (int)(kn->hi - kn->lo) + 1;
+        if (op == PL_COUNT) return n;
+        if (op == PL_CURRENT) return option_of(s->norm[idx], n);
+        if (op == PL_HEADING) { snprintf(out, (size_t)max, "%s", kn->name); return 0; }
+        if (i < 0 || i >= n) return 0;
+        if (op == PL_NAME) snprintf(out, (size_t)max, "%s", kn->choices[i]);
+        else if (op == PL_CHOOSE) {
+            s->norm[idx] = n > 1 ? (float)i / (float)(n - 1) : 0;
+            s->automate |= 1u << idx;
+            s->update_display = 1;
+        }
+        return 0;
+    }
+    if (op == PL_HEADING) return 0;
     if (op == PL_COUNT) return NPRESETS;
     if (op == PL_CURRENT) return s->preset >= 0 && s->preset < NPRESETS && PRESETS[s->preset].machine == option_of(s->norm[kMachine], kNumMachines) ? s->preset : -1;
     if (i < 0 || i >= NPRESETS) return 0;
@@ -737,9 +755,9 @@ int amb_pick(AEffect *e, int list, int op, int i, char *out, int max) {
     else if (op == PL_CHOOSE) load_preset(s, i);
     return 0;
 }
-static const char *const LIST_KEYS[] = {"preset"};
-static const char *const LIST_TITLES[] = {"Presets"};
-static const PickLists LISTS = {1, LIST_KEYS, LIST_TITLES, amb_pick};
+static const char *const LIST_KEYS[] = {"preset", "k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8"};
+static const char *const LIST_TITLES[] = {"Presets", "Knob 1", "Knob 2", "Knob 3", "Knob 4", "Knob 5", "Knob 6", "Knob 7", "Knob 8"};
+static const PickLists LISTS = {9, LIST_KEYS, LIST_TITLES, amb_pick};
 
 static AEffect *make(audioMasterCallback master) {
     Plugin *s = calloc(1, sizeof *s);

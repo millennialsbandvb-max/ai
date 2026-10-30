@@ -362,19 +362,34 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
     }
 }
 
-/* the full-page lists (tools/picklist.h): each slot's presets (its engine's), then the amp's folders, models, IR
- * folders and IRs (NAM's) */
+/* the full-page lists (tools/picklist.h): each slot's presets (its engine's), the amp's folders, models, IR folders
+ * and IRs (NAM's), then each slot's eight knobs (lists 8..39: a choice knob lists its choices, as its engine says) */
 static int quad_pick(AEffect *e, int list, int op, int i, char *out, int max) {
     Plugin *s = (Plugin *)e->object;
+    if (list >= NS + 4) {
+        const int k = (list - NS - 4) / 8, w = (list - NS - 4) % 8, r = s->kind[k] == 0 ? duo_pick(s->duo[k], 3 + w, op, i, out, max)
+                      : s->kind[k] == 1 ? amb_pick(s->amb[k], 1 + w, op, i, out, max) : op == PL_HEADING ? 0 : -1;
+        if (op == PL_HEADING && out[0]) {   /* "FX 2 Pedal", not the engine's "A Pedal" */
+            char t[64];
+            snprintf(t, sizeof t, "FX %d %s", k + 1, s->kind[k] == 0 && out[1] == ' ' ? out + 2 : out);
+            snprintf(out, (size_t)max, "%s", t);
+        }
+        return r;
+    }
     if (list >= NS) return nam_pick(s->nam, list - NS, op, i, out, max);
+    if (op == PL_HEADING) return 0;
     if (s->kind[list] == 0) return duo_pick(s->duo[list], 0, op, i, out, max);
     if (s->kind[list] == 1) return amb_pick(s->amb[list], 0, op, i, out, max);
     return op == PL_CURRENT ? -1 : 0;   /* (Off: no presets) */
 }
-static const char *const LIST_KEYS[] = {"f1_preset", "f2_preset", "f3_preset", "f4_preset", "amp_folder", "amp_model", "amp_ir_folder", "amp_ir"};
+#define KN(f) "f" #f "_k1", "f" #f "_k2", "f" #f "_k3", "f" #f "_k4", "f" #f "_k5", "f" #f "_k6", "f" #f "_k7", "f" #f "_k8"
+#define KT(f) "FX " #f " Knob 1", "FX " #f " Knob 2", "FX " #f " Knob 3", "FX " #f " Knob 4", "FX " #f " Knob 5", "FX " #f " Knob 6", \
+              "FX " #f " Knob 7", "FX " #f " Knob 8"
+static const char *const LIST_KEYS[] = {"f1_preset", "f2_preset", "f3_preset", "f4_preset", "amp_folder", "amp_model", "amp_ir_folder", "amp_ir",
+                                        KN(1), KN(2), KN(3), KN(4)};
 static const char *const LIST_TITLES[] = {"FX 1 Presets", "FX 2 Presets", "FX 3 Presets", "FX 4 Presets", "Model Folders", "Models",
-                                          "IR Folders", "IRs"};
-static const PickLists LISTS = {8, LIST_KEYS, LIST_TITLES, quad_pick};
+                                          "IR Folders", "IRs", KT(1), KT(2), KT(3), KT(4)};
+static const PickLists LISTS = {8 + NS * 8, LIST_KEYS, LIST_TITLES, quad_pick};
 
 static AEffect *make(audioMasterCallback master) {
     fill_fx_names();

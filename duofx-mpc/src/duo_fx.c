@@ -1873,10 +1873,29 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
     }
 }
 
-/* the full-page lists (tools/picklist.h): A's and B's presets (those of the slot's algorithm) and the programs.
- * (Quad Rig calls this for its slots' Duo FX engines too.) */
+/* the full-page lists (tools/picklist.h): A's and B's presets (those of the slot's algorithm), the programs, then
+ * A's and B's eight knobs (lists 3..18: a knob that is a choice, e.g. DrivPdls' Pedal, lists its choices; any other
+ * doesn't open). (Quad Rig calls this for its slots' Duo FX engines too.) */
 int duo_pick(AEffect *e, int list, int op, int i, char *out, int max) {
     Plugin *s = (Plugin *)e->object;
+    if (list >= 3) {
+        const int k = (list - 3) / NK, w = (list - 3) % NK, idx = k * P_SLOT + P_K + w;
+        const Knob *kn = &ALGOS[algo_of(s, k)].k[w];
+        if (!kn->name || kn->map != M_CHOICE) return op == PL_COUNT ? -1 : op == PL_CURRENT ? -1 : 0;
+        const int n = (int)(kn->hi - kn->lo) + 1;
+        if (op == PL_COUNT) return n;
+        if (op == PL_CURRENT) return (int)knob_value(kn, s->norm[idx]);
+        if (op == PL_HEADING) { snprintf(out, (size_t)max, "%c %s", k ? 'B' : 'A', kn->name); return 0; }
+        if (i < 0 || i >= n) return 0;
+        if (op == PL_NAME) snprintf(out, (size_t)max, "%s", kn->choices[i]);
+        else if (op == PL_CHOOSE) {
+            s->norm[idx] = n > 1 ? (float)i / (float)(n - 1) : 0;
+            s->automate |= 1ull << idx;
+            s->update_display = 1;
+        }
+        return 0;
+    }
+    if (op == PL_HEADING) return 0;
     if (list == 2) {
         if (op == PL_COUNT) return NPROGRAMS;
         if (op == PL_CURRENT) return s->program;
@@ -1900,9 +1919,12 @@ int duo_pick(AEffect *e, int list, int op, int i, char *out, int max) {
     else if (op == PL_CHOOSE) load_preset(s, k, at);
     return 0;
 }
-static const char *const LIST_KEYS[] = {"a_preset", "b_preset", "program"};
-static const char *const LIST_TITLES[] = {"A Presets", "B Presets", "Programs"};
-static const PickLists LISTS = {3, LIST_KEYS, LIST_TITLES, duo_pick};
+static const char *const LIST_KEYS[] = {"a_preset", "b_preset", "program", "a_k1", "a_k2", "a_k3", "a_k4", "a_k5", "a_k6", "a_k7",
+                                        "a_k8", "b_k1", "b_k2", "b_k3", "b_k4", "b_k5", "b_k6", "b_k7", "b_k8"};
+static const char *const LIST_TITLES[] = {"A Presets", "B Presets", "Programs", "A Knob 1", "A Knob 2", "A Knob 3", "A Knob 4",
+                                          "A Knob 5", "A Knob 6", "A Knob 7", "A Knob 8", "B Knob 1", "B Knob 2", "B Knob 3",
+                                          "B Knob 4", "B Knob 5", "B Knob 6", "B Knob 7", "B Knob 8"};
+static const PickLists LISTS = {19, LIST_KEYS, LIST_TITLES, duo_pick};
 
 static AEffect *make(audioMasterCallback master) {
     sine_init();
