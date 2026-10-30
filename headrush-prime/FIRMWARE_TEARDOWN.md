@@ -121,34 +121,97 @@ them down by disassembling the `hardwareAssign` C++ or by reading `/proc/bus/inp
 
 ---
 
-## 6. Boot & update verification — THE decision point
+## 6. Boot & update verification — RESOLVED: full enforced verified boot
 
-- `boot` section and `kernel.fit` are both **U‑Boot FIT** images. FIT is the format U‑Boot uses for
-  **verified boot** (hashed/signed `images{}` + `configurations{}`).
-- The rootfs integrity in the AZ0x container is **SHA‑256 only** (an integrity/corruption check, verified
-  above). The app ships OpenSSL + Crypto++ and there is an `az0x` verification layer plus bundled public
-  keys for the boot chain.
+The open question is answered. The SoC is **Rockchip RK3288** (board `rk3288-az05-hg06`). The device runs a
+**complete, enforced secure‑boot chain, and the rootfs is cryptographically locked with dm‑verity.** Every
+stage is RSA‑2048 signed by the production key `headrush-1`:
 
-**Open question that determines the whole flashing strategy:**
+```
+BootROM
+  → idbloader (TPL+SPL)                 ← in signed boot FIT
+  → U-Boot                              ← signed; config signatures key "headrush-1" + "test-headrush"
+  → kernel + board FDT + cmdline FIT    ← signed; config signature key "headrush-1"
+  → rootfs = /dev/dm-0 (dm-verity, ro)  ← roothash baked into the SIGNED cmdline
+```
 
-> Does U‑Boot (in `boot`) **enforce** a signature on the FIT kernel / rootfs and refuse to boot anything not
-> signed by inMusic, or is verification advisory / integrity‑only?
+**Evidence (all extracted from this image):**
 
-- **If integrity‑only:** repackage a modified rootfs (our looper app swapped in), recompute the SHA‑256s,
-  rebuild the AZ0x container, and it installs/boots through the normal updater. Clean path, no hardware.
-- **If signatures are enforced in U‑Boot:** a modified rootfs won't boot via the normal updater. The
-  legitimate route is then the **board‑level recovery/debug path** (serial console / recovery DFU — note the
-  `hg06_update_*.dfu` present in `Scripts/`), which is a hands‑on‑hardware matter, not a cryptographic one.
+1. **U‑Boot mandates signatures.** Its embedded control FDT contains:
+   ```
+   signature { key-headrush-1 { required = "conf"; algo = "sha256,rsa2048"; rsa,modulus = <256 bytes>; … } }
+   ```
+   `required = "conf"` means U‑Boot refuses to boot any configuration not signed by that key. The binary
+   carries the matching enforcement paths: *"Failed to verify required signature"*, *"Unable to verify
+   required signature"*, *"bad signature on secure image"*, *"boot update invalid: images failed to verify"*.
+   Only the **production** key `headrush-1` is `required` (the `test-headrush` key is not in U‑Boot's
+   required set).
 
-I can determine which case we're in by analyzing the U‑Boot config inside `boot` (no hardware required).
-That should be the next technical step before writing any looper code.
+2. **The kernel FIT is signed.** `conf-rk3288-az05-hg06` has `signature-0 { algo="sha256,rsa2048";
+   key-name-hint="headrush-1"; sign-images="kernel","fdt" }`. Kernel, board device tree, and the kernel
+   command line are all covered.
+
+3. **The rootfs is dm‑verity, not just hash‑checked.** The *signed* `fdt-cmdline` sets:
+   ```
+   root=/dev/dm-0 ro  dm-mod.create="rootfs,,,ro,0 972800 verity 1 /dev/mmcblk0p10 /dev/mmcblk0p10 \
+     1024 1024 486400 486401 sha256 521e802ae097ee9c33ce817c63d0f56aafa7b7e0832e3ecb01d0d3caaf5c2fea <salt>"
+   ```
+   dm‑verity builds a Merkle tree over all 486 400 × 1024‑byte (~475 MiB) data blocks; **any** modified
+   block fails verification at read time and the mount fails. The root hash `521e802a…` lives inside the
+   RSA‑2048‑signed cmdline, so it cannot be swapped for a hash of a modified rootfs either.
+
+4. **The app cannot be overlaid.** Only `/etc` and `/var` are writable overlays
+   (`/etc/az01/overlayfs.conf`, upper dir on `/data`). `/usr/Evil/Evil` sits inside the verity‑protected
+   read‑only root and cannot be replaced without re‑signing the whole rootfs.
+
+### What this means for the deliverable
+
+A **PC updater `.exe` that installs a custom looper rootfs is not achievable through the normal update
+path.** To make a modified image install *and boot*, you would need one of:
+
+- **inMusic's private `headrush-1` RSA‑2048 key** — held only by inMusic; not in this image (only public
+  keys ship). Not something I can produce or help obtain.
+- **A secure‑boot / dm‑verity bypass** (boot‑chain exploit, or hardware glitching/key‑extraction on the
+  board) — i.e. defeating the signature enforcement. Per the scope set at the start of this project, I will
+  not develop that.
+
+This is the boundary flagged in the original plan, and the device is on the strict side of it: not just
+signed, but verity‑locked end to end. **See §7 for the paths that remain open.**
 
 ---
 
-## 7. Recommended architecture for the looper
+## 7. Paths that remain open
 
-**Do not write a new OS.** Keep Buildroot + kernel + audio drivers + input/display stack. Replace only the
-app:
+Given §6, the "swap the rootfs, ship a `.exe`" route is closed without crossing the security boundary.
+What is still genuinely doable:
+
+1. **Build the looper anyway, and prove it on a dev board.** The RK3288 + Qt5 + ALSA stack is standard and
+   buyable (e.g. a Firefly/Rockchip RK3288 board, or any Linux SBC). I can build the full RC‑600‑style
+   looper as a normal Linux/Qt app and have it running on commodity hardware. If inMusic ever ships a
+   developer/unlock path for the Prime, it would then drop straight in. This is the most productive thing I
+   can do without hardware‑side work on your unit.
+
+2. **Headless/desktop prototype first.** The audio engine (tracks, sync, quantize, rhythm, overdub,
+   undo) is hardware‑independent. I can build and test it on this machine, then on the SBC, so the design is
+   proven before any device question is settled.
+
+3. **Ask inMusic about developer access.** The presence of a `test-headrush` key hints there is an internal
+   non‑production signing path. A direct request to inMusic for a developer‑unlocked unit or signing is the
+   only *sanctioned* way onto the Prime itself.
+
+4. **Use looper hardware that's open.** If the goal is mainly the RC‑600 workflow on a pedal, an open
+   platform (e.g. a Raspberry‑Pi‑based looper, or the Daisy/Terrarium ecosystem) can run this same engine
+   with no signing wall. I can target that instead.
+
+What I will **not** do: extract/forge the signing key, or develop a secure‑boot / dm‑verity bypass for your
+Prime. That's the line set when we started, and the firmware turned out to sit squarely on the far side of
+it.
+
+---
+
+## 8. Looper architecture (for whichever target we pick)
+
+Keep the OS/kernel/drivers; this is an **app**, not a new OS:
 
 1. New **Qt 5 / QML** application built for `arm-linux-gnueabihf` against the same Qt the device ships, so it
    drops into the `evil.service` slot (or a sibling unit) and renders on the existing Mali/EGL stack.
@@ -167,7 +230,7 @@ app:
 
 ---
 
-## 8. Risks / ground rules
+## 9. Risks / ground rules
 
 - I build; **you flash and test** on the unit, with iteration cycles.
 - **Brick risk is real** — before flashing anything custom, confirm the Prime's forced‑update/recovery mode
@@ -177,10 +240,15 @@ app:
 
 ---
 
-## 9. Next steps (proposed order)
+## 10. Next steps — NEEDS YOUR DECISION
 
-1. **Analyze U‑Boot in `boot`** → answer the signing question (§6). *Gates everything.*
-2. **Pin down control I/O** (§5) → exact footswitch/pedal/touch devices.
-3. **Set up the ARM/Qt cross‑build** matching the device's Qt version.
-4. **Scaffold the looper** (audio engine first, headless‑testable, then QML UI).
-5. **Repackage & flash loop** once §1 confirms the install path.
+§6 is resolved and it blocks the original "custom `.exe` for the Prime" deliverable. Pick a direction:
+
+- **A. Build the looper for open hardware / a dev board** (recommended) — I start the audio engine now,
+  test it headless here, then target an RK3288 SBC or an open looper platform. Produces a real, running
+  looper; does not touch your Prime's security.
+- **B. Stop here** — you keep this teardown as reference and decide later.
+- **C. Pursue sanctioned Prime access** — you contact inMusic about developer unlock/signing; I resume the
+  drop‑in app if that ever opens up.
+
+I will not pursue a secure‑boot/verity bypass of the Prime.
