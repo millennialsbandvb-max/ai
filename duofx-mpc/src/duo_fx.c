@@ -61,9 +61,16 @@ static const char *const VOICE_N[] = {"Single", "Dual"};
 static const char *const SHIM_PITCHES[] = {"-12 st", "-5 st", "+7 st", "+12 st", "+19 st", "+24 st"};
 static const float SHIM_ST[] = {-12, -5, 7, 12, 19, 24};
 static const char *const CHORUS_MODES[] = {"Chorus", "Vibrato"};
-/* DrivPdls: ten classic drive pedals, our own models of their kinds of circuit (near-miss names, personal use) */
+/* DrivPdls: ten classic drive pedals and fifteen boutique ones, our own models of their kinds of circuit (near-miss
+ * names, personal use). New ones go at the end (a saved Pedal is its place in this list). */
 static const char *const PEDALS[] = {"Tube Scrmr", "Klone", "Rodent", "Big Muf", "Fuz Face", "Blues Drvr", "DS-l",
-                                     "Timmie", "0CD", "Guvnr"};
+                                     "Timmie", "0CD", "Guvnr", "Kng o Tone", "Mornin Glo", "Jan Rae", "Zendrv", "Swt Honey",
+                                     "BeeBee Pre", "EP Boostr", "0DR-l", "Sun Set", "C0T5O", "Hny Bee", "Plumz", "Bonzai",
+                                     "Plexi Drv", "Brothrs"};
+#define N_PEDALS ((int)(sizeof PEDALS / sizeof *PEDALS))
+#define P_BONZAI 22
+/* Bonzai's nine Tube Screamer voices (Knob 7, TS Voice; only Bonzai uses it) */
+static const char *const TS_VOICES[] = {"0D-l", "8O8", "TS-9", "MSL", "TS-lO", "Exar", "Keely Mod", "Strong Mod", "TS-7"};
 enum { CL_SOFT, CL_HARD, CL_ASYM, CL_MUFF, CL_MOSFET, CL_FACE };   /* clipping */
 enum { TN_LP, TN_SCOOP, TN_TILT };                                  /* tone circuit */
 typedef struct {
@@ -76,17 +83,45 @@ typedef struct {
     float clean;         /* clean signal kept inside the pedal (the Klon's blend), at no drive */
     float trim;          /* output trim (dB): the pedals about as loud as each other */
 } PedalDef;
-static const PedalDef PEDAL_DEFS[10] = {
+static const PedalDef PEDAL_DEFS[] = {
     {30, 720, 0, 40, 9000, 6000, CL_SOFT, TN_LP, 700, 5000, 0, -1},        /* green screamer: mids, smooth */
-    {80, 300, 6, 42, 10000, 8000, CL_ASYM, TN_TILT, 0, 0, 0.6f, -2.7f},     /* the transparent-ish gold one: clean blend */
-    {60, 0, 12, 64, 20000, 2500, CL_HARD, TN_LP, 600, 16000, 0, -2.2f},       /* rodent: op-amp into hard diodes */
-    {100, 0, 24, 56, 6000, 5000, CL_MUFF, TN_SCOOP, 0, 0, 0, 1.4f},          /* big fuzz: two stages, scooped mids */
-    {20, 0, 16, 48, 9000, 7000, CL_FACE, TN_LP, 2500, 8000, 0, -1.1f},        /* round fuzz: biased, sputtering */
-    {40, 0, 0, 44, 12000, 9000, CL_ASYM, TN_TILT, 0, 0, 0, -1.6f},            /* blue driver: wide, amp-like */
-    {100, 0, 14, 54, 16000, 6000, CL_HARD, TN_SCOOP, 0, 0, 0, 1.3f},          /* orange distortion: hard, scooped */
-    {40, 0, 0, 34, 16000, 12000, CL_SOFT, TN_LP, 2000, 14000, 0.15f, -2.9f},   /* the transparent one */
-    {50, 0, 6, 50, 10000, 7000, CL_MOSFET, TN_LP, 1500, 9000, 0, -2.9f},      /* the obsessive one: MOSFET clipping */
-    {60, 450, 10, 50, 12000, 7000, CL_HARD, TN_TILT, 0, 0, 0, -2.3f},          /* amp-in-a-box British crunch */
+    {80, 300, 6, 42, 10000, 8000, CL_ASYM, TN_TILT, 0, 0, 0.6f, -2.7f},    /* the transparent-ish gold one: clean blend */
+    {60, 0, 12, 64, 20000, 2500, CL_HARD, TN_LP, 600, 16000, 0, -2.2f},      /* rodent: op-amp into hard diodes */
+    {100, 0, 24, 56, 6000, 5000, CL_MUFF, TN_SCOOP, 0, 0, 0, 1.4f},         /* big fuzz: two stages, scooped mids */
+    {20, 0, 16, 48, 9000, 7000, CL_FACE, TN_LP, 2500, 8000, 0, -1.1f},       /* round fuzz: biased, sputtering */
+    {40, 0, 0, 44, 12000, 9000, CL_ASYM, TN_TILT, 0, 0, 0, -1.6f},           /* blue driver: wide, amp-like */
+    {100, 0, 14, 54, 16000, 6000, CL_HARD, TN_SCOOP, 0, 0, 0, 1.3f},         /* orange distortion: hard, scooped */
+    {40, 0, 0, 34, 16000, 12000, CL_SOFT, TN_LP, 2000, 14000, 0.15f, -2.9f},  /* the transparent one */
+    {50, 0, 6, 50, 10000, 7000, CL_MOSFET, TN_LP, 1500, 9000, 0, -2.9f},     /* the obsessive one: MOSFET clipping */
+    {60, 450, 10, 50, 12000, 7000, CL_HARD, TN_TILT, 0, 0, 0, -2.3f},         /* amp-in-a-box British crunch */
+    /* the boutique ones */
+    {50, 0, 0, 36, 12000, 9000, CL_SOFT, TN_LP, 1500, 9000, 0, -2.7f},         /* the king: bluesbreaker-style, open */
+    {40, 0, 0, 36, 14000, 10000, CL_SOFT, TN_TILT, 0, 0, 0, -2.6f},            /* morning: brighter bluesbreaker */
+    {40, 250, 0, 32, 16000, 12000, CL_SOFT, TN_TILT, 0, 0, 0.1f, -2.3f},       /* the sparkly transparent one */
+    {60, 400, 6, 46, 9000, 5000, CL_SOFT, TN_LP, 800, 6000, 0, -3.2f},          /* zen: smooth, vocal mids (D-style amp) */
+    {50, 0, 4, 40, 10000, 7000, CL_ASYM, TN_LP, 1200, 8000, 0, -1.6f},          /* honey: amp-like, a little uneven */
+    {40, 0, 6, 44, 12000, 8000, CL_ASYM, TN_TILT, 0, 0, 0, -1.7f},              /* the preamp: thick, more gain */
+    {20, 0, 0, 22, 20000, 18000, CL_SOFT, TN_TILT, 0, 0, 0, -1.3f},             /* the echo-preamp booster: clean, a bit hot */
+    {40, 500, 0, 40, 9000, 6000, CL_SOFT, TN_TILT, 0, 0, 0, -2.2f},             /* green box: flatter mid hump */
+    {40, 0, 0, 44, 14000, 9000, CL_ASYM, TN_TILT, 0, 0, 0, -1.6f},              /* sunset: wide, amp-like */
+    {60, 0, 10, 50, 10000, 6000, CL_HARD, TN_LP, 1500, 10000, 0, -1.8f},        /* the hot plexi-style one */
+    {50, 350, 6, 44, 10000, 7000, CL_SOFT, TN_LP, 1000, 8000, 0, -3.2f},        /* the bee: British overdrive */
+    {30, 700, 0, 40, 11000, 7000, CL_SOFT, TN_LP, 900, 7000, 0, -1.3f},         /* green-style, louder and opener */
+    {30, 720, 0, 40, 9000, 6000, CL_SOFT, TN_LP, 700, 5000, 0, -1.2f},          /* Bonzai: (its voice: TS_VOICE_DEFS) */
+    {80, 0, 12, 52, 10000, 6000, CL_HARD, TN_TILT, 0, 0, 0, -1.8f},             /* plexi in a box */
+    {40, 0, 6, 50, 12000, 7000, CL_ASYM, TN_TILT, 0, 0, 0.1f, -1.9f},           /* the brothers: boost into drive */
+};
+_Static_assert(sizeof PEDAL_DEFS / sizeof *PEDAL_DEFS == sizeof PEDALS / sizeof *PEDALS, "a PedalDef per pedal");
+static const PedalDef TS_VOICE_DEFS[] = {   /* Bonzai's voices */
+    {30, 600, 4, 42, 10000, 6000, CL_ASYM, TN_LP, 3500, 3500, 0, -1.7f},       /* the first: asymmetric, no tone sweep */
+    {30, 720, 0, 40, 9000, 6000, CL_SOFT, TN_LP, 700, 5000, 0, -1.2f},          /* the 808 */
+    {30, 720, 0, 40, 10000, 7000, CL_SOFT, TN_LP, 900, 7000, 0, -1.2f},         /* the 9: brighter */
+    {40, 600, 10, 52, 9000, 5000, CL_SOFT, TN_LP, 800, 6000, 0, -3.4f},         /* the metal one */
+    {30, 720, 0, 38, 9000, 6000, CL_SOFT, TN_LP, 700, 5500, 0, -0.8f},          /* the 10 */
+    {30, 700, 6, 46, 9000, 6000, CL_SOFT, TN_LP, 800, 6000, 0, -3.0f},          /* the Exar chip: hotter */
+    {25, 450, 2, 44, 11000, 7000, CL_SOFT, TN_LP, 900, 7000, 0, -3.0f},         /* the mod: fuller lows, more gain */
+    {25, 300, 6, 50, 11000, 7000, CL_SOFT, TN_LP, 900, 7500, 0, -3.4f},         /* the strong mod */
+    {30, 720, 4, 46, 9000, 6000, CL_HARD, TN_LP, 800, 6000, 0, -2.0f},          /* the 7 */
 };
 
 /* ==== the algorithms ========================================================================================= */
@@ -94,7 +129,7 @@ enum {   /* in the pop-up's order */
     /* delay */ A_BAND, A_BBD, A_DIGITAL, A_DUCKED, A_FPONG, A_HEADS, A_MODDLY, A_MULTITAP, A_REVDLY, A_TAPE, A_TAPCLOUD,
     A_VINTAGE,
     /* distortion */ A_FUZZOCT, A_CRUSH, A_FUZZDLY, A_BANDDRIVE, A_MIDDRIVE, A_PEDALS,
-    /* pitch */ A_REVSHIFT, A_DIATONIC, A_VSHIFTER, A_PMODHARM, A_ARP, A_MICRO, A_OCTAVER, A_BEND, A_POLYBEND, A_POLYSHIFT,
+    /* pitch */ A_REVSHIFT, A_DIATONIC, A_VSHIFTER, A_PMODHARM, A_ARP, A_MICRO, A_OCTAVER, A_POG, A_BEND, A_POLYBEND, A_POLYSHIFT,
     A_SYNTH, A_STEPSHIFT, A_QUAD, A_RESONATOR, A_VOCAL, A_CORRECT,
     /* modulation */ A_CHORUS, A_FLANGER, A_TREMOLO, A_PHASER, A_VIBE, A_SFLANGER, A_SPHASER, A_TRICHORUS,
     /* reverb */ A_HALL, A_ROOM, A_PLATE, A_SPRING, A_SHIMMER, A_ABYSS, A_CLASSIC, A_CRUSHVERB, A_TREMVERB, A_WARP,
@@ -154,9 +189,9 @@ static const Algo ALGOS[kNumAlgos] = {
     [A_BANDDRIVE] = {"Sculpt3", G_DIST, 100, "Lows and highs driven separately, then blended",
         {HZ("Split", 100, 2000, 400), PCT("Low Drive", 30), PCT("High Drive", 60), LIN("Low Level", -24, 6, 0, "dB"),
          LIN("High Level", -24, 6, -3, "dB"), HZ("Filter", 1000, 16000, 7000), PCT("Comp", 30), NONE}},
-    [A_PEDALS] = {"DrivPdls", G_DIST, 100, "Ten classic overdrive, distortion and fuzz pedals",
+    [A_PEDALS] = {"DrivPdls", G_DIST, 100, "25 drive and fuzz pedals, classic and boutique",
         {CHO("Pedal", PEDALS, 0), PCT("Drive", 50), PCT("Tone", 50), LIN("Level", -24, 6, -6, "dB"), LIN("Bass", -12, 12, 0, "dB"),
-         PCT("Blend", 0), NONE, NONE}},
+         PCT("Blend", 0), CHO("TS Voice", TS_VOICES, 1), NONE}},
     [A_MIDDRIVE] = {"WeedWackr", G_DIST, 100, "Mid-hump overdrive in the classic green-pedal style",
         {PCT("Drive", 45), PCT("Tone", 50), LIN("Level", -24, 12, -3, "dB"), HZ("Mid", 400, 1600, 720), LIN("Bass", -12, 6, -3, "dB"),
          CHO("Hard Clip", ONOFF, 0), PCT("Blend", 100), NONE}},
@@ -181,6 +216,9 @@ static const Algo ALGOS[kNumAlgos] = {
          PCT("Drift", 20), NONE, NONE}},
     [A_OCTAVER] = {"Octaver", G_PITCH, 100, "Octaves below and above your playing",
         {PCT("Sub 1", 70), PCT("Sub 2", 0), PCT("Up", 0), PCT("Dry", 100), PCT("Tone", 50), PCT("Drive", 0), NONE, NONE}},
+    [A_POG] = {"P0G3", G_PITCH, 100, "Polyphonic octaves: 2 down, 2 up, detune, filter, swell",
+        {PCT("Sub", 0), PCT("Down", 60), PCT("Dry", 100), PCT("Up", 50), PCT("Up 2", 0), INT("Detune", 0, 50, 0, "c"),
+         HZ("Filter", 200, 16000, 16000), LIN("Attack", 0, 2000, 0, "ms")}},
     [A_BEND] = {"PitchFlx", G_PITCH, 100, "Bend between two intervals (a Q-Link makes a pedal)",
         {PCT("Bend", 0), ST("Heel", 0), ST("Toe", 12), MS("Glide", 1, 500, 30), CHO("Voices", VOICE_N, 0), PCT("Tone", 50), NONE, NONE}},
     [A_POLYBEND] = {"PolyFlx", G_PITCH, 100, "Two voices bending in opposite directions",
@@ -625,7 +663,7 @@ static void slot_control(Slot *s) {
     case A_FUZZDLY: c[20] = lp_coef(lerp(1500, 9000, PC(1)), fs); c[21] = db(V(2)); c[22] = powf(2, V(3) / 12); c[23] = powf(2, V(4) / 12); break;
     case A_BANDDRIVE: c[20] = lp_coef(V(0), fs); c[21] = db(V(3)); c[22] = db(V(4)); c[23] = lp_coef(V(5), fs); break;
     case A_PEDALS: {
-        const PedalDef *pd = &PEDAL_DEFS[(int)V(0)];
+        const PedalDef *pd = (int)V(0) == P_BONZAI ? &TS_VOICE_DEFS[(int)V(6)] : &PEDAL_DEFS[(int)V(0)];
         c[20] = lp_coef(pd->pre_hp, fs);
         c[21] = pd->mid_hp > 0 ? lp_coef(pd->mid_hp, fs) : 0;
         c[22] = db(lerp(pd->gain_lo, pd->gain_hi, PC(1)));
@@ -649,6 +687,12 @@ static void slot_control(Slot *s) {
     case A_PMODHARM: c[20] = lp_coef(tone_cut(V(6)), fs); c[21] = powf(2, V(0) / 12); c[22] = powf(2, V(1) / 12); break;
     case A_MICRO: c[20] = lp_coef(tone_cut(V(4)), fs); c[21] = powf(2, V(0) / 1200); break;
     case A_OCTAVER: c[20] = lp_coef(tone_cut(V(4)), fs); break;
+    case A_POG:
+        s->sc[0] = svf_co(V(6), 1.2f, fs);
+        c[20] = powf(2, V(5) / 1200);                                  /* detune: + on the left, - on the right */
+        c[21] = V(7) < 1 ? 1 : 1 - expf(-1 / (V(7) * 0.001f * fs));   /* the swell's rise */
+        c[22] = lp_coef(300, fs); c[23] = lp_coef(4, fs);             /* onset: a fast and a slow envelope */
+        break;
     case A_BEND: case A_POLYBEND: c[20] = lp_coef(tone_cut(V(s->algo == A_BEND ? 5 : 6)), fs); c[21] = expf(-1 / (V(3) * 0.001f * fs)); break;
     case A_POLYSHIFT: c[21] = powf(2, (V(0) + V(1) * 0.01f) / 12); c[22] = powf(2, (V(2) + V(3) * 0.01f) / 12); break;
     case A_SYNTH: c[21] = expf(-1 / (V(5) * 0.001f * fs)); c[22] = expf(-1 / (V(6) * 0.001f * fs)); c[23] = expf(-1 / (V(7) * 0.001f * fs));
@@ -1175,6 +1219,26 @@ static void run_algo(Slot *s, const float in[2], float out[2]) {
             float y = s1 * PC(0) + s2 * PC(1) + up * PC(2);
             if (PC(5) > 0.01f) y = tanh_fast(y * (1 + PC(5) * 10)) / (1 + PC(5) * 2);
             out[ch] = lp(&s->op[ch][0], y, c[20]) + x * PC(3);
+        }
+        break;
+    }
+    case A_POG: {   /* four grain shifters a side (their correlation search keeps chords together) */
+        static const float RATIO[4] = {0.25f, 0.5f, 2, 4}, WIN[4] = {0.07f, 0.05f, 0.03f, 0.025f};
+        const int lv[4] = {0, 1, 3, 4};
+        for (int ch = 0; ch < 2; ch++) {
+            const float x = in[ch], det = ch ? 1 / c[20] : c[20];
+            float wet = 0;
+            for (int k = 0; k < 4; k++)
+                if (PC(lv[k]) > 0.005f) wet += shift_s(&s->sh[ch][k], x, RATIO[k] * det, WIN[k] * fs, 1) * PC(lv[k]);
+            float lo, bp, hi;
+            svf(&s->svf[ch][0], &s->sc[0], wet, &lo, &bp, &hi);
+            float *st = s->st[ch];   /* the swell: each new note's octaves rise over Attack */
+            const float a = fabsf(x);
+            st[0] += c[22] * (a - st[0]);
+            st[1] += c[23] * (a - st[1]);
+            if (st[0] > 2 * st[1] + 0.003f && st[2] > 0.5f) st[2] = 0;
+            st[2] += c[21] * (1 - st[2]);
+            out[ch] = lo * st[2] + x * PC(2);
         }
         break;
     }

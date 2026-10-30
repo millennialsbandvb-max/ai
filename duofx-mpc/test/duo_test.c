@@ -161,8 +161,8 @@ int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: %s <Duo-FX.so> [algorithm]\n", argv[0]); return 2; }
     void *h = dlopen(argv[1], RTLD_NOW);
     if (!h || !(*(void **)&entry = dlsym(h, "VSTPluginMain"))) { fprintf(stderr, "can't load %s\n", argv[1]); return 1; }
-    {   /* the algorithm names, from the plugin (57 options: the last is Off) */
-        nalgo = 57;
+    {   /* the algorithm names, from the plugin (58 options: the last is Off) */
+        nalgo = 58;
         AEffect *e = make();
         for (int a = 0; a < nalgo; a++) {
             e->setParameter(e, P_ALGO, (float)a / (float)(nalgo - 1));
@@ -375,11 +375,15 @@ int main(int argc, char **argv) {
         }
         {   /* DrivPdls: every pedal distorts (harmonics), stays finite, and they're about as loud as each other */
             static const char *const PED[] = {"Tube Scrmr", "Klone", "Rodent", "Big Muf", "Fuz Face", "Blues Drvr", "DS-l",
-                                              "Timmie", "0CD", "Guvnr"};
+                                              "Timmie", "0CD", "Guvnr", "Kng o Tone", "Mornin Glo", "Jan Rae", "Zendrv",
+                                              "Swt Honey", "BeeBee Pre", "EP Boostr", "0DR-l", "Sun Set", "C0T5O", "Hny Bee",
+                                              "Plumz", "Bonzai", "Plexi Drv", "Brothrs"};
             double lo = 1e9, hi = -1e9;
-            for (int pdl = 0; pdl < 10; pdl++) {
+            for (int pdl = 0; pdl < 25 + 8; pdl++) {   /* (then Bonzai's other eight voices) */
+                static const char *const VOICE[] = {"0D-l", "TS-9", "MSL", "TS-lO", "Exar", "Keely Mod", "Strong Mod", "TS-7"};
                 AEffect *e = one("DrivPdls", 1.0f);
-                set_by_text(e, 0, "Pedal", PED[pdl]);
+                set_by_text(e, 0, "Pedal", PED[pdl < 25 ? pdl : 22]);
+                if (pdl >= 25) set_by_text(e, 0, "TS Voice", VOICE[pdl - 25]);
                 set_by_text(e, 0, "Drive", "50%");
                 hz_in = 220;
                 float peak;
@@ -387,7 +391,7 @@ int main(int argc, char **argv) {
                 const double f1 = tone_level(buf, FS / 2, 2 * FS, 220), h2 = tone_level(buf, FS / 2, 2 * FS, 440),
                              h3 = tone_level(buf, FS / 2, 2 * FS, 660), lvl = 20 * log10(rms(buf, FS / 2, 2 * FS) + 1e-9);
                 const double thd = sqrt(h2 * h2 + h3 * h3) / (f1 + 1e-9);
-                printf("  %-11s level %+5.1f dB, harmonics %.0f%%, peak %.2f\n", PED[pdl], lvl, 100 * thd, peak);
+                printf("  %-11s level %+5.1f dB, harmonics %.0f%%, peak %.2f\n", pdl < 25 ? PED[pdl] : VOICE[pdl - 25], lvl, 100 * thd, peak);
                 CHECK(ok && peak < 3.99f, "a pedal isn't finite or hits the ceiling");
                 CHECK(thd > 0.03, "a pedal doesn't distort");
                 if (lvl < lo) lo = lvl;
@@ -410,6 +414,22 @@ int main(int argc, char **argv) {
             printf("  PtchFuzz, both voices -12 st on 440 Hz: strongest %.1f Hz\n", f);
             CHECK(fabs(f - 220) < 4, "PtchFuzz's voices aren't an octave down");
             e->dispatcher(e, effClose, 0, 0, NULL, 0);
+        }
+        {   /* P0G3: each voice alone is its octave (Sub -2, Down -1, Up +1, Up 2 +2) */
+            static const char *const V[4] = {"Sub", "Down", "Up", "Up 2"};
+            static const double WANT[4] = {110, 220, 880, 1760};
+            for (int v = 0; v < 4; v++) {
+                AEffect *e = one("P0G3", 1.0f);
+                for (int k = 0; k < 4; k++) set_by_text(e, 0, V[k], k == v ? "100%" : "0%");
+                set_by_text(e, 0, "Dry", "0%");
+                hz_in = 440;
+                float peak;
+                const int ok = render(e, 3, g_sine, &peak);
+                const double f = peak_hz(buf, FS, 3 * FS, 60, 4000);
+                printf("  P0G3 %-4s on 440 Hz: strongest %.1f Hz, peak %.2f\n", V[v], f, peak);
+                CHECK(ok && fabs(f / WANT[v] - 1) < 0.02, "a P0G3 voice isn't its octave");
+                e->dispatcher(e, effClose, 0, 0, NULL, 0);
+            }
         }
 
         printf("CPU (128-frame blocks, this machine)\n");

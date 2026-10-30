@@ -28,7 +28,7 @@ int nam_pick(AEffect *, int, int, int, char *, int);
 
 #define NS 4
 /* the engines' own parameter numbers we use */
-enum { DUO_ALGO = 0, DUO_MIX = 2, DUO_K = 3, DUO_B_ALGO = 20, DUO_PRESET = 42, DUO_NALGO = 57 };   /* (Duo: 56 + Off) */
+enum { DUO_ALGO = 0, DUO_MIX = 2, DUO_K = 3, DUO_B_ALGO = 20, DUO_PRESET = 42, DUO_NALGO = 58 };   /* (Duo: 57 + Off) */
 enum { AMB_MACHINE = 0, AMB_MIX = 2, AMB_K = 3, AMB_HOLD = 11, AMB_PRESET = 12, AMB_NMACH = 11 };
 #define N_DUO (DUO_NALGO - 1)                  /* Duo's algorithms without its Off */
 #define N_FX (N_DUO + AMB_NMACH + 1)           /* our list: Duo's, Ambient Lab's, Off */

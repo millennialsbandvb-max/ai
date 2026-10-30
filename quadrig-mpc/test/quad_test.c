@@ -86,16 +86,16 @@ int main(int argc, char **argv) {
     int n_fx = 0, bad = 0;
     char last[64] = "";
     for (int f = 0; f < 100; f++) {
-        e->setParameter(e, fx1, (float)f / 67);
+        e->setParameter(e, fx1, (float)f / 68);
         disp(e, fx1, t);
         if (!strcmp(t, last)) break;
         strcpy(last, t);
         n_fx++;
         if (!render(e, 0.4f, &peak) || peak >= 3.99f) { printf("  FAIL  %s in FX1 (peak %.2f)\n", t, peak); bad++; }
-        if (f == 67) break;
+        if (f == 68) break;
     }
     printf("  %d effects in FX1, %d bad\n", n_fx, bad);
-    CHECK(n_fx == 68 && !bad, "the effect list");
+    CHECK(n_fx == 69 && !bad, "the effect list");
 
     /* knob names and values come from the slot's engine */
     set_text(e, fx1, "Digital Delay");
