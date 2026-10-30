@@ -765,7 +765,7 @@ int amb_pick(AEffect *e, int list, int op, int i, char *out, int max) {
 }
 static const char *const LIST_KEYS[] = {"preset", "k1", "k2", "k3", "k4", "k5", "k6", "k7", "k8"};
 static const char *const LIST_TITLES[] = {"Presets", "Knob 1", "Knob 2", "Knob 3", "Knob 4", "Knob 5", "Knob 6", "Knob 7", "Knob 8"};
-static const PickLists LISTS = {9, LIST_KEYS, LIST_TITLES, amb_pick};
+static const PickLists LISTS = {9, LIST_KEYS, LIST_TITLES, amb_pick, 1};   /* (1: MIDI Ch) */
 
 static AEffect *make(audioMasterCallback master) {
     Plugin *s = calloc(1, sizeof *s);

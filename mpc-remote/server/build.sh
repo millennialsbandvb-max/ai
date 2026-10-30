@@ -44,7 +44,7 @@ cp "$HERE/mpc-cleanup.sh" "$B/bundle/bin/"
 # MPC's buttons: mpc-buttons.so (loaded into MPC), mpc-launch (starts MPC with it) and acvs.service's drop-in
 P="$HERE/../preload"
 arm-linux-gnueabihf-gcc -O2 -Wall -Wextra -shared -fPIC -march=armv7-a -mfpu=neon-vfpv4 -mfloat-abi=hard \
-  -o "$B/bundle/bin/mpc-buttons.so" "$P/mpc-buttons.c" "$P/webin.c" "$P/overlay.c" -ldl -lpthread -lm
+  -o "$B/bundle/bin/mpc-buttons.so" "$P/mpc-buttons.c" "$P/webin.c" "$P/overlay.c" "$P/extmidi.c" -ldl -lpthread -lm
 arm-linux-gnueabihf-strip "$B/bundle/bin/mpc-buttons.so"
 cp "$P/mpc-launch" "$B/bundle/bin/"
 mkdir -p "$B/bundle/dropins/acvs.service.d"

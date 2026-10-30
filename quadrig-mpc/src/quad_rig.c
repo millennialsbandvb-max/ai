@@ -399,7 +399,7 @@ static const char *const LIST_KEYS[] = {"f1_preset", "f2_preset", "f3_preset", "
                                         KN(1), KN(2), KN(3), KN(4)};
 static const char *const LIST_TITLES[] = {"FX 1 Presets", "FX 2 Presets", "FX 3 Presets", "FX 4 Presets", "Model Folders", "Models",
                                           "IR Folders", "IRs", KT(1), KT(2), KT(3), KT(4)};
-static const PickLists LISTS = {8 + NS * 8, LIST_KEYS, LIST_TITLES, quad_pick};
+static const PickLists LISTS = {8 + NS * 8, LIST_KEYS, LIST_TITLES, quad_pick, 1};   /* (1: MIDI Ch) */
 
 static AEffect *make(audioMasterCallback master) {
     fill_fx_names();

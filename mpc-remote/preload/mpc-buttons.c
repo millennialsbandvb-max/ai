@@ -25,6 +25,8 @@ typedef struct _snd_seq_client_info snd_seq_client_info_t;
 typedef struct _snd_seq_port_info snd_seq_port_info_t;
 typedef struct _snd_seq_port_subscribe snd_seq_port_subscribe_t;
 typedef struct { unsigned char client, port; } snd_seq_addr_t;
+void extmidi_panel(snd_rawmidi_t *in);   /* extmidi.c: never copy the panel's input to our plugins */
+void extmidi_panel_port(int client, int port);
 /* the parts of alsa-lib used here, looked up when first needed: MPC links libasound, but this library is also loaded
  * into the programs the launcher runs on the way to MPC (systemd-inhibit), which don't */
 static int (*p_snd_rawmidi_close)(snd_rawmidi_t *);
@@ -202,6 +204,8 @@ static int redirect(int card, snd_rawmidi_t **in, int mode) {
     p_snd_seq_port_subscribe_free(sub);
     if (e < 0) { logf_("can't connect %d:%d to %d:%d (%d)", hw.client, hw.port, virt.client, virt.port, e); goto fail; }
     virt_client = virt.client;
+    extmidi_panel(*in);
+    extmidi_panel_port(hw.client, hw.port);
     FILE *f = fopen(STATUS ".new", "w");
     if (f) {
         fprintf(f, "virt=%d:%d hw=%d:%d pid=%d\n", virt.client, virt.port, hw.client, hw.port, (int)getpid());
@@ -238,6 +242,7 @@ int snd_rawmidi_open(snd_rawmidi_t **in, snd_rawmidi_t **out, const char *name, 
     if (redirect(card, in, mode) == 0) { pthread_mutex_unlock(&lock); return 0; }
     logf_("using the real device instead");
     r = real(in, NULL, name, mode);
+    if (r >= 0) extmidi_panel(*in);
     if (r < 0 && out) { p_snd_rawmidi_close(*out); *out = NULL; }
     pthread_mutex_unlock(&lock);
     return r;

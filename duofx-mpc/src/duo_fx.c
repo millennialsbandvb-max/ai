@@ -2016,7 +2016,7 @@ static const char *const LIST_KEYS[] = {"a_preset", "b_preset", "program", "a_k1
 static const char *const LIST_TITLES[] = {"A Presets", "B Presets", "Programs", "A Knob 1", "A Knob 2", "A Knob 3", "A Knob 4",
                                           "A Knob 5", "A Knob 6", "A Knob 7", "A Knob 8", "B Knob 1", "B Knob 2", "B Knob 3",
                                           "B Knob 4", "B Knob 5", "B Knob 6", "B Knob 7", "B Knob 8"};
-static const PickLists LISTS = {19, LIST_KEYS, LIST_TITLES, duo_pick};
+static const PickLists LISTS = {19, LIST_KEYS, LIST_TITLES, duo_pick, 1};   /* (1: MIDI Ch) */
 
 static AEffect *make(audioMasterCallback master) {
     sine_init();

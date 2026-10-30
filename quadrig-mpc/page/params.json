@@ -288,6 +288,7 @@
     {"key": "f4_k6__list", "name": "FX 4 Knob 6 List", "options": ["Closed", "Open"]},
     {"key": "f4_k7__list", "name": "FX 4 Knob 7 List", "options": ["Closed", "Open"]},
     {"key": "f4_k8__list", "name": "FX 4 Knob 8 List", "options": ["Closed", "Open"]},
+    {"key": "midi_ch__list", "name": "MIDI Ch List", "options": ["Closed", "Open"]},
     {"key": "pick_1", "name": "List 1", "options": ["Off", "On"], "display": "string"},
     {"key": "pick_2", "name": "List 2", "options": ["Off", "On"], "display": "string"},
     {"key": "pick_3", "name": "List 3", "options": ["Off", "On"], "display": "string"},
@@ -315,6 +316,9 @@
     {"key": "pick_prev", "name": "List <", "options": ["Off", "On"], "momentary": true},
     {"key": "pick_next", "name": "List >", "options": ["Off", "On"], "momentary": true},
     {"key": "pick_close", "name": "List Close", "options": ["Off", "On"], "momentary": true},
-    {"key": "pick_title", "name": "List Title", "options": ["Off", "On"], "display": "string"}
+    {"key": "pick_title", "name": "List Title", "options": ["Off", "On"], "display": "string"},
+    {"key": "midi_ch", "name": "MIDI Ch", "min": 0, "max": 1, "display": "string", "type": "stepper"},
+    {"key": "midi_ch_prev", "name": "MIDI Ch <", "options": ["Off", "On"], "momentary": true},
+    {"key": "midi_ch_next", "name": "MIDI Ch >", "options": ["Off", "On"], "momentary": true}
   ]
 }

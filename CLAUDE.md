@@ -255,6 +255,15 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   png_shrink.py also writes TUI.json unindented (Quad Rig's 5.5 MB -> 1.5 MB). Our pages have no Q-Link frame (MPC's
   orange box with a "Q"; the user asked): qlinkBoundsData [] as Akai's SP1200/MPC3000/MPC60 pages have it
   (pedal_looks.py patch, which also fixes the kit's preview for it). Device-untested: the look switching live (when= is device-proven for popups/modes).
+- **MIDI from controllers to our effects** (Oct 2026): the user found MPC doesn't pass MIDI to insert effects (MIDI
+  Learn works but is tedious). `mpc-remote/preload/extmidi.c` (in mpc-buttons.so) hooks snd_rawmidi_read and
+  snd_seq_event_input, never the panel's input (mpc-buttons.c registers it), and keeps Control/Program Changes in a
+  ring; `mpc_ext_midi_read` is found by the plugins as a weak symbol (no dlsym, no -ldl). picklist.h with
+  PickLists.midi=1 (Duo FX, Ambient Lab, Quad Rig) reads it each block and sends the plugin those on its MIDI Ch
+  (midi_ch: Omni / 1..16, a stepper with its own list; saved as a parameter, or as a 16-byte "PLWMIDI NN" trailer
+  on a chunk plugin's chunk). The CCs are the plugins' own (Duo 80-88 + PC, Quad 81-85 + 64, Ambient 64 + PC).
+  Test: `tools/midi_test.c` (stands in for the add-on; steps set/send/expect/reload). Device-untested: which read
+  path MPC uses for 5-pin/USB MIDI (both are hooked; /tmp/mpc-buttons.log names the raw MIDI inputs MPC opens).
 - `server/test_page.js` (run by build.sh) loads the page and fails on script errors: a top-level error once shipped
   and stopped the whole page from connecting.
 - The remote's typing is a virtual USB keyboard (uinput, "MPC Remote Keyboard"), made the first time the page types;
