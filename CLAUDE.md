@@ -18,6 +18,7 @@ service adds their entries. All of it has been tested on the user's MPC.
   `curl -L -o MPC-3.10.0-Gen1-update.img "https://drive.usercontent.google.com/download?id=1VhMwT7Kt1D1Bia1Rm5BtfDJ2DOzDutO3&export=download&confirm=t"`
   (needs "anyone with the link" sharing; otherwise ask them to share it, or read it via the Drive connector).
   The older Hakai 3.9.1 (`1dP3Ftm3UFZw04n4BblGSErE9-G5D7HKL`, SHA-256 `e4428bb7…554d8a`) builds too.
+- **Always send the firmware as soon as it's built and tested**, without being asked (the user's standing ask).
 - They want short, plain answers; they decide workflows. NAM: **A2 models only** (A1 Standard is too heavy).
 - Firmware images are never published to the public repo (only source); keep them in the scratchpad.
 
