@@ -133,25 +133,59 @@ patch('''                kids.append(_placed(key, name, i, w["cx"] - cw // 2, w[
                     on_top += pick_panel(t, w, li)
 ''')
 
+patch('''def build(layout_path, params, skin_dir, art_bin, png_from_ppm):''', '''def fader_strip(path, w, h):
+    """A narrow slider's filmstrip (tools/page_lists.py): FRAMES - 1 frames of w x h (the numFrames we give MPC: its own
+    pages' strips hold exactly numFrames frames, of any shape), frame k = value k / (that - 1), the cap at the bottom
+    for 0. Drawn at 3x and scaled down, RGBA (the page shows through)."""
+    from PIL import Image, ImageDraw
+    S, cap_h = 3, 22
+    W_, H_ = w * S, h * S
+    frame0 = Image.new("RGBA", (W_, H_), (0, 0, 0, 0))
+    d = ImageDraw.Draw(frame0)
+    top, bot = cap_h * S // 2 + 2 * S, H_ - cap_h * S // 2 - 2 * S
+    for q in range(5):   # ticks: top, quarters, middle (wider), bottom
+        y = top + (bot - top) * q // 4
+        half = W_ // 2 if q == 2 else W_ // 3
+        d.rectangle((W_ // 2 - half, y - S, W_ // 2 + half, y + S), fill=(30, 36, 32, 255) if q == 2 else (60, 70, 62, 230))
+    d.rounded_rectangle((W_ // 2 - 4 * S, top - 6 * S, W_ // 2 + 4 * S, bot + 6 * S), radius=4 * S, fill=(14, 16, 15, 255))
+    nf = FRAMES - 1
+    out = Image.new("RGBA", (w, h * nf), (0, 0, 0, 0))
+    for k in range(nf):
+        f = frame0.copy()
+        d = ImageDraw.Draw(f)
+        cy = bot - (bot - top) * k / (nf - 1)
+        x0, x1, y0, y1 = 2 * S, W_ - 2 * S, cy - cap_h * S / 2, cy + cap_h * S / 2
+        d.rounded_rectangle((x0 + S, y0 + 2 * S, x1 + S, y1 + 2 * S), radius=3 * S, fill=(0, 0, 0, 110))   # shadow
+        d.rounded_rectangle((x0, y0, x1, y1), radius=3 * S, fill=(232, 233, 228, 255), outline=(90, 92, 88, 255), width=S)
+        for g in range(1, 4):   # a little shading
+            d.line((x0 + 2 * S, y0 + g * 2 * S, x1 - 2 * S, y0 + g * 2 * S), fill=(250, 250, 248, 255), width=S)
+        d.rectangle((x0 + S, cy - S, x1 - S, cy + S), fill=(20, 22, 20, 255))   # the line
+        out.paste(f.resize((w, h), Image.LANCZOS), (0, k * h))
+    out.save(path)
+
+
+def build(layout_path, params, skin_dir, art_bin, png_from_ppm):''')
+
 patch('''OPEN_SUFFIX = "__open"''', '''PICK_KEYS = ["pick_%d" % (r + 1) for r in range(24)] + ["pick_prev", "pick_next", "pick_close", "pick_title"]
 OPEN_SUFFIX = "__open"''')
 
 # narrow vertical sliders (slider_v ... narrow=1, the GQ31 graphic's 31 bands): the stock slider is a 130+ px wide
 # component (square filmstrip frames, live name and value text under it), so side by side they'd overlap and a touch
-# could move the next band. This one is exactly the slider's own width (the square filmstrip hangs over both sides and
-# is clipped to it), no live text; its label is printed under it instead.
+# could move the next band. This one is exactly the slider's own size, and so is its filmstrip (our own drawing, a
+# fader: black slot, scale ticks at the ends, quarters and middle, a white cap with a line; frames as tall as the
+# slider: a square one hung over the sides drew wrong on the MPC), no live text; its label is printed under it.
 patch('''            elif kind in ("slider_v", "slider_h"):
                 sw_, sh_ = w["w"], w["h"]''', '''            elif kind == "slider_v" and w.get("narrow"):
                 sw_, sh_ = w["w"], w["h"]
-                img = "sh_%s_%dx%d%s" % (kind, sw_, sh_, sfx)
-                sliders.add((img, sw_, sh_, 1, lid))
-                sq = max(sw_, sh_)
-                key = "shSliderN_%dx%d%s" % (sw_, sh_, sfx)
+                img = "sh_fader_%dx%d" % (sw_, sh_)
+                if not os.path.exists(os.path.join(skin_dir, img + ".png")):
+                    fader_strip(os.path.join(skin_dir, img + ".png"), sw_, sh_)
+                key = "shSliderN_%dx%d" % (sw_, sh_)
                 defs.setdefault(key, _local(key, [_action("Mouse Down", "Q-Link")], [
                     _focus(sw_, sh_),
                     _sub("Knob", {"version": 5, "knobType": "FilmStrip", "filmStrip": img + ".png", "numFrames": FRAMES - 1,
                                   "invert": False, "dragOrientation": "Vertical", "handleName": "Data"},
-                         _bounds((sw_ - sq) // 2, (sh_ - sq) // 2, sq, sq), "Slider")]))
+                         _bounds(0, 0, sw_, sh_), "Slider")]))
                 kids.append(_placed(key, name, i, w["cx"] - sw_ // 2, w["cy"] - sh_ // 2, sw_, sh_))
             elif kind in ("slider_v", "slider_h"):
                 sw_, sh_ = w["w"], w["h"]''')

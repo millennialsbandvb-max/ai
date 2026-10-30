@@ -1,4 +1,4 @@
-/* GQ31 Graphic: a 31-band graphic EQ for MPC OS (VST2, stereo), in the style of the classic rack graphics (one
+/* 31 Smashly (files: GQ31-Graphic): a 31-band graphic EQ for MPC OS (VST2, stereo), in the style of the classic rack graphics (one
  * slider per ISO 1/3-octave band, 20 Hz .. 20 kHz). Our own code, on vocal-mpc's core (parameter table, biquads).
  * Each band is a constant-Q peaking filter (Q 4.3, a third of an octave wide at any boost or cut), so neighbouring
  * bands add up like an analog graphic's do. Range: the sliders span +/-12 dB, or +/-6 dB for finer moves. High-pass
@@ -141,7 +141,7 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
     case effGetParamDisplay: if (idx >= 0 && idx < kNumParams) { char t[32] = {0}; display(s, idx, t); copy_str(p, t, 24); } return 1;
     case effCanBeAutomated: return idx >= 0 && idx < kNumParams;
     case effGetPlugCategory: return kPlugCategEffect;
-    case effGetEffectName: case effGetProductString: copy_str(p, "GQ31 Graphic", 32); return 1;
+    case effGetEffectName: case effGetProductString: copy_str(p, "31 Smashly", 32); return 1;
     case effGetVendorString: copy_str(p, VC_VENDOR, 32); return 1;
     case effGetVendorVersion: return 1000;
     case effGetVstVersion: return 2400;
@@ -178,5 +178,5 @@ static AEffect *make(audioMasterCallback master) {
 __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallback master) { return make(master); }
 
 #ifdef VC_PARAMS
-int main(void) { write_params_json("GQ31 Graphic", P, kNumParams, NULL); return 0; }
+int main(void) { write_params_json("31 Smashly", P, kNumParams, NULL); return 0; }
 #endif

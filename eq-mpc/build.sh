@@ -52,7 +52,7 @@ bundle)
     qemu-arm -L "$SYSROOT" "$B/vst-probe-arm" "$B/bundle/plugins/$so.so" "/usr/lib/nam-mpc/plugins/$so.so" > "$B/bundle/entries/$so.xml"
     cat "$B/bundle/entries/$so.xml"
   done
-  for n in "GQ31 Graphic" "X-Para EQ"; do
+  for n in "31 Smashly" "X-Para EQ"; do
     [ -d "$B/bundle/skins/Other Things - VST - $n" ] || { echo "no page folder for $n" >&2; exit 1; }
   done ;;
 *) echo "usage: $0 [host|arm|test|skin|bundle]" >&2; exit 2 ;;

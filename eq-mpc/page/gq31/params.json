@@ -1,5 +1,5 @@
 {
-  "name": "GQ31 Graphic",
+  "name": "31 Smashly",
   "params": [
     {"key": "g20", "name": "20", "min": -12, "max": 12, "default": 0, "unit": "dB"},
     {"key": "g25", "name": "25", "min": -12, "max": 12, "default": 0, "unit": "dB"},
