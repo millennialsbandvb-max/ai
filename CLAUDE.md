@@ -44,6 +44,7 @@ Tools needed: arm-linux-gnueabihf-gcc/g++, cmake, ninja, qemu-arm, python3 + PIL
 | `trichorus-mpc/` | **Tri Chorus**: a three-voice bucket-brigade chorus in the spirit of the classic tri-chorus (our own DSP, `src/tri_chorus.c`; no Eventide name/art): voices 120 degrees apart panned L/C/R, slow LFO + ensemble wobble, Chorus/Vibrato, pitch-shifted Shimmer layer; page in `page/`; `test/tri_test.c` | ours |
 | `vocal-mpc/` | **Vocal plugins** (our own DSP; shared `src/vocal_core.h`: param table + params.json, biquads, FDN reverb, YIN tracker, scales/chords, held MIDI, TD-PSOLA voice): **VoxLive 3X** (`voxlive.c`, VoiceLive-3-Extreme-like: 4 voices, Scale / MIDI Chord / MIDI Notes, lead tune, double, humanize, gender, 21 styles), **HedRush Harmony** (`rush_harmony.c`, HeadRush-style 2-voice key/scale harmonizer), **Vocal Rack** (`vocal_rack.c`: gate, EQ, de-ess, comp, tune, FX, double, delay, reverb, 17 presets); pages in `page/<voxlive|rush|rack>/`; `test/vocal_test.c` | ours |
 | `ambient-mpc/` | **Ambient Lab** (our own DSP, `src/ambient.c`, using `vocal-mpc/src/vocal_core.h`): 11 machines after ambient pedals (Mikrocosm granular looper, Moodd MK2 micro-looper, Partikle granular delay, Tensr tape stretch, NiteSky sequenced-filter shimmer, Cloudbrst swell/ensemble reverb, Polym00n cascading delays, Hedr4 3-voice pitched delay, Aftrneath delay swarm, Rainbow Mchn warbling shifter, Data Korrupt subharmonic synth); 8 knobs per machine (`MACHINES[]`, names live via effGetParamName), Hold (freeze; MIDI CC 64), 35 presets; `test/ambient_test.c` | ours |
+| `quadrig-mpc/` | **Quad Rig** (`src/quad_rig.c`): four effect slots (each any Duo FX algorithm or Ambient Lab machine, or Off) + a NAM MPC amp at a movable position; it hosts the real engines (duo_fx.c, ambient.c, nam_mpc.cpp compiled with VSTPluginMain renamed duo_entry / amb_entry / nam_entry) and passes parameters through; page RIG / FX 1-4 / AMP; `test/quad_test.c` | ours |
 | `browser-mpc/` | **MPC Browser** plugin: its page's lower area is painted `OVERLAY_MARKER`; the browser shows there on the MPC's own screen (see `mpc-remote/overlay.h`) | ours |
 | `tools/` | `build_firmware.sh`, `build_pages.sh` (shared page style: 1.35x text), `vst_test.c` (generic plugin test) | |
 | repo root zips | source the user provided (NAM, AudioDSPTools, Eigen, DPF, Dragonfly, sfizz, mpc-vst-plugins page tools) | |
@@ -201,6 +202,15 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   weights sum to one; Rainbow's Magic is reduced with the Second voice): the random-settings test found each.
   Grains read the recording by "samples ago" (d += recording - rate). Untested on the device (CPU: 0.3-2.5% of a
   PC core per machine).
+- **Quad Rig**: 4 Duo FX engines (slot A only, B Off), 4 Ambient Lab engines and 1 NAM engine per instance (~60 MB);
+  only a slot's chosen engine runs. Engines report automation through engine_host (it finds the owner by AEffect
+  pointer and maps the engine's index to ours: a preset that changes the algorithm/machine moves our Effect too).
+  Bypass is ours (the engine hears silence, tail rings out). State = chunk: "QRIG1 <n>" + our norms (effects
+  restored first, then the rest) + NAM's own chunk (model/IR paths; NAM loads in the background). params.json:
+  ours + effect names asked from the engines + nam-mpc/params.json's entries as amp_* (gen-params checks NAM's
+  order). Effect popup: 68 entries need cols=5 and a 240 px field (the list's column width is the field's).
+  Adding a Duo algorithm or Ambient machine: update DUO_NALGO / AMB_NMACH (and the test's 67 / 68).
+  CPU: the starting board (drive, chorus, A2 amp, tape echo, hall) ~10% of a PC core; untested on the device.
 - `server/test_page.js` (run by build.sh) loads the page and fails on script errors: a top-level error once shipped
   and stopped the whole page from connecting.
 - The remote's typing is a virtual USB keyboard (uinput, "MPC Remote Keyboard"), made the first time the page types;

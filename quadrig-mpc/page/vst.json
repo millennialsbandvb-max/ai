@@ -1,0 +1,9 @@
+{
+  "name": "Quad Rig",
+  "vendor": "Other Things",
+  "uid": "QRIG",
+  "version": 1000,
+  "so": "Quad-Rig.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}
