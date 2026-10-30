@@ -43,6 +43,7 @@ Tools needed: arm-linux-gnueabihf-gcc/g++, cmake, ninja, qemu-arm, python3 + PIL
 | `duofx-mpc/` | **Duo FX**, an H90-style dual multi-effect (our own DSP, `src/duo_fx.c`): slots A and B, each one of 56 algorithms in 6 groups (delay, distortion, pitch, modulation, reverb, granular; table `ALGOS[]`), series/parallel; page in `page/` (PROGRAM, A, B tabs, Eventide-Control-like dark theme); `test/duo_test.c` | ours |
 | `trichorus-mpc/` | **Tri Chorus**: a three-voice bucket-brigade chorus in the spirit of the classic tri-chorus (our own DSP, `src/tri_chorus.c`; no Eventide name/art): voices 120 degrees apart panned L/C/R, slow LFO + ensemble wobble, Chorus/Vibrato, pitch-shifted Shimmer layer; page in `page/`; `test/tri_test.c` | ours |
 | `vocal-mpc/` | **Vocal plugins** (our own DSP; shared `src/vocal_core.h`: param table + params.json, biquads, FDN reverb, YIN tracker, scales/chords, held MIDI, TD-PSOLA voice): **VoxLive 3X** (`voxlive.c`, VoiceLive-3-Extreme-like: 4 voices, Scale / MIDI Chord / MIDI Notes, lead tune, double, humanize, gender, 21 styles), **HedRush Harmony** (`rush_harmony.c`, HeadRush-style 2-voice key/scale harmonizer), **Vocal Rack** (`vocal_rack.c`: gate, EQ, de-ess, comp, tune, FX, double, delay, reverb, 17 presets); pages in `page/<voxlive|rush|rack>/`; `test/vocal_test.c` | ours |
+| `ambient-mpc/` | **Ambient Lab** (our own DSP, `src/ambient.c`, using `vocal-mpc/src/vocal_core.h`): 11 machines after ambient pedals (Mikrocosm granular looper, Moodd MK2 micro-looper, Partikle granular delay, Tensr tape stretch, NiteSky sequenced-filter shimmer, Cloudbrst swell/ensemble reverb, Polym00n cascading delays, Hedr4 3-voice pitched delay, Aftrneath delay swarm, Rainbow Mchn warbling shifter, Data Korrupt subharmonic synth); 8 knobs per machine (`MACHINES[]`, names live via effGetParamName), Hold (freeze; MIDI CC 64), 35 presets; `test/ambient_test.c` | ours |
 | `browser-mpc/` | **MPC Browser** plugin: its page's lower area is painted `OVERLAY_MARKER`; the browser shows there on the MPC's own screen (see `mpc-remote/overlay.h`) | ours |
 | `tools/` | `build_firmware.sh`, `build_pages.sh` (shared page style: 1.35x text), `vst_test.c` (generic plugin test) | |
 | repo root zips | source the user provided (NAM, AudioDSPTools, Eigen, DPF, Dragonfly, sfizz, mpc-vst-plugins page tools) | |
@@ -195,6 +196,11 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   Lead Tune is on. Harmony targets are worked out only when the tracker updates. vocal_test's pitch estimate takes
   the shortest period within 3% of the best (a periodic sound repeats at 2T; a strong 2nd harmonic fools 0.9).
   Untested on the device: CPU (about 1% of a PC core each at defaults) and real voices.
+- **Ambient Lab**: every feedback loop is kept under unity by construction (NiteSky's shimmer is scaled by what
+  the reverb loses each pass; Polym00n feeds back taps/Dimension, not /sqrt, plus a DC blocker; Aftrneath's tap
+  weights sum to one; Rainbow's Magic is reduced with the Second voice): the random-settings test found each.
+  Grains read the recording by "samples ago" (d += recording - rate). Untested on the device (CPU: 0.3-2.5% of a
+  PC core per machine).
 - `server/test_page.js` (run by build.sh) loads the page and fails on script errors: a top-level error once shipped
   and stopped the whole page from connecting.
 - The remote's typing is a virtual USB keyboard (uinput, "MPC Remote Keyboard"), made the first time the page types;

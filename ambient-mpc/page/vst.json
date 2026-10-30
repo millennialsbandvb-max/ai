@@ -1,0 +1,9 @@
+{
+  "name": "Ambient Lab",
+  "vendor": "Other Things",
+  "uid": "AMBL",
+  "version": 1000,
+  "so": "Ambient-Lab.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}
