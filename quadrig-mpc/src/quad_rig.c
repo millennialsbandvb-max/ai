@@ -331,7 +331,7 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
     case effGetParamDisplay: if (idx >= 0 && idx < kNumParams) { char t[96] = {0}; param_display(s, idx, t); copy_str(p, t, 24); } return 1;
     case effCanBeAutomated: return idx >= 0 && idx < kNumParams;
     case effGetPlugCategory: return kPlugCategEffect;
-    case effGetEffectName: case effGetProductString: copy_str(p, "Quad Rig", 32); return 1;
+    case effGetEffectName: case effGetProductString: copy_str(p, "0Quad Rig", 32); return 1;   /* (the 0: first in MPC's list) */
     case effGetVendorString: copy_str(p, "Other Things", 32); return 1;
     case effGetVendorVersion: return 1000;
     case effGetVstVersion: return 2400;
@@ -450,7 +450,7 @@ static const char *const NAM_KEYS[NAM_N] = {"input", "gate", "bass", "middle", "
 int main(int argc, char **argv) {
     /* NAM's own params.json supplies the amp's entries (argv[1]); ours go around them */
     fill_fx_names();
-    printf("{\n  \"name\": \"Quad Rig\",\n  \"params\": [\n");
+    printf("{\n  \"name\": \"0Quad Rig\",\n  \"params\": [\n");
     printf("    {\"key\": \"amp_pos\", \"name\": \"Amp Position\", \"options\": [");
     for (int k = 0; k < 5; k++) printf("%s\"%s\"", k ? ", " : "", AMP_POS[k]);
     printf("], \"default\": 2},\n");

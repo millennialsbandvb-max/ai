@@ -2,8 +2,8 @@
 # NAM MPC boot helper (started by nam-mpc.service after MPC). Every plugin built into the firmware has an entry in
 # /usr/lib/nam-mpc/entries/*.xml (NAM MPC, the Dragonfly reverbs, ...). If MPC.settings is missing any of them:
 # stop MPC, back the settings up, add the missing entries (all at once, so MPC restarts only once) and start MPC
-# again. An entry already there is left alone unless its maker (manufacturer=, the folder MPC lists it under) has
-# changed, when it's replaced; nothing else is touched, and any problem leaves the settings as they were.
+# again. An entry already there is left alone unless its maker (manufacturer=, the folder MPC lists it under) or its
+# name (name=, what MPC shows; e.g. Quad Rig became 0Quad Rig to list first) has changed, when it's replaced; nothing else is touched, and any problem leaves the settings as they were.
 # Log: /tmp/nam-mpc-boot.log
 DIR=/usr/lib/nam-mpc
 exec >>/tmp/nam-mpc-boot.log 2>&1
@@ -28,8 +28,10 @@ for e in "$DIR"/entries/*.xml; do
     f=$(file_of "$e")
     [ -n "$f" ] || { echo "skipping $e: no file= in it"; continue; }
     m=$(sed -n 's/.* manufacturer="\([^"]*\)".*/\1/p' "$e")
+    n=$(sed -n 's/.* name="\([^"]*\)".*/\1/p' "$e")
     if ! grep -qF "file=\"$f\"" "$SETTINGS"; then missing="$missing $e"
     elif ! entry_of "$f" | grep -qF "manufacturer=\"$m\""; then echo "new maker ($m): $f"; missing="$missing $e"
+    elif [ -n "$n" ] && ! entry_of "$f" | grep -qF " name=\"$n\""; then echo "new name ($n): $f"; missing="$missing $e"
     else echo "listed: $f"; fi
 done
 [ -n "$missing" ] || { echo "all plugins already listed in $SETTINGS"; exit 0; }   # (a changed one counts as missing)

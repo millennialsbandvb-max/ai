@@ -11,7 +11,7 @@ REPO="$(dirname "$HERE")"
 MODE="${1:-arm}"
 B="$HERE/build"
 SYSROOT="${ARM_SYSROOT:-/usr/arm-linux-gnueabihf}"
-PAGE="Other Things - VST - Quad Rig"
+PAGE="Other Things - VST - 0Quad Rig"
 JOBS="$(nproc 2>/dev/null || echo 4)"
 "$REPO/nam-mpc/build.sh" deps >/dev/null   # (unpacks NAM's sources into nam-mpc/build/deps)
 DEPS="$REPO/nam-mpc/build/deps"

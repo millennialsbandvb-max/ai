@@ -197,7 +197,8 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
 - **Maker "Other Things"**: every plugin we wrote (NAM MPC, SFZ MPC, Duo FX, Tri Chorus, MPC Browser, the vocal ones)
   reports vendor "Other Things", so MPC lists them in one folder; Airwindows and Dragonfly keep their own. Page
   folders are "Other Things - VST - <name>". nam-mpc-boot.sh replaces an MPC.settings entry whose manufacturer=
-  differs from ours (reads the whole <PLUGIN/>, JUCE may wrap it over lines), so existing devices move too.
+  differs from ours, or whose name= does (reads the whole <PLUGIN/>, JUCE may wrap it over lines), so existing
+  devices follow.
 - **Vocal plugins**: TD-PSOLA (grains 2 source periods, Hann tabulated, centred at their exact fractional time:
   whole-sample placement brightened some ratios) keeps formants (test: centroid of a 3rd up ~ the same vowel sung
   at that pitch); latency ~30 ms (80 Hz lowest period x2, room for Gender x1.45). Dry lead has no latency unless
@@ -209,7 +210,8 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   weights sum to one; Rainbow's Magic is reduced with the Second voice): the random-settings test found each.
   Grains read the recording by "samples ago" (d += recording - rate). Untested on the device (CPU: 0.3-2.5% of a
   PC core per machine).
-- **Quad Rig**: 4 Duo FX engines (slot A only, B Off), 4 Ambient Lab engines and 1 NAM engine per instance (~60 MB);
+- **Quad Rig** (shown as "0Quad Rig" since Oct 2026, so it lists first; files and page folder key stay Quad-Rig /
+  "Other Things - VST - 0Quad Rig"; nam-mpc-boot.sh replaces an MPC.settings entry whose name= changed): 4 Duo FX engines (slot A only, B Off), 4 Ambient Lab engines and 1 NAM engine per instance (~60 MB);
   only a slot's chosen engine runs. Engines report automation through engine_host (it finds the owner by AEffect
   pointer and maps the engine's index to ours: a preset that changes the algorithm/machine moves our Effect too).
   Bypass is ours (the engine hears silence, tail rings out). State = chunk: "QRIG1 <n>" + our norms (effects
