@@ -1,9 +1,0 @@
-{
-  "name": "GQ31 Graphic",
-  "vendor": "Other Things",
-  "uid": "GQ31",
-  "version": 1000,
-  "so": "GQ31-Graphic.so",
-  "params": "params.json",
-  "layout": "layout.conf"
-}

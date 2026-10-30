@@ -1,2 +1,0 @@
-#!/bin/sh
-exec /usr/bin/python3 /home/user/ai/eq-mpc/build/skin-tools/html_art.py "$@"

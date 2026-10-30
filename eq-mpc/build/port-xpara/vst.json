@@ -1,9 +1,0 @@
-{
-  "name": "X-Para EQ",
-  "vendor": "Other Things",
-  "uid": "XPEQ",
-  "version": 1000,
-  "so": "X-Para-EQ.so",
-  "params": "params.json",
-  "layout": "layout.conf"
-}
