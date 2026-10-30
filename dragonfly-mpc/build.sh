@@ -98,7 +98,7 @@ sources() {
 }
 
 if [ "$MODE" = skin ]; then   # the shared page style (tools/build_pages.sh), one page per plugin
-  "$REPO/tools/build_pages.sh" "$B" "$B/skin" "$HERE"/pages/*/
+  PEDAL_LOOK=0 "$REPO/tools/build_pages.sh" "$B" "$B/skin" "$HERE"/pages/*/
   exit 0
 fi
 

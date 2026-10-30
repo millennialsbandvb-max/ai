@@ -238,6 +238,19 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   overlay) and on a tap of its value text (a clear field over it). Lists share one panel picture. Device-untested:
   the panel and rows on MPC (field pattern = the device-proven popups'), the repaint of row text, and whether an
   action's handleName other than Data works (the value-text tap is the fallback).
+- **Pedal look** (Oct 2026, the user's pick): our pages (not Airwindows/Dragonfly: PEDAL_LOOK=0 in their build.sh)
+  are drawn by the kit's browser renderer (html_art.py) with `tools/pedal_look.css`: an enclosure in the page's
+  colour (theme_plate_hi / theme_plate_lo, a hammertone filter on the base background), recessed frames, metal knob
+  faces with a glowing value arc. `tools/pedal_look.py` patches html_art (plate class, defs, PW_CHROMIUM). Needs
+  Python Playwright for /usr/bin/python3 (here: pip install --break-system-packages playwright; Chromium at
+  /opt/pw-browsers/chromium); without it build_pages.sh falls back to the plain renderer. `tools/png_shrink.py`
+  turns the pages' PNGs into 256-colour ones (shaded filmstrips were ~2.4 MB each; ~10x smaller). Per-effect
+  colours: Duo FX (a_look/b_look) and Quad Rig (f1_look..f4_look, outside its state chunk) report a read-only
+  "look" (tools/pedal_looks.h: the palette and, in the plugins, which look each algorithm / DrivPdls pedal /
+  Ambient machine takes; duo_look, amb_look); a tab's `looks key=<param>` line becomes one full-page art line per
+  look with when=<param>:<n> (tools/pedal_looks.py, which also patches shadow_skin to draw mode images in layout
+  order so the colour lies under frames). Look backgrounds are smooth (texture doesn't compress). Sizes: Quad Rig
+  page ~19 MB, Duo ~8 MB. Device-untested: the look switching live (when= is device-proven for popups/modes).
 - `server/test_page.js` (run by build.sh) loads the page and fails on script errors: a top-level error once shipped
   and stopped the whole page from connecting.
 - The remote's typing is a virtual USB keyboard (uinput, "MPC Remote Keyboard"), made the first time the page types;

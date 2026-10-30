@@ -15,6 +15,7 @@
 #include "vst2.h"
 #include "presets.h"
 #include "../../tools/picklist.h"
+#include "../../tools/pedal_looks.h"
 
 #define PI 3.14159265358979f
 #define NK 8                        /* knobs per slot */
@@ -320,7 +321,7 @@ static const Algo ALGOS[kNumAlgos] = {
 /* ==== parameters (the order is the VST index: saved projects and Q-Links refer to them by it) ============== */
 enum { P_ALGO, P_OPEN, P_MIX, P_K, P_NAME = P_K + NK, P_INFO = P_NAME + NK, P_SLOT };   /* per slot */
 enum { kRouting = 2 * P_SLOT, kOutput, kPresetBase, kProgBase = kPresetBase + 6, kBypass = kProgBase + 3, kBypassA, kBypassB,
-       kNumParams };
+       kLookA, kLookB, kNumParams };   /* (A/B Look: read-only, the page's colour for the slot: tools/pedal_looks.h) */
 /* per slot: Preset, Preset <, Preset >; then Program, Program <, Program > (both slots and the routing); then
  * Bypass (both), A Bypass, B Bypass. A bypassed slot hears nothing but lets its tail ring out, the dry sound passes. */
 
@@ -1603,6 +1604,26 @@ static void load_defaults(Plugin *s, int k, int algo) {   /* an algorithm was ch
     }
 }
 
+/* the colour of a slot's page (tools/pedal_looks.h): DrivPdls after its pedal, a few algorithms after theirs, the rest
+ * by group. (Quad Rig asks duo_look for its slots.) */
+static const unsigned char PEDAL_LOOK_OF[] = {LK_GREEN, LK_GOLD, LK_BLACK, LK_SILVER, LK_RED, LK_BLUE, LK_ORANGE, LK_IVORY,
+    LK_IVORY, LK_BLACK, LK_PERIWINKLE, LK_SKY, LK_IVORY, LK_BLACK, LK_YELLOW, LK_IVORY, LK_SILVER, LK_GREEN, LK_PLUM, LK_COPPER,
+    LK_YELLOW, LK_YELLOW, LK_GREEN, LK_COPPER, LK_BLACK};
+_Static_assert(sizeof PEDAL_LOOK_OF == sizeof PEDALS / sizeof *PEDALS, "a look per pedal");
+static int slot_look(const Plugin *s, int k) {
+    static const unsigned char GROUP_LOOK[] = {LK_DELAY, LK_DRIVE, LK_PITCH, LK_MOD, LK_REVERB, LK_GRAIN, LK_GRAPHITE};
+    const int a = algo_of(s, k);
+    switch (a) {
+    case A_PEDALS: return PEDAL_LOOK_OF[option_of(s->norm[k * P_SLOT + P_K], N_PEDALS)];
+    case A_MIDDRIVE: return LK_GREEN;        /* the green screamer */
+    case A_POG: return LK_SILVER;
+    case A_TRICHORUS: return LK_PERIWINKLE;
+    case A_VIBE: return LK_TURQUOISE;
+    default: return GROUP_LOOK[ALGOS[a].group];
+    }
+}
+int duo_look(AEffect *e) { return slot_look((Plugin *)e->object, 0); }
+
 /* presets (presets.h): a preset sets the slot's algorithm, Mix and knobs */
 static void load_preset(Plugin *s, int k, int idx) {
     const int base = k * P_SLOT;
@@ -1675,6 +1696,7 @@ static void setParameter(AEffect *e, int32_t i, float v) {
     v = clampf(v, 0, 1);
     if (i == kRouting) { s->norm[i] = (float)option_of(v, 2); s->update_display = 1; return; }
     if (i == kOutput) { s->norm[i] = v; return; }
+    if (i >= kLookA) return;   /* read-only */
     if (i >= kBypass) { s->norm[i] = v > 0.5f ? 1 : 0; s->update_display = 1; return; }
     if (i >= kProgBase) {   /* as a preset below, over the programs */
         const int w = i - kProgBase;
@@ -1764,6 +1786,7 @@ static void fmt_knob(const Knob *k, float n, char *t) {
 static void param_display(Plugin *s, int i, char *t) {
     if (i == kRouting) { snprintf(t, 96, "%s", s->norm[i] > 0.5f ? "Parallel" : "Series"); return; }
     if (i == kOutput) { snprintf(t, 96, "%+.1f dB", lerp(-24, 12, s->norm[i])); return; }
+    if (i >= kLookA) { snprintf(t, 96, "%s", PEDAL_LOOKS[slot_look(s, i - kLookA)].name); return; }
     if (i >= kBypass) { snprintf(t, 96, "%s", s->norm[i] > 0.5f ? "Bypassed" : "On"); return; }
     if (i >= kProgBase) {
         const int w = i - kProgBase;
@@ -1795,6 +1818,10 @@ static void process(AEffect *e, float **in, float **out, int32_t n) {
     __asm__ volatile("vmsr fpscr, %0" : : "r"(fpscr | (1u << 24)));
 #endif
     Plugin *s = (Plugin *)e->object;
+    for (int k = 0; k < 2; k++) {   /* the page's colour follows the slot's effect */
+        const float lv = (float)slot_look(s, k) / (float)(N_LOOKS - 1);
+        if (s->norm[kLookA + k] != lv) { s->norm[kLookA + k] = lv; s->automate |= 1ull << (kLookA + k); }
+    }
     if (s->master) {
         const uint64_t a = s->automate;
         if (a) {
@@ -1900,7 +1927,8 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
             char t[40];
             const int w = idx % P_SLOT;
             const Knob *kn = idx < kRouting && w >= P_K && w < P_K + NK ? &ALGOS[algo_of(s, idx / P_SLOT)].k[w - P_K] : NULL;
-            if (idx >= kBypass) snprintf(t, sizeof t, "%sBypass", idx == kBypass ? "" : idx == kBypassA ? "A " : "B ");
+            if (idx >= kLookA) snprintf(t, sizeof t, "%c Look", idx == kLookA ? 'A' : 'B');
+            else if (idx >= kBypass) snprintf(t, sizeof t, "%sBypass", idx == kBypass ? "" : idx == kBypassA ? "A " : "B ");
             else if (idx >= kProgBase) snprintf(t, sizeof t, "Program%s", idx == kProgBase ? "" : idx == kProgBase + 1 ? " <" : " >");
             else if (idx >= kPresetBase) snprintf(t, sizeof t, "%c Preset%s", (idx - kPresetBase) / 3 ? 'B' : 'A',
                                              (idx - kPresetBase) % 3 == 0 ? "" : (idx - kPresetBase) % 3 == 1 ? " <" : " >");
@@ -2066,6 +2094,11 @@ int main(void) {
     printf("    {\"key\": \"bypass\", \"name\": \"Bypass\", \"options\": [\"On\", \"Bypassed\"]},\n");
     printf("    {\"key\": \"a_bypass\", \"name\": \"A Bypass\", \"options\": [\"On\", \"Bypassed\"]},\n");
     printf("    {\"key\": \"b_bypass\", \"name\": \"B Bypass\", \"options\": [\"On\", \"Bypassed\"]}");
+    for (int k = 0; k < 2; k++) {
+        printf(",\n    {\"key\": \"%c_look\", \"name\": \"%c Look\", \"options\": [", k ? 'b' : 'a', k ? 'B' : 'A');
+        for (int l = 0; l < N_LOOKS; l++) printf("%s\"%s\"", l ? ", " : "", PEDAL_LOOKS[l].name);
+        printf("]}");
+    }
     pl_params_json(&LISTS, stdout);
     printf("\n  ]\n}\n");
     return 0;

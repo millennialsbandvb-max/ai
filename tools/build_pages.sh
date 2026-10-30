@@ -27,6 +27,7 @@ gcc -O2 -I"$mv/tools/vendor/force-shadow/tools" -o "$W/shadow_art" "$tools/shado
 art_env=()
 if [ "${PEDAL_LOOK:-1}" = 1 ] && "${PEDAL_PY:-/usr/bin/python3}" -c "import playwright, PIL" 2>/dev/null; then
   python3 "$REPO/tools/pedal_look.py" "$tools/html_art.py"
+  python3 "$REPO/tools/pedal_looks.py" patch "$tools/shadow_skin.py"
   printf '#!/bin/sh\nexec %s %s "$@"\n' "${PEDAL_PY:-/usr/bin/python3}" "$tools/html_art.py" > "$W/html_art_run"
   chmod +x "$W/html_art_run"
   art_env=(SHADOW_ART="$W/html_art_run" PW_CHROMIUM="${PW_CHROMIUM:-$( [ -e /opt/pw-browsers/chromium ] && echo /opt/pw-browsers/chromium)}")
@@ -36,9 +37,14 @@ rm -rf "$OUT" "$W"/preview_*.png && mkdir -p "$OUT"
 for d in "$@"; do
   p=$(basename "$d"); w="$W/port-$p"
   rm -rf "$w" && mkdir -p "$w/build" && cp "$d"/* "$w/" && cp "$W/shadow_art" "$w/build/"
+  # "looks key=<param>" lines: a background per effect colour (tools/pedal_looks.py; the browser renderer only)
+  if [ ${#art_env[@]} != 0 ]; then python3 "$REPO/tools/pedal_looks.py" layout "$d/layout.conf" "$w/looks"; src="$w/looks/layout.conf"
+    cp "$w"/looks/look_*.svg "$w/"
+  else grep -v '^[[:space:]]*looks[[:space:]]' "$d/layout.conf" > "$w/plain.conf"; src="$w/plain.conf"; fi
   { echo "font_label=$mv/tools/html_art/fonts/TitilliumWeb-SemiBold.ttf"; [ ${#art_env[@]} = 0 ] || echo "art_css=$REPO/tools/pedal_look.css"
-    cat "$d/layout.conf"; } > "$w/layout.conf"
+    cat "$src"; } > "$w/layout.conf"
   (cd "$w" && env "${art_env[@]}" SHADOW_TITLE_FONT="$mv/tools/html_art/fonts/TitilliumWeb-Bold.ttf" python3 "$tools/gen_vst.py" vst.json >/dev/null)
+  [ ${#art_env[@]} = 0 ] || python3 "$REPO/tools/png_shrink.py" "$w"/build/skin   # (the pedal look's images are big)
   cp -a "$w"/build/skin/* "$OUT/"
   python3 "$tools/studio.py" preview "$(ls -d "$w"/build/skin/*/)Plugin Skins" -o "$W/preview_${p}_%d.png" >/dev/null
   echo "page: $(ls "$w/build/skin")"

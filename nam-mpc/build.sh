@@ -86,7 +86,16 @@ skin() {
   python3 "$HERE/../tools/pick_params.py" "$HERE/params.json" folder="Model Folders" model=Models ir_folder="IR Folders" ir=IRs \
     > "$B/port/params.json"   # + the full-page lists (src/nam_mpc.cpp LISTS)
   cp "$B/shadow_art" "$B/port/build/"
-  (cd "$B/port" && SHADOW_TITLE_FONT="$mv/tools/html_art/fonts/TitilliumWeb-Bold.ttf" python3 "$tools/gen_vst.py" vst.json)
+  local art_env=()   # the pedal look (tools/pedal_look.*), as tools/build_pages.sh does it
+  if [ "${PEDAL_LOOK:-1}" = 1 ] && "${PEDAL_PY:-/usr/bin/python3}" -c "import playwright, PIL" 2>/dev/null; then
+    python3 "$HERE/../tools/pedal_look.py" "$tools/html_art.py"
+    printf '#!/bin/sh\nexec %s %s "$@"\n' "${PEDAL_PY:-/usr/bin/python3}" "$tools/html_art.py" > "$B/html_art_run"
+    chmod +x "$B/html_art_run"
+    art_env=(SHADOW_ART="$B/html_art_run" PW_CHROMIUM="${PW_CHROMIUM:-$( [ -e /opt/pw-browsers/chromium ] && echo /opt/pw-browsers/chromium)}")
+    { echo "art_css=$HERE/../tools/pedal_look.css"; cat "$HERE/layout.conf"; } > "$B/port/layout.conf"
+  fi
+  (cd "$B/port" && env "${art_env[@]}" SHADOW_TITLE_FONT="$mv/tools/html_art/fonts/TitilliumWeb-Bold.ttf" python3 "$tools/gen_vst.py" vst.json)
+  [ ${#art_env[@]} = 0 ] || python3 "$HERE/../tools/png_shrink.py" "$B/port/build/skin"
   rm -rf "$B/skin" && cp -a "$B/port/build/skin" "$B/skin"
   rm -f "$B"/preview_*.png
   python3 "$tools/studio.py" preview "$(ls -d "$B"/skin/*/)Plugin Skins" -o "$B/preview_%d.png" >/dev/null

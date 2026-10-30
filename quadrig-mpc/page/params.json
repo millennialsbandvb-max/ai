@@ -1,5 +1,5 @@
 {
-  "name": "Quad Rig",
+  "name": "0Quad Rig",
   "params": [
     {"key": "amp_pos", "name": "Amp Position", "options": ["Amp First", "After FX 1", "After FX 2", "After FX 3", "Amp Last"], "default": 2},
     {"key": "amp_bypass", "name": "Amp Bypass", "options": ["On", "Bypassed"]},
@@ -244,6 +244,10 @@
       "momentary": true
     }
 ,
+    {"key": "f1_look", "name": "FX1 Look", "options": ["Graphite", "Green", "Gold", "Black", "Silver", "Red", "Blue", "Orange", "Ivory", "Periwinkle", "Yellow", "Plum", "Delay", "Reverb", "Mod", "Pitch", "Drive", "Grain", "Teal", "Purple", "Sky", "Turquoise", "Magenta", "Copper"]},
+    {"key": "f2_look", "name": "FX2 Look", "options": ["Graphite", "Green", "Gold", "Black", "Silver", "Red", "Blue", "Orange", "Ivory", "Periwinkle", "Yellow", "Plum", "Delay", "Reverb", "Mod", "Pitch", "Drive", "Grain", "Teal", "Purple", "Sky", "Turquoise", "Magenta", "Copper"]},
+    {"key": "f3_look", "name": "FX3 Look", "options": ["Graphite", "Green", "Gold", "Black", "Silver", "Red", "Blue", "Orange", "Ivory", "Periwinkle", "Yellow", "Plum", "Delay", "Reverb", "Mod", "Pitch", "Drive", "Grain", "Teal", "Purple", "Sky", "Turquoise", "Magenta", "Copper"]},
+    {"key": "f4_look", "name": "FX4 Look", "options": ["Graphite", "Green", "Gold", "Black", "Silver", "Red", "Blue", "Orange", "Ivory", "Periwinkle", "Yellow", "Plum", "Delay", "Reverb", "Mod", "Pitch", "Drive", "Grain", "Teal", "Purple", "Sky", "Turquoise", "Magenta", "Copper"]},
     {"key": "f1_preset__list", "name": "FX 1 Presets List", "options": ["Closed", "Open"]},
     {"key": "f2_preset__list", "name": "FX 2 Presets List", "options": ["Closed", "Open"]},
     {"key": "f3_preset__list", "name": "FX 3 Presets List", "options": ["Closed", "Open"]},

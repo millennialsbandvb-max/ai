@@ -23,7 +23,7 @@ params)
   python3 "$HERE/pages.py" "$HERE/params" "$HERE/pages"
   exit 0 ;;
 skin)
-  "$REPO/tools/build_pages.sh" "$B" "$B/skin" "$HERE"/pages/*/
+  PEDAL_LOOK=0 "$REPO/tools/build_pages.sh" "$B" "$B/skin" "$HERE"/pages/*/
   exit 0 ;;
 bundle)
   [ -d "$B/skin" ] && ls "$B"/arm/*.so >/dev/null || { echo "run ./build.sh arm and ./build.sh skin first" >&2; exit 1; }

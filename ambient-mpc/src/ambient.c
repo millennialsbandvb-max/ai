@@ -726,6 +726,14 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
     }
 }
 
+/* the colour of the page after the pedal the machine is like (tools/pedal_looks.h; for Quad Rig's slots) */
+#include "../../tools/pedal_looks.h"
+int amb_look(AEffect *e) {
+    static const unsigned char LOOK[kNumMachines] = {LK_SILVER, LK_TURQUOISE, LK_ORANGE, LK_RED, LK_PURPLE, LK_SKY, LK_BLACK,
+                                                     LK_YELLOW, LK_TEAL, LK_MAGENTA, LK_COPPER};
+    return LOOK[option_of(((Plugin *)e->object)->norm[kMachine], kNumMachines)];
+}
+
 /* the full-page lists (tools/picklist.h; Quad Rig calls this for its slots' engines too): the presets, then the
  * eight knobs (lists 1..8: a knob that is a choice lists its choices; any other doesn't open) */
 int amb_pick(AEffect *e, int list, int op, int i, char *out, int max) {

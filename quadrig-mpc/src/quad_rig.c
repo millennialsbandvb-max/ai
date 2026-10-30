@@ -16,6 +16,7 @@
 
 #include "vst2.h"
 #include "../../tools/picklist.h"
+#include "../../tools/pedal_looks.h"
 
 enum { audioMasterVersion = 1 };
 
@@ -25,6 +26,7 @@ AEffect *nam_entry(audioMasterCallback);
 int duo_pick(AEffect *, int, int, int, char *, int);   /* their full-page lists (tools/picklist.h) */
 int amb_pick(AEffect *, int, int, int, char *, int);
 int nam_pick(AEffect *, int, int, int, char *, int);
+int duo_look(AEffect *), amb_look(AEffect *);   /* the colour of their pedal (tools/pedal_looks.h) */
 
 #define NS 4
 /* the engines' own parameter numbers we use */
@@ -38,7 +40,8 @@ enum { AMB_MACHINE = 0, AMB_MIX = 2, AMB_K = 3, AMB_HOLD = 11, AMB_PRESET = 12, 
 enum { kAmpPos, kAmpBypass, kOutput, kSlot0 };
 enum { S_FX, S_OPEN, S_MIX, S_K, S_PRESET = S_K + 8, S_PREV, S_NEXT, S_BYPASS, S_HOLD, SP };
 #define SLOT(s, k) (kSlot0 + (s) * SP + (k))
-enum { kNam0 = kSlot0 + NS * SP, kNumParams = kNam0 + NAM_N };
+enum { kNam0 = kSlot0 + NS * SP, kNumSaved = kNam0 + NAM_N,   /* (the state chunk: these) */
+       kLook0 = kNumSaved, kNumParams = kLook0 + NS };          /* FX1..4 Look: read-only, each slot page's colour */
 static const char *const AMP_POS[] = {"Amp First", "After FX 1", "After FX 2", "After FX 3", "Amp Last"};
 
 typedef struct {
@@ -136,7 +139,7 @@ static void choose_fx(Plugin *s, int k, int fx) {   /* point the slot at an engi
 
 static void setParameter(AEffect *e, int32_t i, float v) {
     Plugin *s = (Plugin *)e->object;
-    if (i < 0 || i >= kNumParams) return;
+    if (i < 0 || i >= kNumParams || i >= kLook0) return;   /* (the looks are read-only) */
     v = clampf(v, 0, 1);
     if (i >= kNam0) { s->nam->setParameter(s->nam, i - kNam0, v); s->norm[i] = s->nam->getParameter(s->nam, i - kNam0); return; }
     if (i == kAmpPos) { s->norm[i] = (float)option_of(v, 5) / 4; s->update_display = 1; return; }
@@ -180,7 +183,9 @@ static void fill_fx_names(void) {
     a->dispatcher(a, effClose, 0, 0, NULL, 0);
 }
 
+static int slot_look(Plugin *s, int k) { return s->kind[k] == 0 ? duo_look(s->duo[k]) : s->kind[k] == 1 ? amb_look(s->amb[k]) : LK_GRAPHITE; }
 static void param_name(Plugin *s, int i, char *t) {
+    if (i >= kLook0) { snprintf(t, 32, "FX%d Look", i - kLook0 + 1); return; }
     if (i >= kNam0) { s->nam->dispatcher(s->nam, effGetParamName, i - kNam0, 0, t, 0); return; }
     if (i < kSlot0) { static const char *const N[] = {"Amp Position", "Amp Bypass", "Output"}; snprintf(t, 32, "%s", N[i]); return; }
     const int k = (i - kSlot0) / SP, w = (i - kSlot0) % SP;
@@ -195,6 +200,7 @@ static void param_name(Plugin *s, int i, char *t) {
     snprintf(t, 32, "FX%d %s", k + 1, W[w]);
 }
 static void param_display(Plugin *s, int i, char *t) {
+    if (i >= kLook0) { snprintf(t, 32, "%s", PEDAL_LOOKS[slot_look(s, i - kLook0)].name); return; }
     if (i >= kNam0) { s->nam->dispatcher(s->nam, effGetParamDisplay, i - kNam0, 0, t, 0); return; }
     if (i == kAmpPos) { snprintf(t, 32, "%s", AMP_POS[option_of(s->norm[i], 5)]); return; }
     if (i == kAmpBypass) { snprintf(t, 32, "%s", s->norm[i] > 0.5f ? "Bypassed" : "On"); return; }
@@ -215,12 +221,12 @@ static void param_display(Plugin *s, int i, char *t) {
 static int get_chunk(Plugin *s, void **out) {
     void *nc = NULL;
     const intptr_t nn = s->nam->dispatcher(s->nam, effGetChunk, 0, 0, &nc, 0);
-    const size_t cap = 64 + (size_t)kNumParams * 16 + (nn > 0 ? (size_t)nn : 0);
+    const size_t cap = 64 + (size_t)kNumSaved * 16 + (nn > 0 ? (size_t)nn : 0);
     free(s->chunk);
     s->chunk = malloc(cap);
     if (!s->chunk) return 0;
-    size_t o = (size_t)snprintf(s->chunk, cap, "QRIG1 %d\n", kNumParams);
-    for (int i = 0; i < kNumParams; i++) o += (size_t)snprintf(s->chunk + o, cap - o, "%.6f\n", s->norm[i]);
+    size_t o = (size_t)snprintf(s->chunk, cap, "QRIG1 %d\n", kNumSaved);
+    for (int i = 0; i < kNumSaved; i++) o += (size_t)snprintf(s->chunk + o, cap - o, "%.6f\n", s->norm[i]);
     o += (size_t)snprintf(s->chunk + o, cap - o, "NAM %ld\n", (long)(nn > 0 ? nn : 0));
     if (nn > 0 && nc) { memcpy(s->chunk + o, nc, (size_t)nn); o += (size_t)nn; }
     *out = s->chunk;
@@ -228,10 +234,10 @@ static int get_chunk(Plugin *s, void **out) {
 }
 static void set_chunk(Plugin *s, const char *c, size_t n) {
     int np = 0, used = 0;
-    if (n < 8 || sscanf(c, "QRIG1 %d\n%n", &np, &used) != 1 || np != kNumParams) return;
-    float v[kNumParams];
+    if (n < 8 || sscanf(c, "QRIG1 %d\n%n", &np, &used) != 1 || np != kNumSaved) return;
+    float v[kNumSaved];
     size_t o = (size_t)used;
-    for (int i = 0; i < kNumParams; i++) {
+    for (int i = 0; i < kNumSaved; i++) {
         int u = 0;
         if (o >= n || sscanf(c + o, "%f\n%n", &v[i], &u) != 1) return;
         o += (size_t)u;
@@ -247,7 +253,7 @@ static void set_chunk(Plugin *s, const char *c, size_t n) {
     int u = 0;
     if (o < n && sscanf(c + o, "NAM %ld\n%n", &nn, &u) == 1 && nn > 0 && o + (size_t)u + (size_t)nn <= n)
         s->nam->dispatcher(s->nam, effSetChunk, 0, (intptr_t)nn, (void *)(c + o + (size_t)u), 0);
-    for (int i = kNam0; i < kNumParams; i++) s->norm[i] = s->nam->getParameter(s->nam, i - kNam0);
+    for (int i = kNam0; i < kNumSaved; i++) s->norm[i] = s->nam->getParameter(s->nam, i - kNam0);
     s->update_display = 1;
 }
 
@@ -259,6 +265,10 @@ static void run_engine(AEffect *e, float *l, float *r, float *tl, float *tr, int
 }
 static void process(AEffect *e, float **in, float **out, int32_t n) {
     Plugin *s = (Plugin *)e->object;
+    for (int k = 0; k < NS; k++) {   /* each slot page's colour follows its effect */
+        const float lv = (float)slot_look(s, k) / (float)(N_LOOKS - 1);
+        if (s->norm[kLook0 + k] != lv) { s->norm[kLook0 + k] = lv; s->automate[kLook0 + k] = 1; }
+    }
     if (s->master) {
         for (int i = 0; i < kNumParams; i++)
             if (s->automate[i]) { s->automate[i] = 0; s->master(e, audioMasterAutomate, i, 0, NULL, s->norm[i]); s->update_display = 1; }
@@ -498,6 +508,11 @@ int main(int argc, char **argv) {
             count++;
             q = end;
         }
+    }
+    for (int k = 0; k < NS; k++) {
+        printf(",\n    {\"key\": \"f%d_look\", \"name\": \"FX%d Look\", \"options\": [", k + 1, k + 1);
+        for (int l = 0; l < N_LOOKS; l++) printf("%s\"%s\"", l ? ", " : "", PEDAL_LOOKS[l].name);
+        printf("]}");
     }
     pl_params_json(&LISTS, stdout);
     printf("\n  ]\n}\n");

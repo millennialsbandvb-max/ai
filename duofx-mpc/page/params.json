@@ -55,6 +55,8 @@
     {"key": "bypass", "name": "Bypass", "options": ["On", "Bypassed"]},
     {"key": "a_bypass", "name": "A Bypass", "options": ["On", "Bypassed"]},
     {"key": "b_bypass", "name": "B Bypass", "options": ["On", "Bypassed"]},
+    {"key": "a_look", "name": "A Look", "options": ["Graphite", "Green", "Gold", "Black", "Silver", "Red", "Blue", "Orange", "Ivory", "Periwinkle", "Yellow", "Plum", "Delay", "Reverb", "Mod", "Pitch", "Drive", "Grain", "Teal", "Purple", "Sky", "Turquoise", "Magenta", "Copper"]},
+    {"key": "b_look", "name": "B Look", "options": ["Graphite", "Green", "Gold", "Black", "Silver", "Red", "Blue", "Orange", "Ivory", "Periwinkle", "Yellow", "Plum", "Delay", "Reverb", "Mod", "Pitch", "Drive", "Grain", "Teal", "Purple", "Sky", "Turquoise", "Magenta", "Copper"]},
     {"key": "a_preset__list", "name": "A Presets List", "options": ["Closed", "Open"]},
     {"key": "b_preset__list", "name": "B Presets List", "options": ["Closed", "Open"]},
     {"key": "program__list", "name": "Programs List", "options": ["Closed", "Open"]},
