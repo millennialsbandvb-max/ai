@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "vst2.h"
 #include "presets.h"
@@ -1588,7 +1589,24 @@ typedef struct {
 } Plugin;
 
 static void copy_str(void *dst, const char *src, size_t max) { const size_t n = strnlen(src, max - 1); memcpy(dst, src, n); ((char *)dst)[n] = 0; }
-static int algo_of(const Plugin *s, int k) { return option_of(s->norm[k * P_SLOT + P_ALGO], kNumAlgos); }
+/* the algorithm choice lists them A-Z, Off first (the user's ask): its value is a place in that order; ALGOS[],
+ * the presets and everything else keep the algorithms' own numbers */
+static int ALGO_AT[kNumAlgos], ALGO_PLACE[kNumAlgos];
+static int algo_cmp(const void *a, const void *b) {
+    const int x = *(const int *)a, y = *(const int *)b;
+    if (x == A_OFF || y == A_OFF) return (y == A_OFF) - (x == A_OFF);
+    return strcasecmp(ALGOS[x].name, ALGOS[y].name);
+}
+static void algo_order(void) {
+    static int done;
+    if (done) return;
+    for (int a = 0; a < kNumAlgos; a++) ALGO_AT[a] = a;
+    qsort(ALGO_AT, kNumAlgos, sizeof *ALGO_AT, algo_cmp);
+    for (int p = 0; p < kNumAlgos; p++) ALGO_PLACE[ALGO_AT[p]] = p;
+    done = 1;
+}
+static float algo_norm(int a) { return (float)ALGO_PLACE[a] / (float)(kNumAlgos - 1); }   /* algorithm -> the choice's value */
+static int algo_of(const Plugin *s, int k) { return ALGO_AT[option_of(s->norm[k * P_SLOT + P_ALGO], kNumAlgos)]; }
 
 static void load_defaults(Plugin *s, int k, int algo) {   /* an algorithm was chosen: its own knob settings */
     const Algo *a = &ALGOS[algo];
@@ -1627,7 +1645,7 @@ int duo_look(AEffect *e) { return slot_look((Plugin *)e->object, 0); }
 /* presets (presets.h): a preset sets the slot's algorithm, Mix and knobs */
 static void load_preset(Plugin *s, int k, int idx) {
     const int base = k * P_SLOT;
-    s->norm[base + P_ALGO] = (float)PRESETS[idx].algo / (float)(kNumAlgos - 1);
+    s->norm[base + P_ALGO] = algo_norm(PRESETS[idx].algo);
     load_defaults(s, k, PRESETS[idx].algo);   /* (names, info, and every knob reported back) */
     s->norm[base + P_MIX] = PRESETS[idx].mix;
     for (int i = 0; i < NK; i++) s->norm[base + P_K + i] = PRESETS[idx].k[i];
@@ -1663,7 +1681,7 @@ static void load_program(Plugin *s, int idx) {
     for (int k = 0; k < 2; k++) {
         const ProgSlot *ps = &PROGRAMS[idx].s[k];
         const int base = k * P_SLOT;
-        s->norm[base + P_ALGO] = (float)ps->algo / (float)(kNumAlgos - 1);
+        s->norm[base + P_ALGO] = algo_norm(ps->algo);
         load_defaults(s, k, ps->algo);
         s->norm[base + P_MIX] = ps->mix;
         for (int i = 0; i < NK; i++) s->norm[base + P_K + i] = ps->k[i];
@@ -1737,12 +1755,12 @@ static void setParameter(AEffect *e, int32_t i, float v) {
     if (w >= P_NAME) return;   /* read-only */
     if (w == P_OPEN) { s->norm[i] = v > 0.5f ? 1 : 0; return; }
     if (w == P_ALGO) {   /* a pick from the list (which closes it), or a Q-Link nudge (steps one) */
-        const float pos = v * (float)(kNumAlgos - 1), cur = (float)algo_of(s, k);
+        const float pos = v * (float)(kNumAlgos - 1), cur = (float)ALGO_PLACE[algo_of(s, k)];   /* (places in the A-Z list) */
         const int between = fabsf(pos - roundf(pos)) > 0.001f;
         int opt = between && fabsf(pos - cur) < 1 ? (int)cur + (pos > cur ? 1 : -1) : (int)lrintf(pos);
         opt = opt < 0 ? 0 : opt > kNumAlgos - 1 ? kNumAlgos - 1 : opt;
         s->norm[i] = (float)opt / (float)(kNumAlgos - 1);
-        if (opt != (int)cur) load_defaults(s, k, opt);
+        if (opt != (int)cur) load_defaults(s, k, ALGO_AT[opt]);
         if (!between && s->norm[k * P_SLOT + P_OPEN] > 0.5f) {
             s->norm[k * P_SLOT + P_OPEN] = 0;
             s->automate |= 1ull << (k * P_SLOT + P_OPEN);
@@ -2023,8 +2041,9 @@ static AEffect *make(audioMasterCallback master) {
     Plugin *s = calloc(1, sizeof *s);
     if (!s) return NULL;
     s->master = master;
-    s->norm[P_ALGO] = (float)A_TAPE / (float)(kNumAlgos - 1);            /* A: tape echo into B: hall */
-    s->norm[P_SLOT + P_ALGO] = (float)A_HALL / (float)(kNumAlgos - 1);
+    algo_order();
+    s->norm[P_ALGO] = algo_norm(A_TAPE);            /* A: tape echo into B: hall */
+    s->norm[P_SLOT + P_ALGO] = algo_norm(A_HALL);
     load_defaults(s, 0, A_TAPE);
     load_defaults(s, 1, A_HALL);
     s->automate = 0;
@@ -2071,7 +2090,8 @@ int main(void) {
     for (int k = 0; k < 2; k++) {
         const char S = k ? 'B' : 'A', s = k ? 'b' : 'a';
         printf("    {\"key\": \"%c_algo\", \"name\": \"%c Algorithm\", \"options\": [", s, S);
-        for (int a = 0; a < kNumAlgos; a++) printf("%s\"%s\"", a ? ", " : "", ALGOS[a].name);
+        algo_order();
+        for (int p = 0; p < kNumAlgos; p++) printf("%s\"%s\"", p ? ", " : "", ALGOS[ALGO_AT[p]].name);
         printf("]},\n");
         printf("    {\"key\": \"%c_algo__open\", \"name\": \"%c Algorithm List\", \"options\": [\"Closed\", \"Open\"]},\n", s, S);
         printf("    {\"key\": \"%c_mix\", \"name\": \"%c Mix\", \"min\": 0, \"max\": 100, \"unit\": \"%%\"},\n", s, S);

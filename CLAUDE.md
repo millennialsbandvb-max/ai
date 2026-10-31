@@ -234,6 +234,10 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   ours + effect names asked from the engines + nam-mpc/params.json's entries as amp_* (gen-params checks NAM's
   order). Effect popup: 69 entries need cols=5 and a 240 px field (the list's column width is the field's).
   Adding a Duo algorithm or Ambient machine: update DUO_NALGO / AMB_NMACH (and the test's 68 / 69).
+  A-Z (Oct 2026, the user's ask; old projects may come back on other effects, accepted): Duo's algorithm choice
+  and Quad's effect choice list A-Z with Off first. The choice's value is a place in that order (Duo ALGO_AT /
+  ALGO_PLACE, algo_norm(); Quad FX_AT / FX_PLACE, fx_norm(), sorted from FX_NAMES); ALGOS[], presets.h and Quad's
+  fx numbers are unchanged. Quad's fx f < N_DUO is Duo's place f + 1 (Duo's Off is place 0; slot B is set to 0).
   CPU: the starting board (drive, chorus, A2 amp, tape echo, hall) ~10% of a PC core; untested on the device.
 - **Full-page lists** (the user disliked MPC's round knob menu on a stepper's name): tapping any stepper's name
   (presets, Duo programs, NAM/Quad folders/models/IRs, SFZ instruments, VoxLive styles) opens a list over the

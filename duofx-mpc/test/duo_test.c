@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 
 #include "../../nam-mpc/src/vst2.h"
@@ -161,7 +162,7 @@ int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: %s <Duo-FX.so> [algorithm]\n", argv[0]); return 2; }
     void *h = dlopen(argv[1], RTLD_NOW);
     if (!h || !(*(void **)&entry = dlsym(h, "VSTPluginMain"))) { fprintf(stderr, "can't load %s\n", argv[1]); return 1; }
-    {   /* the algorithm names, from the plugin (58 options: the last is Off) */
+    {   /* the algorithm names, from the plugin (58 options, listed A-Z with Off first) */
         nalgo = 58;
         AEffect *e = make();
         for (int a = 0; a < nalgo; a++) {
@@ -170,7 +171,9 @@ int main(int argc, char **argv) {
         }
         e->dispatcher(e, effClose, 0, 0, NULL, 0);
         printf("%d algorithms: %s ... %s\n", nalgo, names[0], names[nalgo - 1]);
-        if (strcmp(names[nalgo - 1], "Off")) { printf("FAILED: the algorithm count changed\n"); return 1; }
+        if (strcmp(names[0], "Off") || !names[nalgo - 1][0]) { printf("FAILED: the algorithm count changed\n"); return 1; }
+        for (int a = 2; a < nalgo; a++)
+            if (strcasecmp(names[a - 1], names[a]) > 0) { printf("FAILED: not A-Z: %s before %s\n", names[a - 1], names[a]); return 1; }
     }
     const int only = argc > 2 ? atoi(argv[2]) : -1;
 
@@ -272,7 +275,7 @@ int main(int argc, char **argv) {
         {   /* every preset: 8 s of sound, 8 s of silence: finite, under the ceiling, dying away (unless it holds) */
             AEffect *e = make();
             algo(e, 1, find("Off"));
-            algo(e, 0, 0);
+            algo(e, 0, 1);
             int n = 0, bad = 0;
             char first[64] = "", t[64];
             for (;;) {

@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 #include "vst2.h"
 #include "../../tools/picklist.h"
@@ -32,7 +33,7 @@ int duo_look(AEffect *), amb_look(AEffect *);   /* the colour of their pedal (to
 /* the engines' own parameter numbers we use */
 enum { DUO_ALGO = 0, DUO_MIX = 2, DUO_K = 3, DUO_B_ALGO = 20, DUO_PRESET = 42, DUO_NALGO = 58 };   /* (Duo: 57 + Off) */
 enum { AMB_MACHINE = 0, AMB_MIX = 2, AMB_K = 3, AMB_HOLD = 11, AMB_PRESET = 12, AMB_NMACH = 11 };
-#define N_DUO (DUO_NALGO - 1)                  /* Duo's algorithms without its Off */
+#define N_DUO (DUO_NALGO - 1)                  /* Duo's algorithms without its Off (Duo's choice lists Off first: place = fx + 1) */
 #define N_FX (N_DUO + AMB_NMACH + 1)           /* our list: Duo's, Ambient Lab's, Off */
 #define FX_OFF (N_FX - 1)
 #define NAM_N 21
@@ -62,7 +63,11 @@ static float clampf(float v, float lo, float hi) { return v < lo ? lo : v > hi ?
 static int option_of(float v, int n) { return (int)lrintf(clampf(v, 0, 1) * (float)(n - 1)); }
 static void copy_str(void *dst, const char *src, size_t max) { const size_t n = strnlen(src, max - 1); memcpy(dst, src, n); ((char *)dst)[n] = 0; }
 static int finite_bits(float v) { uint32_t u; memcpy(&u, &v, 4); return (u & 0x7f800000u) != 0x7f800000u; }
-static int fx_of(const Plugin *s, int k) { return option_of(s->norm[SLOT(k, S_FX)], N_FX); }
+/* our effect choice lists everything A-Z with Off first (the user's ask): its value is a place in FX_AT; fx (Duo's,
+ * then Ambient Lab's, then Off) is what the slots and engines use */
+static int FX_AT[N_FX], FX_PLACE[N_FX];
+static float fx_norm(int fx) { return (float)FX_PLACE[fx] / (float)(N_FX - 1); }
+static int fx_of(const Plugin *s, int k) { return FX_AT[option_of(s->norm[SLOT(k, S_FX)], N_FX)]; }
 static int kind_of(int fx) { return fx < N_DUO ? 0 : fx < N_DUO + AMB_NMACH ? 1 : 2; }
 
 /* ---- the engines' reports back -------------------------------------------------------------------------------- */
@@ -96,8 +101,8 @@ static intptr_t engine_host(AEffect *e, int32_t op, int32_t idx, intptr_t val, v
         else if (what == 1 && idx == AMB_HOLD) ours = SLOT(slot, S_HOLD);
         else if (idx == (what ? AMB_PRESET : DUO_PRESET)) ours = SLOT(slot, S_PRESET);
         else if (idx == (what ? AMB_MACHINE : DUO_ALGO)) {   /* a preset can change the algorithm / machine */
-            const int fx = what ? N_DUO + option_of(opt, AMB_NMACH) : option_of(opt, DUO_NALGO);
-            if (fx < N_FX && (what || fx < N_DUO)) { ours = SLOT(slot, S_FX); v = (float)fx / (float)(N_FX - 1); }
+            const int fx = what ? N_DUO + option_of(opt, AMB_NMACH) : option_of(opt, DUO_NALGO) - 1;
+            if (fx >= 0 && fx < N_FX && (what || fx < N_DUO)) { ours = SLOT(slot, S_FX); v = fx_norm(fx); }
         }
     }
     if (ours >= 0) { s->norm[ours] = v; s->automate[ours] = 1; }
@@ -126,7 +131,7 @@ static void choose_fx(Plugin *s, int k, int fx) {   /* point the slot at an engi
         e->dispatcher(e, effMainsChanged, 0, 1, NULL, 0);
     }
     s->kind[k] = kind;
-    if (kind == 0) s->duo[k]->setParameter(s->duo[k], DUO_ALGO, (float)fx / (float)(DUO_NALGO - 1));
+    if (kind == 0) s->duo[k]->setParameter(s->duo[k], DUO_ALGO, (float)(fx + 1) / (float)(DUO_NALGO - 1));
     else if (kind == 1) s->amb[k]->setParameter(s->amb[k], AMB_MACHINE, (float)(fx - N_DUO) / (float)(AMB_NMACH - 1));
     /* (the engine reports its defaults back; until then show them as they are) */
     AEffect *e = engine(s, k);
@@ -147,12 +152,12 @@ static void setParameter(AEffect *e, int32_t i, float v) {
     if (i == kOutput) { s->norm[i] = v; return; }
     const int k = (i - kSlot0) / SP, w = (i - kSlot0) % SP;
     if (w == S_FX) {   /* a pick from the list (which closes it), or a Q-Link nudge (steps one) */
-        const float pos = v * (float)(N_FX - 1), cur = (float)fx_of(s, k);
+        const float pos = v * (float)(N_FX - 1), cur = (float)FX_PLACE[fx_of(s, k)];   /* (places in the A-Z list) */
         const int between = fabsf(pos - roundf(pos)) > 0.001f;
         int opt = between && fabsf(pos - cur) < 1 ? (int)cur + (pos > cur ? 1 : -1) : (int)lrintf(pos);
         opt = opt < 0 ? 0 : opt > N_FX - 1 ? N_FX - 1 : opt;
         s->norm[i] = (float)opt / (float)(N_FX - 1);
-        if (opt != (int)cur || kind_of(opt) != s->kind[k]) choose_fx(s, k, opt);
+        if (opt != (int)cur || kind_of(FX_AT[opt]) != s->kind[k]) choose_fx(s, k, FX_AT[opt]);
         if (!between && s->norm[SLOT(k, S_OPEN)] > 0.5f) { s->norm[SLOT(k, S_OPEN)] = 0; s->automate[SLOT(k, S_OPEN)] = 1; }
         s->update_display = 1;
         return;
@@ -174,13 +179,21 @@ static void fill_fx_names(void) {
     AEffect *d = duo_entry(engine_host), *a = amb_entry(engine_host);
     for (int f = 0; f < N_FX; f++) {
         char t[64] = {0};
-        if (f < N_DUO) { d->setParameter(d, DUO_ALGO, (float)f / (float)(DUO_NALGO - 1)); d->dispatcher(d, effGetParamDisplay, DUO_ALGO, 0, t, 0); }
+        if (f < N_DUO) { d->setParameter(d, DUO_ALGO, (float)(f + 1) / (float)(DUO_NALGO - 1)); d->dispatcher(d, effGetParamDisplay, DUO_ALGO, 0, t, 0); }
         else if (f < N_DUO + AMB_NMACH) { a->setParameter(a, AMB_MACHINE, (float)(f - N_DUO) / (float)(AMB_NMACH - 1)); a->dispatcher(a, effGetParamDisplay, AMB_MACHINE, 0, t, 0); }
         else snprintf(t, sizeof t, "Off");
         copy_str(FX_NAMES[f], t, sizeof FX_NAMES[f]);
     }
     d->dispatcher(d, effClose, 0, 0, NULL, 0);
     a->dispatcher(a, effClose, 0, 0, NULL, 0);
+    for (int f = 0; f < N_FX; f++) FX_AT[f] = f;   /* A-Z, Off first (a short insertion sort) */
+    for (int i = 1; i < N_FX; i++)
+        for (int j = i; j > 0; j--) {
+            const int x = FX_AT[j - 1], y = FX_AT[j];
+            if (y == FX_OFF ? x != FX_OFF : x != FX_OFF && strcasecmp(FX_NAMES[x], FX_NAMES[y]) > 0) { FX_AT[j - 1] = y; FX_AT[j] = x; }
+            else break;
+        }
+    for (int p = 0; p < N_FX; p++) FX_PLACE[FX_AT[p]] = p;
 }
 
 static int slot_look(Plugin *s, int k) { return s->kind[k] == 0 ? duo_look(s->duo[k]) : s->kind[k] == 1 ? amb_look(s->amb[k]) : LK_GRAPHITE; }
@@ -415,7 +428,7 @@ static AEffect *make(audioMasterCallback master) {
         s->duo[k] = duo_entry(engine_host);
         s->amb[k] = amb_entry(engine_host);
         if (!s->duo[k] || !s->amb[k]) { close_all(s); return NULL; }
-        s->duo[k]->setParameter(s->duo[k], DUO_B_ALGO, 1.0f);   /* (each Duo FX engine runs slot A alone: B is Off) */
+        s->duo[k]->setParameter(s->duo[k], DUO_B_ALGO, 0.0f);   /* (each Duo FX engine runs slot A alone: B is Off, first in its list) */
         s->byp_s[k] = 1;
     }
     s->nam = nam_entry(engine_host);
@@ -425,7 +438,7 @@ static AEffect *make(audioMasterCallback master) {
     for (int k = 0; k < NS; k++) {
         int fx = FX_OFF;
         for (int f = 0; f < N_FX; f++) if (!strcmp(FX_NAMES[f], START[k])) fx = f;
-        s->norm[SLOT(k, S_FX)] = (float)fx / (float)(N_FX - 1);
+        s->norm[SLOT(k, S_FX)] = fx_norm(fx);
         s->kind[k] = -1;
         choose_fx(s, k, fx);
     }
@@ -468,7 +481,7 @@ int main(int argc, char **argv) {
     printf("    {\"key\": \"output\", \"name\": \"Output\", \"min\": -24, \"max\": 12, \"default\": 0, \"unit\": \"dB\"},\n");
     for (int k = 0; k < NS; k++) {
         printf("    {\"key\": \"f%d_fx\", \"name\": \"FX%d Effect\", \"options\": [", k + 1, k + 1);
-        for (int f = 0; f < N_FX; f++) printf("%s\"%s\"", f ? ", " : "", FX_NAMES[f]);
+        for (int p = 0; p < N_FX; p++) printf("%s\"%s\"", p ? ", " : "", FX_NAMES[FX_AT[p]]);
         printf("]},\n");
         printf("    {\"key\": \"f%d_fx__open\", \"name\": \"FX%d Effect List\", \"options\": [\"Closed\", \"Open\"]},\n", k + 1, k + 1);
         printf("    {\"key\": \"f%d_mix\", \"name\": \"FX%d Mix\", \"min\": 0, \"max\": 100, \"unit\": \"%%\"},\n", k + 1, k + 1);
