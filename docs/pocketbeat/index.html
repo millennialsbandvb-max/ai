@@ -269,10 +269,9 @@
   // with a leak so sensor bias doesn't run away. Track the biggest upward value since
   // the phone was last still; that's the swing speed of the lift.
   let vVert = 0, upMax = 0, lastT = 0;
-  const hV = new Float32Array(HN); // vertical velocity history, parallel to hT/hM
   const trace = new Float32Array(240); let ti = 0;
   // ~1 s history of (time, magnitude) for the lift measurement
-  const HN = 200, hT = new Float64Array(HN), hM = new Float32Array(HN); let hi = 0;
+  const HN = 200, hT = new Float64Array(HN), hM = new Float32Array(HN), hV = new Float32Array(HN); let hi = 0;
   const G = 9.81;
   function onMotion(e) {
     let ax, ay, az;
