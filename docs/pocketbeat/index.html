@@ -106,7 +106,7 @@
 </div>
 <div class="ctl">
   <label for="swthr">Snare: swing speed above</label><output id="swthrOut"></output>
-  <input type="range" id="swthr" min="0.2" max="3" step="0.05" value="0.9">
+  <input type="range" id="swthr" min="0.05" max="3" step="0.05" value="0.35">
 </div>
 <div class="ctl">
   <label for="gap">Minimum gap between stomps</label><output id="gapOut"></output>
@@ -280,7 +280,7 @@
 
     if (calibrated) {
       const aR = hx * rx + hy * ry + hz * rz;          // m/s² toward "right"
-      vRight = (vRight + aR * dt) * 0.97;               // leaky integration
+      vRight = (vRight + aR * dt) * 0.985;              // leaky integration
       if (mag < 0.1) vRight *= 0.8;
       const swthr = +$('swthr').value;
       if (vRight > swthr && !inSwing && now - lastSwing > +$('gap').value) {
