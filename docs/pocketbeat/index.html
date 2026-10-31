@@ -33,7 +33,10 @@
   .meter .flash.on { opacity: .45; transition: none; }
   .meter .label { position: absolute; left: 14px; top: 10px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
   .meter .last { position: absolute; right: 14px; top: 8px; font-family: var(--font-display); font-size: 40px; font-weight: 700; letter-spacing: .04em; line-height: 1; }
-  .mrow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 4px; }
+  .row { display: flex; gap: 10px; }
+  .row button { flex: 1; background: var(--bg); color: var(--fg); border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 14px; cursor: pointer; }
+  .row button.arm { background: var(--snare); color: #2a1f00; border-color: var(--snare); }
+  .mrow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 4px; }
   .mrow b { font-size: 22px !important; }
   .mrow span { font-size: 10px !important; }
   .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -79,17 +82,10 @@
   </div>
 </div>
 
-<h2>Snare trigger</h2>
-<div class="seg" id="snSeg">
-  <button type="button" data-sn="dir" class="on">Up / Down</button>
-  <button type="button" data-sn="up">Up speed</button>
-  <button type="button" data-sn="move">Movement</button>
-  <button type="button" data-sn="lift">Air time</button>
-  <button type="button" data-sn="hard">Hard stomp</button>
-</div>
+<h2>Snare = swing leg to the right</h2>
 <div class="tile" id="measures" style="flex:none">
-  <span>last stomp measured</span>
-  <div class="mrow"><div><b id="mDir">—</b><span>dir · m/s</span></div><div><b id="mUp">—</b><span>up speed · m/s</span></div><div><b id="mMove">—</b><span>movement · g</span></div><div><b id="mAir">—</b><span>air time · ms</span></div><div><b id="mPeak">—</b><span>impact · g</span></div></div>
+  <div class="mrow"><div><b id="mPeak">—</b><span>last stomp · g</span></div><div><b id="mSwing">—</b><span>last swing · m/s</span></div><div><b id="calState">not set</b><span>right direction</span></div></div>
+  <div class="row" style="margin-top:8px"><button type="button" id="calBtn">Set right: tap, then swing right once</button></div>
 </div>
 <h2>Quantize stomps to</h2>
 <div class="seg" id="qSeg">
@@ -108,25 +104,9 @@
   <label for="thr">Kick: soft stomp above</label><output id="thrOut"></output>
   <input type="range" id="thr" min="0.3" max="3" step="0.05" value="0.8">
 </div>
-<div class="ctl" id="dirCtl">
-  <label for="dthr">Direction sensitivity (how clearly up/down must read)</label><output id="dthrOut"></output>
-  <input type="range" id="dthr" min="0" max="0.6" step="0.01" value="0.08">
-</div>
-<div class="ctl" id="upCtl" hidden>
-  <label for="uthr">Snare: up speed above</label><output id="uthrOut"></output>
-  <input type="range" id="uthr" min="0.1" max="3" step="0.02" value="0.8">
-</div>
-<div class="ctl" id="moveCtl" hidden>
-  <label for="mthr">Snare: movement above</label><output id="mthrOut"></output>
-  <input type="range" id="mthr" min="0.05" max="1.5" step="0.01" value="0.35">
-</div>
-<div class="ctl" id="liftCtl" hidden>
-  <label for="lthr">Snare: air time above</label><output id="lthrOut"></output>
-  <input type="range" id="lthr" min="100" max="900" step="10" value="320">
-</div>
-<div class="ctl" id="hardCtl" hidden>
-  <label for="sthr">Snare: hard stomp above</label><output id="sthrOut"></output>
-  <input type="range" id="sthr" min="0.5" max="6" step="0.05" value="1.8">
+<div class="ctl">
+  <label for="swthr">Snare: swing speed above</label><output id="swthrOut"></output>
+  <input type="range" id="swthr" min="0.2" max="3" step="0.05" value="0.9">
 </div>
 <div class="ctl">
   <label for="gap">Minimum gap between stomps</label><output id="gapOut"></output>
@@ -136,7 +116,7 @@
   <label for="vol">Volume</label><output id="volOut"></output>
   <input type="range" id="vol" min="0" max="100" step="1" value="85">
 </div>
-<p class="hint">Up / Down mode: a jolt while your foot is coming <b>down</b> (landing) is a kick, a jolt while it's going <b>up</b> (lift-off) is a snare. So a normal tap gives a kick, and a sharp upward flick of the foot gives a snare. The readout shows "dir" as the vertical speed at the moment of the jolt (negative = down). Other modes: the panel above shows every measure for your last stomp. Do a few taps, then a few lifts, and pick the measure whose numbers separate best; set its slider between the two. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each stomp is nudged onto the nearest grid line so kicks and snares sit square with the hats. Stop for two beats and the clock stops. Orange line = kick threshold, yellow line = snare threshold.</p>
+<p class="hint">Stomp = kick (same detector as the first version). Snare = swing your leg out to the right. Once, with the phone in your pocket: tap "Set right", then do one clear swing to the right; the app remembers that direction (saved on this phone). After that, any swing that way faster than the slider's speed is a snare, and the stomp detector ignores the swing so you don't get a kick at the same time. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each hit is nudged onto the nearest grid line.</p>
 <p class="err" id="err" hidden></p>
 <p class="hint" id="diag"></p>
 <button class="big" id="go" type="button">Start</button>
@@ -264,15 +244,16 @@
     $('b' + beatIdx).className = kind === 'snare' ? 's' : 'k';
   }
   // ---------- Motion detection ----------
-  let lastHit = 0, peak = 0, peakT = 0, gx = 0, gy = 0, gz = 0, snareMode = 'dir';
-  // Vertical velocity: project acceleration onto the gravity direction and integrate,
-  // with a leak so sensor bias doesn't run away. Track the biggest upward value since
-  // the phone was last still; that's the swing speed of the lift.
-  let vVert = 0, upMax = 0, lastT = 0;
+  let lastHit = 0, peak = 0, peakT = 0, gx = 0, gy = 0, gz = 0;
   const trace = new Float32Array(240); let ti = 0;
-  // ~1 s history of (time, magnitude) for the lift measurement
-  const HN = 200, hT = new Float64Array(HN), hM = new Float32Array(HN), hV = new Float32Array(HN); let hi = 0;
   const G = 9.81;
+  // Right-swing detection: horizontal acceleration (gravity removed, vertical part removed)
+  // integrated along the calibrated "right" direction, with a leak.
+  let rx = 0, ry = 0, rz = 0, calibrated = false, calibrating = false, calEnd = 0, calAx = 0, calAy = 0, calAz = 0, calBest = 0;
+  let vRight = 0, lastT = 0, lastSwing = 0, swingPeak = 0, inSwing = false;
+  try { const c = JSON.parse(localStorage.getItem('pb_right') || 'null'); if (c) { [rx, ry, rz] = c; calibrated = true; } } catch (e) {}
+  $('calState').textContent = calibrated ? 'set' : 'not set';
+
   function onMotion(e) {
     let ax, ay, az;
     const ag = e.accelerationIncludingGravity;
@@ -280,78 +261,72 @@
     if (e.acceleration && e.acceleration.x !== null) ({ x: ax, y: ay, z: az } = e.acceleration);
     else if (ag) { ax = ag.x - gx; ay = ag.y - gy; az = ag.z - gz; }
     else return;
+    const now = performance.now();
+    const dt = lastT ? Math.min(0.05, (now - lastT) / 1000) : 0; lastT = now;
     const mag = Math.sqrt(ax * ax + ay * ay + az * az) / G;
-    // vertical component: "up" is opposite to gravity. On iOS, accelerationIncludingGravity
-    // reports gravity as pointing down (negative on the up axis), so up = -(a · g_hat).
-    const gl = Math.hypot(gx, gy, gz) || 1;
-    const aUp = -(ax * gx + ay * gy + az * gz) / gl;    // m/s² upward
-    const dt = lastT ? Math.min(0.05, (e.timeStamp - lastT) / 1000) : 0; lastT = e.timeStamp;
-    vVert = (vVert + aUp * dt) * 0.985;                 // leaky integration
-    if (mag < 0.12) { vVert *= 0.7; }                   // still: bleed velocity quickly
-    if (vVert > upMax) upMax = vVert;
     trace[ti] = mag; ti = (ti + 1) % trace.length;
-    const now = performance.now(), thr = +$('thr').value, gap = +$('gap').value;
-    hT[hi] = now; hM[hi] = mag; hV[hi] = vVert; hi = (hi + 1) % HN;
+
+    // horizontal part of the acceleration
+    const gl = Math.hypot(gx, gy, gz) || 1, ux = gx / gl, uy = gy / gl, uz = gz / gl;
+    const dot = ax * ux + ay * uy + az * uz;
+    const hx = ax - dot * ux, hy = ay - dot * uy, hz = az - dot * uz;
+
+    if (calibrating) {
+      const hm = Math.hypot(hx, hy, hz);
+      if (hm > calBest) { calBest = hm; calAx = hx; calAy = hy; calAz = hz; }
+      if (now > calEnd) finishCal();
+      return;
+    }
+
+    if (calibrated) {
+      const aR = hx * rx + hy * ry + hz * rz;          // m/s² toward "right"
+      vRight = (vRight + aR * dt) * 0.97;               // leaky integration
+      if (mag < 0.1) vRight *= 0.8;
+      const swthr = +$('swthr').value;
+      if (vRight > swthr && !inSwing && now - lastSwing > +$('gap').value) {
+        inSwing = true; lastSwing = now; swingPeak = vRight;
+        $('mSwing').textContent = vRight.toFixed(2);
+        onStomp('snare', Math.min(1, 0.7 + 0.3 * (vRight / (swthr * 2))));
+      }
+      if (inSwing) { if (vRight > swingPeak) { swingPeak = vRight; $('mSwing').textContent = vRight.toFixed(2); } if (vRight < swthr * 0.4) inSwing = false; }
+    }
+
+    // Kick: the original impact-spike detector, suppressed while a swing is happening.
+    const thr = +$('thr').value, gap = +$('gap').value;
     if (mag > thr) {
-      if (now - lastHit > gap) {
+      if (now - lastHit > gap && now - lastSwing > 250) {
         if (mag > peak) { peak = mag; if (!peakT) peakT = now; }
         if (now - peakT > 35) fire(now);
       }
     } else if (peakT) fire(now);
   }
-  // Air time = how long the foot was moving before it landed. Walk back from the impact
-  // through the history until we find a stretch of ~60 ms where the phone was nearly still
-  // (below the quiet level); the lift started when that stillness ended. A quick tap is
-  // ~150-250 ms; a high lift is 400 ms or more.
-  function liftBefore(t) {
-    const quiet = Math.max(0.08, +$('thr').value * 0.2);
-    // collect samples in the last 1.2 s, newest first
-    const idx = [];
-    for (let k = 1; k <= HN; k++) { const i = (hi - k + HN) % HN; if (t - hT[i] > 1200 || hT[i] === 0) break; idx.push(i); }
-    let stillSince = -1;
-    for (const i of idx) {
-      if (t - hT[i] < 40) continue;            // skip the impact spike itself
-      if (hM[i] < quiet) {
-        if (stillSince < 0) stillSince = hT[i];
-        else if (stillSince - hT[i] >= 60) return t - stillSince; // found 60 ms of stillness
-      } else stillSince = -1;
-    }
-    return idx.length ? t - hT[idx[idx.length - 1]] : 0; // never still: moving the whole window
-  }
-  function moveBefore(t) {
-    let sum = 0, n = 0;
-    for (let i = 0; i < HN; i++) { const dt = t - hT[i]; if (dt > 50 && dt < 500) { sum += hM[i]; n++; } }
-    return n ? sum / n : 0;
-  }
-  // Vertical velocity around the jolt (40 ms before to 60 ms after). A landing is moving
-  // down going in and stops (negative average); a lift-off starts still and ends moving up
-  // (positive average).
-  function dirBefore(t) {
-    let sum = 0, n = 0;
-    for (let i = 0; i < HN; i++) { const dt = t - hT[i]; if (dt > -60 && dt < 40 && hT[i] > 0) { sum += hV[i]; n++; } }
-    return n ? sum / n : 0;
-  }
   function fire(now) {
-    const p = peak, sthr = +$('sthr').value, lthr = +$('lthr').value, mthr = +$('mthr').value, uthr = +$('uthr').value;
-    const t0 = peakT || now;
-    const air = liftBefore(t0), move = moveBefore(t0), up = upMax, dir = dirBefore(t0), dthr = +$('dthr').value;
-    peak = 0; peakT = 0; lastHit = now; upMax = 0; vVert = 0;
-    $('mDir').textContent = (dir > 0 ? '+' : '') + dir.toFixed(2); $('mUp').textContent = up.toFixed(2); $('mMove').textContent = move.toFixed(2);
-    $('mAir').textContent = Math.round(air); $('mPeak').textContent = p.toFixed(2);
-    if (snareMode === 'dir' && Math.abs(dir) < dthr) return; // ambiguous direction: ignore the jolt
-    const isSnare = snareMode === 'dir' ? dir > 0 : snareMode === 'up' ? up >= uthr : snareMode === 'move' ? move >= mthr : snareMode === 'lift' ? air >= lthr : p >= sthr;
-    if (isSnare) onStomp('snare', Math.min(1, 0.7 + 0.3 * (p / (sthr * 2))));
-    else onStomp('kick', Math.min(1, 0.6 + 0.4 * (p / sthr)));
+    const p = peak; peak = 0; peakT = 0; lastHit = now;
+    $('mPeak').textContent = p.toFixed(2);
+    onStomp('kick', Math.min(1, 0.6 + 0.4 * (p / 2)));
   }
+  function startCal() {
+    calibrating = true; calBest = 0; calEnd = performance.now() + 2500;
+    $('calBtn').classList.add('arm'); $('calBtn').textContent = 'Swing right now…'; $('calState').textContent = 'listening';
+  }
+  function finishCal() {
+    calibrating = false; $('calBtn').classList.remove('arm'); $('calBtn').textContent = 'Set right: tap, then swing right once';
+    const m = Math.hypot(calAx, calAy, calAz);
+    if (calBest < 1.5 || !m) { $('calState').textContent = 'no swing seen'; return; }
+    rx = calAx / m; ry = calAy / m; rz = calAz / m; calibrated = true; vRight = 0;
+    $('calState').textContent = 'set';
+    try { localStorage.setItem('pb_right', JSON.stringify([rx, ry, rz])); } catch (e) {}
+  }
+  $('calBtn').addEventListener('click', () => { if (!running) { err.textContent = 'Tap Start first, then Set right.'; err.hidden = false; return; } startCal(); });
 
   // ---------- Scope ----------
   const cv = $('scope'), g2 = cv.getContext('2d');
   function draw() {
-    const w = cv.width, h = cv.height, thr = +$('thr').value, sthr = +$('sthr').value, scale = snareMode === 'hard' ? Math.max(sthr * 1.5, 1.5) : Math.max(thr * 3, 1.5);
+    const w = cv.width, h = cv.height, thr = +$('thr').value, scale = Math.max(thr * 3, 1.5);
     g2.clearRect(0, 0, w, h);
     const y = v => h - Math.min(1, v / scale) * h;
     g2.lineWidth = 2; g2.setLineDash([8, 8]);
-    for (const [v, c] of snareMode === 'hard' ? [[thr, colors.kick], [sthr, colors.snare]] : [[thr, colors.kick]]) {
+    for (const [v, c] of [[thr, colors.kick]]) {
       g2.strokeStyle = c; g2.beginPath(); g2.moveTo(0, y(v)); g2.lineTo(w, y(v)); g2.stroke();
     }
     g2.setLineDash([]); g2.strokeStyle = '#f2efe6'; g2.lineWidth = 3; g2.beginPath();
@@ -367,12 +342,8 @@
   // ---------- Controls ----------
   const bind = (id, out, fmt) => { const el = $(id); const f = () => $(out).textContent = fmt(el.value); el.addEventListener('input', f); f(); };
   bind('thr', 'thrOut', v => (+v).toFixed(2) + ' g');
-  bind('sthr', 'sthrOut', v => (+v).toFixed(2) + ' g');
-  bind('lthr', 'lthrOut', v => v + ' ms');
-  bind('mthr', 'mthrOut', v => (+v).toFixed(2) + ' g');
-  bind('uthr', 'uthrOut', v => (+v).toFixed(2) + ' m/s');
-  bind('dthr', 'dthrOut', v => (+v).toFixed(2) + ' m/s');
   bind('gap', 'gapOut', v => v + ' ms');
+  bind('swthr', 'swthrOut', v => (+v).toFixed(2) + ' m/s');
   bind('vol', 'volOut', v => v + '%');
   $('vol').addEventListener('input', () => { if (master) master.gain.value = $('vol').value / 100; });
   const seg = (id, attr, cb) => $(id).addEventListener('click', e => {
@@ -381,7 +352,6 @@
   });
   seg('hatSeg', 'hat', v => hatMode = +v);
   seg('qSeg', 'q', v => quant = +v);
-  seg('snSeg', 'sn', v => { snareMode = v; for (const m of ['dir', 'up', 'move', 'lift', 'hard']) $(m + 'Ctl').hidden = v !== m; });
 
   let running = false, wakeLock = null;
   async function start() {
