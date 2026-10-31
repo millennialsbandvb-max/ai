@@ -3,7 +3,8 @@
 # /usr/lib/nam-mpc/entries/*.xml (NAM MPC, the Dragonfly reverbs, ...). If MPC.settings is missing any of them:
 # stop MPC, back the settings up, add the missing entries (all at once, so MPC restarts only once) and start MPC
 # again. An entry already there is left alone unless its maker (manufacturer=, the folder MPC lists it under) or its
-# name (name=, what MPC shows; e.g. Quad Rig became 0Quad Rig to list first) has changed, when it's replaced; nothing else is touched, and any problem leaves the settings as they were.
+# name (name=, what MPC shows; e.g. Quad Rig became 0Quad Rig to list first) has changed, when it's replaced; an
+# entry for one of ours whose file isn't in the firmware any more (Dragonfly and Airwindows were taken out) is removed; nothing else is touched, and any problem leaves the settings as they were.
 # Log: /tmp/nam-mpc-boot.log
 DIR=/usr/lib/nam-mpc
 exec >>/tmp/nam-mpc-boot.log 2>&1
@@ -34,9 +35,13 @@ for e in "$DIR"/entries/*.xml; do
     elif [ -n "$n" ] && ! entry_of "$f" | grep -qF " name=\"$n\""; then echo "new name ($n): $f"; missing="$missing $e"
     else echo "listed: $f"; fi
 done
-[ -n "$missing" ] || { echo "all plugins already listed in $SETTINGS"; exit 0; }   # (a changed one counts as missing)
+stale=""   # ours, listed, but no longer in the firmware
+for f in $(grep -o "file=\"$DIR/plugins/[^\"]*\"" "$SETTINGS" | sed 's/^file="//; s/"$//' | sort -u); do
+    [ -f "$f" ] || { echo "no longer in the firmware: $f"; stale="$stale $f"; }
+done
+[ -n "$missing$stale" ] || { echo "all plugins already listed in $SETTINGS"; exit 0; }   # (a changed one counts as missing)
 
-echo "adding to $SETTINGS:$missing"
+echo "adding to $SETTINGS:$missing; removing:$stale"
 systemctl stop acvs
 i=0; while pidof MPC >/dev/null && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
 if pidof MPC >/dev/null; then echo "MPC did not stop; leaving settings alone"; systemctl start acvs; exit 0; fi
@@ -53,6 +58,16 @@ for e in $missing; do   # entry file names have no spaces (they're ours)
         echo "edit failed for $f"
         ok=0
         break
+    fi
+done
+for f in $stale; do
+    [ $ok = 1 ] || break
+    if awk -v mode=remove -v file="$f" -f "$DIR/plugin_list.awk" "$SETTINGS.work" > "$SETTINGS.new" &&
+       ! grep -qF "file=\"$f\"" "$SETTINGS.new" && grep -q '</PROPERTIES>' "$SETTINGS.new"; then
+        mv "$SETTINGS.new" "$SETTINGS.work"
+    else
+        echo "removal failed for $f"
+        ok=0
     fi
 done
 if [ $ok = 1 ]; then

@@ -2,7 +2,7 @@
 # Build the complete MPC Live II firmware from the user's Hakai image, in one go:
 #   tools/build_firmware.sh <Hakai MPC-<version>-Gen1-update.img> <output dir>
 # The result is named after the image's MPC OS version: MPC-<version>-Gen1-update.img (+ .part1 to .part7).
-# Builds every plugin for ARM (NAM, Dragonfly, SFZ, Airwindows, Duo FX, Tri Chorus, MPC Browser) with their touchscreen pages, the browser remote,
+# Builds every plugin for ARM (NAM, SFZ, Duo FX, Tri Chorus, the vocal ones, Ambient Lab, Quad Rig, the EQs, MPC Browser) with their touchscreen pages, the browser remote,
 # puts them into the image with nam-mpc/firmware/patch_image.sh, and splits the result into 7 pieces under 30 MiB
 # (the most a single file can be when sent to the user in chat). Prints each piece's name and the image's SHA-256.
 # Needs: arm-linux-gnueabihf-gcc/g++, cmake, ninja, qemu-arm, python3 (+PIL), e2fsprogs, xz, upx, unzip.
@@ -34,12 +34,10 @@ export ARM_SYSROOT="$W/sysroot"
 
 echo "== NAM"
 (cd "$REPO/nam-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null)
-echo "== Dragonfly"
-(cd "$REPO/dragonfly-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
+# (Dragonfly and Airwindows were taken out of the firmware at the user's ask, Oct 2026; their sources stay in the repo
+# and the boot script removes their entries from MPC's plugin list)
 echo "== SFZ (sax player)"
 (cd "$REPO/sfizz-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
-echo "== Airwindows"
-(cd "$REPO/airwindows-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
 echo "== Duo FX (H90-style dual effect)"
 (cd "$REPO/duofx-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
 echo "== Tri Chorus"
@@ -59,7 +57,7 @@ echo "== browser remote"
 
 echo "== one bundle of everything"
 rm -rf "$W/extra" && mkdir -p "$W/extra"
-for b in dragonfly-mpc/build/bundle sfizz-mpc/build/bundle airwindows-mpc/build/bundle duofx-mpc/build/bundle \
+for b in sfizz-mpc/build/bundle duofx-mpc/build/bundle \
          trichorus-mpc/build/bundle vocal-mpc/build/bundle ambient-mpc/build/bundle quadrig-mpc/build/bundle \
          eq-mpc/build/bundle browser-mpc/build/bundle \
          mpc-remote/server/build/bundle; do
