@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>PocketBeat Mic</title>
+<style>
+  :root {
+    --bg: #0e0f12; --panel: #181a20; --fg: #f2efe6; --muted: #8b8f9c;
+    --kick: #ff6a3d; --snare: #ffd166; --hat: #7bdff2; --line: #2a2d36;
+    --font-display: "Avenir Next Condensed", "Helvetica Neue", Arial Narrow, sans-serif;
+    --font-body: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg); font-family: var(--font-body);
+    padding-block: env(safe-area-inset-top, 0px) env(safe-area-inset-bottom, 0px);
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    display: flex; flex-direction: column; gap: 14px;
+    -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+  }
+  header { display: flex; align-items: baseline; justify-content: space-between; padding-top: 10px; }
+  h1 { font-family: var(--font-display); font-weight: 700; font-size: 28px; letter-spacing: .02em; margin: 0; }
+  .status { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .meter { position: relative; background: var(--panel); border-radius: 18px; height: 180px; overflow: hidden; border: 1px solid var(--line); }
+  .meter canvas { width: 100%; height: 100%; display: block; }
+  .meter .flash { position: absolute; inset: 0; opacity: 0; pointer-events: none; transition: opacity .25s ease-out; }
+  .meter .flash.on { opacity: .45; transition: none; }
+  .meter .label { position: absolute; left: 14px; top: 10px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .meter .last { position: absolute; right: 14px; top: 8px; font-family: var(--font-display); font-size: 40px; font-weight: 700; letter-spacing: .04em; line-height: 1; }
+  .counts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .count { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+  .count b { display: block; font-family: var(--font-display); font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .count span { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .count.kick b { color: var(--kick); } .count.snare b { color: var(--snare); } .count.hat b { color: var(--hat); }
+  .controls { display: grid; gap: 12px; }
+  .ctl { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 10px; }
+  .ctl label { font-size: 13px; }
+  .ctl output { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .ctl input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--fg); }
+  .hint { font-size: 12px; color: var(--muted); line-height: 1.45; margin: 0; }
+  .big { margin-top: auto; margin-bottom: 10px; font-family: var(--font-display); font-size: 24px; font-weight: 700; letter-spacing: .04em;
+    background: var(--fg); color: var(--bg); border: 0; border-radius: 16px; padding: 18px; width: 100%; cursor: pointer; }
+  .big.live { background: var(--kick); color: #1a0b05; }
+  .big:focus-visible { outline: 3px solid var(--hat); outline-offset: 2px; }
+  .row { display: flex; gap: 10px; }
+  .row button { flex: 1; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 14px; cursor: pointer; }
+  .row button:active { background: var(--line); }
+  .err { color: var(--snare); font-size: 13px; margin: 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PocketBeat Mic</h1>
+  <div class="status" id="status">idle</div>
+</header>
+
+<div class="meter">
+  <canvas id="scope" width="800" height="360"></canvas>
+  <div class="flash" id="flash"></div>
+  <div class="label">thump level</div>
+  <div class="last" id="last">—</div>
+</div>
+
+<div class="counts">
+  <div class="count kick"><b id="nKick">0</b><span>kick</span></div>
+  <div class="count snare"><b id="nSnare">0</b><span>snare</span></div>
+  <div class="count hat"><b id="nHat">0</b><span>hat</span></div>
+</div>
+
+<div class="controls">
+  <div class="ctl">
+    <label for="thr">Snare threshold (lighter tap)</label><output id="thrOut">25</output>
+    <input type="range" id="thr" min="2" max="100" step="1" value="25">
+  </div>
+  <div class="ctl">
+    <label for="kthr">Kick threshold (hard stomp)</label><output id="kthrOut">60</output>
+    <input type="range" id="kthr" min="5" max="100" step="1" value="60">
+  </div>
+  <div class="ctl">
+    <label for="gap">Minimum gap between hits</label><output id="gapOut">220 ms</output>
+    <input type="range" id="gap" min="80" max="500" step="10" value="220">
+  </div>
+  <div class="ctl">
+    <label for="vol">Volume</label><output id="volOut">80%</output>
+    <input type="range" id="vol" min="0" max="100" step="1" value="80">
+  </div>
+  <p class="hint">Listens for the low thump of your foot (everything above 250 Hz is filtered out, so guitar and voice mostly pass through unnoticed). Stomp hard for a kick, lighter for a snare, two quick taps for a hi-hat. Use headphones or a Bluetooth speaker: if the drums play out of the phone's own speaker the mic will hear them and retrigger.</p>
+  <p class="err" id="err" hidden></p>
+</div>
+
+<div class="row">
+  <button type="button" id="testKick">Test kick</button>
+  <button type="button" id="testSnare">Test snare</button>
+  <button type="button" id="testHat">Test hat</button>
+</div>
+<button class="big" id="go" type="button">Start listening</button>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const statusEl = $('status'), lastEl = $('last'), flash = $('flash'), err = $('err');
+  const counts = { kick: 0, snare: 0, hat: 0 };
+  const colors = { kick: '#ff6a3d', snare: '#ffd166', hat: '#7bdff2' };
+
+  // ---------- Synth drums ----------
+  let ctx = null, master = null, noise = null;
+  function ensureAudio() {
+    if (ctx) return;
+    ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+    master = ctx.createGain(); master.gain.value = $('vol').value / 100; master.connect(ctx.destination);
+    const len = ctx.sampleRate; noise = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = noise.getChannelData(0); for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  }
+  function kick(vel = 1) {
+    const t = ctx.currentTime, o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = 'sine'; o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
+    g.gain.setValueAtTime(1.2 * vel, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
+    o.connect(g).connect(master); o.start(t); o.stop(t + 0.5);
+    const c = ctx.createBufferSource(); c.buffer = noise; const cg = ctx.createGain();
+    cg.gain.setValueAtTime(0.4 * vel, t); cg.gain.exponentialRampToValueAtTime(0.001, t + 0.02);
+    c.connect(cg).connect(master); c.start(t); c.stop(t + 0.03);
+  }
+  function snare(vel = 1) {
+    const t = ctx.currentTime, n = ctx.createBufferSource(); n.buffer = noise;
+    const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1500;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.9 * vel, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
+    n.connect(f).connect(g).connect(master); n.start(t); n.stop(t + 0.25);
+    const o = ctx.createOscillator(), og = ctx.createGain();
+    o.type = 'triangle'; o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(150, t + 0.08);
+    og.gain.setValueAtTime(0.6 * vel, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+    o.connect(og).connect(master); o.start(t); o.stop(t + 0.15);
+  }
+  function hat(vel = 1) {
+    const t = ctx.currentTime, n = ctx.createBufferSource(); n.buffer = noise;
+    const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7000;
+    const g = ctx.createGain(); g.gain.setValueAtTime(0.5 * vel, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+    n.connect(f).connect(g).connect(master); n.start(t); n.stop(t + 0.08);
+  }
+  const play = { kick, snare, hat };
+  function hit(kind, vel) {
+    play[kind](Math.min(1, 0.5 + vel * 0.5));
+    counts[kind]++;
+    $('n' + kind[0].toUpperCase() + kind.slice(1)).textContent = counts[kind];
+    lastEl.textContent = kind.toUpperCase(); lastEl.style.color = colors[kind];
+    flash.style.background = colors[kind]; flash.classList.add('on');
+    requestAnimationFrame(() => requestAnimationFrame(() => flash.classList.remove('on')));
+  }
+
+  // ---------- Mic onset detection ----------
+  // Mic → low-pass at 250 Hz → short-window RMS. A hit is a sudden rise well above
+  // the slowly-moving background level; the peak size picks kick vs snare.
+  let stream = null, analyser = null, buf = null, timer = null;
+  let bg = 0, peak = 0, peakT = 0, lastHit = 0, lastSnare = 0, holdUntil = 0;
+  const trace = new Float32Array(240); let ti = 0;
+
+  function level() {
+    analyser.getFloatTimeDomainData(buf);
+    let s = 0; for (let i = 0; i < buf.length; i++) s += buf[i] * buf[i];
+    return Math.sqrt(s / buf.length) * 400; // scaled so sliders read 0–100ish
+  }
+  function tick() {
+    const v = level();
+    trace[ti] = v; ti = (ti + 1) % trace.length;
+    const now = performance.now();
+    const snareThr = +$('thr').value, kickThr = +$('kthr').value, gap = +$('gap').value;
+    // Background tracker: follows the signal slowly, never chases a spike upward fast.
+    bg += (v > bg ? 0.02 : 0.1) * (v - bg);
+    if (now < holdUntil) return;
+    const above = v > snareThr && v > bg * 2.5;
+    if (above && now - lastHit > gap) {
+      if (v > peak) { peak = v; if (!peakT) peakT = now; }
+      if (now - peakT > 30) classify(now);
+    } else if (peakT) classify(now);
+  }
+  function classify(now) {
+    const kickThr = +$('kthr').value, gap = +$('gap').value;
+    const p = peak; peak = 0; peakT = 0; lastHit = now;
+    holdUntil = now + gap; // ignore the mic while our own drum sound rings out
+    if (p >= kickThr) { hit('kick', Math.min(1, p / (kickThr * 2))); return; }
+    if (now - lastSnare < 300) { hit('hat', 0.8); lastSnare = 0; return; }
+    lastSnare = now;
+    hit('snare', Math.min(1, p / kickThr));
+  }
+
+  // ---------- Scope ----------
+  const cv = $('scope'), g2 = cv.getContext('2d');
+  function draw() {
+    const w = cv.width, h = cv.height;
+    g2.clearRect(0, 0, w, h);
+    const sThr = +$('thr').value, kThr = +$('kthr').value, scale = Math.max(kThr * 1.4, 40);
+    const y = v => h - Math.min(1, v / scale) * h;
+    g2.lineWidth = 2;
+    for (const [v, c] of [[sThr, colors.snare], [kThr, colors.kick]]) {
+      g2.strokeStyle = c; g2.setLineDash([8, 8]); g2.beginPath(); g2.moveTo(0, y(v)); g2.lineTo(w, y(v)); g2.stroke();
+    }
+    g2.setLineDash([]); g2.strokeStyle = '#f2efe6'; g2.lineWidth = 3; g2.beginPath();
+    for (let i = 0; i < trace.length; i++) {
+      const v = trace[(ti + i) % trace.length], x = (i / (trace.length - 1)) * w;
+      i ? g2.lineTo(x, y(v)) : g2.moveTo(x, y(v));
+    }
+    g2.stroke();
+    requestAnimationFrame(draw);
+  }
+  draw();
+
+  // ---------- Controls ----------
+  const bind = (id, out, fmt) => { const el = $(id); const f = () => $(out).textContent = fmt(el.value); el.addEventListener('input', f); f(); };
+  bind('thr', 'thrOut', v => v); bind('kthr', 'kthrOut', v => v);
+  bind('gap', 'gapOut', v => v + ' ms'); bind('vol', 'volOut', v => v + '%');
+  $('vol').addEventListener('input', () => { if (master) master.gain.value = $('vol').value / 100; });
+  for (const k of ['kick', 'snare', 'hat']) {
+    $('test' + k[0].toUpperCase() + k.slice(1)).addEventListener('click', () => { ensureAudio(); ctx.resume(); hit(k, 1); });
+  }
+
+  let running = false, wakeLock = null;
+  async function start() {
+    err.hidden = true; ensureAudio(); await ctx.resume();
+    if (!navigator.mediaDevices?.getUserMedia) {
+      err.textContent = 'This browser cannot open the microphone. The page must be on https://.'; err.hidden = false; return;
+    }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+      });
+    } catch (e) {
+      err.textContent = 'Microphone access was denied. Reload and tap Allow.'; err.hidden = false; return;
+    }
+    const src = ctx.createMediaStreamSource(stream);
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 250; lp.Q.value = 0.7;
+    analyser = ctx.createAnalyser(); analyser.fftSize = 512; analyser.smoothingTimeConstant = 0;
+    buf = new Float32Array(analyser.fftSize);
+    src.connect(lp).connect(analyser); // analyser is not connected to output, so no mic passthrough
+    timer = setInterval(tick, 8);
+    try { wakeLock = await navigator.wakeLock?.request('screen'); } catch (e) {}
+    running = true;
+    $('go').textContent = 'Stop'; $('go').classList.add('live'); statusEl.textContent = 'listening';
+  }
+  function stop() {
+    clearInterval(timer); timer = null;
+    stream?.getTracks().forEach(t => t.stop()); stream = null;
+    try { wakeLock?.release(); } catch (e) {}
+    running = false;
+    $('go').textContent = 'Start listening'; $('go').classList.remove('live'); statusEl.textContent = 'idle';
+  }
+  $('go').addEventListener('click', () => running ? stop() : start());
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && ctx) ctx.resume(); });
+})();
+</script>
+</body>
+</html>
