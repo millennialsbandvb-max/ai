@@ -97,6 +97,12 @@
   <div class="mrow"><div><b id="mPeak">—</b><span>last stomp · g</span></div><div><b id="mSwing">—</b><span>last swing · m/s</span></div><div><b id="calState">not set</b><span>right direction</span></div></div>
   <div class="row" style="margin-top:8px"><button type="button" id="calBtn">Set right: tap, then swing right once</button></div>
 </div>
+<h2>Drum kit</h2>
+<div class="seg" id="kitSeg">
+  <button type="button" data-kit="acoustic" class="on">Acoustic</button>
+  <button type="button" data-kit="electro">Electro</button>
+  <button type="button" data-kit="synth">Synth</button>
+</div>
 <h2>Quantize stomps to</h2>
 <div class="seg" id="qSeg">
   <button type="button" data-q="0">Off</button>
@@ -135,6 +141,7 @@
 <p class="hint" id="diag"></p>
 <button class="big" id="go" type="button">Start</button>
 
+<script src="samples.js"></script>
 <script>
 (() => {
   const $ = id => document.getElementById(id);
@@ -150,8 +157,9 @@
     master = ctx.createGain(); master.gain.value = $('vol').value / 100; master.connect(ctx.destination);
     const len = ctx.sampleRate; noise = ctx.createBuffer(1, len, ctx.sampleRate);
     const d = noise.getChannelData(0); for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    loadKit('acoustic'); loadKit('electro');
   }
-  function kick(t, vel = 1) {
+  function kickSynth(t, vel = 1) {
     const o = ctx.createOscillator(), g = ctx.createGain();
     o.type = 'sine'; o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.12);
     g.gain.setValueAtTime(1.2 * vel, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.45);
@@ -160,7 +168,7 @@
     cg.gain.setValueAtTime(0.4 * vel, t); cg.gain.exponentialRampToValueAtTime(0.001, t + 0.02);
     c.connect(cg).connect(master); c.start(t); c.stop(t + 0.03);
   }
-  function snare(t, vel = 1) {
+  function snareSynth(t, vel = 1) {
     const n = ctx.createBufferSource(); n.buffer = noise;
     const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1500;
     const g = ctx.createGain(); g.gain.setValueAtTime(0.9 * vel, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
@@ -171,13 +179,35 @@
     o.connect(og).connect(master); o.start(t); o.stop(t + 0.15);
   }
   let lastHatT = 0;
-  function hat(t, vel = 1) {
-    lastHatT = t;
+  function hatSynth(t, vel = 1) {
     const n = ctx.createBufferSource(); n.buffer = noise;
     const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7000;
     const g = ctx.createGain(); g.gain.setValueAtTime(0.45 * vel, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
     n.connect(f).connect(g).connect(master); n.start(t); n.stop(t + 0.08);
   }
+  // ---------- Sampled kits (baked WAVs in samples.js) ----------
+  let kit = 'acoustic';
+  const buffers = {}; // kitName -> {kick, snare, hat}
+  function b64ToBuf(b64) { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < u.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; }
+  function loadKit(name) {
+    if (buffers[name] || !window.PB_KITS || !window.PB_KITS[name]) return;
+    buffers[name] = {};
+    for (const [k, b64] of Object.entries(window.PB_KITS[name])) {
+      // decodeAudioData with callbacks works on old Safari too
+      ctx.decodeAudioData(b64ToBuf(b64), buf => { buffers[name][k] = buf; }, () => {});
+    }
+  }
+  function playSample(kind, t, vel, gainMul) {
+    const b = buffers[kit] && buffers[kit][kind];
+    if (!b) return false;
+    const src = ctx.createBufferSource(); src.buffer = b;
+    const g = ctx.createGain(); g.gain.value = gainMul * (0.55 + 0.45 * vel);
+    src.connect(g).connect(master); src.start(t);
+    return true;
+  }
+  function kick(t, vel = 1) { if (kit === 'synth' || !playSample('kick', t, vel, 1.0)) kickSynth(t, vel); }
+  function snare(t, vel = 1) { if (kit === 'synth' || !playSample('snare', t, vel, 0.9)) snareSynth(t, vel); }
+  function hat(t, vel = 1) { lastHatT = t; if (kit === 'synth' || !playSample('hat', t, vel, 0.5)) hatSynth(t, vel); }
   const play = { kick, snare, hat };
 
   function show(kind) {
@@ -397,6 +427,7 @@
   });
   seg('hatSeg', 'hat', v => { hatMode = +v; if (clockOn && beatSec) { nextHat = lastHatSched + hatSub(); } });
   seg('qSeg', 'q', v => quant = +v);
+  seg('kitSeg', 'kit', v => { kit = v; if (ctx) loadKit(v); });
   seg('snSeg', 'sn', v => { snareMode = v; $('swingCtl').hidden = v !== 'swing'; $('hardCtl').hidden = v === 'swing'; });
   seg('placeSeg', 'place', v => { const p = presets[v]; setRange('thr', p.thr); setRange('sthr', p.sthr); setRange('gap', p.gap); });
 
