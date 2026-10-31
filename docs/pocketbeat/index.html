@@ -76,6 +76,12 @@
   </div>
 </div>
 
+<h2>Quantize stomps to</h2>
+<div class="seg" id="qSeg">
+  <button type="button" data-q="0">Off</button>
+  <button type="button" data-q="2" class="on">8ths</button>
+  <button type="button" data-q="4">16ths</button>
+</div>
 <h2>Hi-hat (automatic, follows your tempo)</h2>
 <div class="seg" id="hatSeg">
   <button type="button" data-hat="0">Off</button>
@@ -99,7 +105,7 @@
   <label for="vol">Volume</label><output id="volOut"></output>
   <input type="range" id="vol" min="0" max="100" step="1" value="85">
 </div>
-<p class="hint">Soft stomp = kick, hard stomp = snare. The hi-hat is automatic: the app measures the time between your stomps and keeps hats ticking at that tempo until you stop for two beats. Watch the meter: the orange line is the kick threshold, the yellow line is the snare threshold. Drag them until your soft and hard stomps land on opposite sides.</p>
+<p class="hint">Soft stomp = kick, hard stomp = snare. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each stomp is nudged onto the nearest grid line so kicks and snares sit square with the hats. Stop for two beats and the clock stops. Orange line = kick threshold, yellow line = snare threshold.</p>
 <p class="err" id="err" hidden></p>
 <p class="hint" id="diag"></p>
 <button class="big" id="go" type="button">Start</button>
@@ -154,46 +160,77 @@
     flash.style.background = colors[kind]; flash.classList.add('on');
     requestAnimationFrame(() => requestAnimationFrame(() => flash.classList.remove('on')));
   }
-  // Schedule a sound for a future audio-clock time; cancelable if the groove stops.
-  let pending = [];
-  function at(kind, when, vel = 1) {
-    const t = setTimeout(() => { play[kind](ctx.currentTime, vel); show(kind); }, Math.max(0, (when - ctx.currentTime) * 1000 - 20));
-    pending.push(t);
-  }
-  function clearPending() { pending.forEach(clearTimeout); pending = []; }
-
-  // ---------- Groove engine ----------
-  // Tempo comes from the gap between stomps (one stomp = one beat).
-  let intervals = [], lastStompT = 0, beatSec = 0, stopTimer = null;
+  // ---------- Clock + groove engine ----------
+  // After two stomps we run a beat clock (anchor + beatSec). Hats are scheduled from the
+  // clock with a short lookahead, in audio time, so they never drift. Each stomp nudges
+  // the clock's phase a little (a soft PLL) so the grid follows the player.
+  let intervals = [], lastStompT = 0, beatSec = 0, anchor = 0, nextHat = 0, clockOn = false, quant = 2;
+  let tickTimer = null;
   function median(a) { const s = [...a].sort((x, y) => x - y); return s[(s.length - 1) >> 1]; }
+  const LOOKAHEAD = 0.12; // seconds of audio scheduled ahead
 
-  // Each stomp is one beat. Soft = kick, hard = snare. Hats are laid down automatically
-  // at the measured stomp tempo and keep ticking until the stomps stop.
+  function flashAt(kind, when) {
+    setTimeout(() => show(kind), Math.max(0, (when - ctx.currentTime) * 1000));
+  }
+  function tick() {
+    if (!clockOn) return;
+    const now = ctx.currentTime;
+    // Stop if the player has gone quiet for ~2 beats.
+    if (now - lastStompT > beatSec * 2.2) { stopClock(); return; }
+    const sub = hatMode === 2 ? beatSec / 2 : beatSec; // hat spacing
+    if (hatMode === 0) { nextHat = now + sub; return; }
+    while (nextHat < now + LOOKAHEAD) {
+      if (nextHat >= now - 0.01) {
+        const onBeat = Math.abs(((nextHat - anchor) / beatSec) % 1) < 0.01 || Math.abs((((nextHat - anchor) / beatSec) % 1) - 1) < 0.01;
+        hat(Math.max(nextHat, now), onBeat ? 0.7 : 0.45); flashAt('hat', nextHat);
+      }
+      nextHat += sub;
+    }
+  }
+  function startClock(now) {
+    anchor = now; nextHat = now; clockOn = true;
+    clearInterval(tickTimer); tickTimer = setInterval(tick, 25);
+  }
+  function stopClock() {
+    clockOn = false; clearInterval(tickTimer); tickTimer = null;
+    intervals = []; lastStompT = 0; beatSec = 0; $('bpm').textContent = '—';
+  }
+
   function onStomp(kind, vel) {
     const now = ctx.currentTime;
     stomps++; $('nKick').textContent = stomps;
-    play[kind](now, vel); show(kind);
-
     if (lastStompT) {
       const dt = now - lastStompT;
       if (dt > 0.2 && dt < 2.5) { intervals.push(dt); if (intervals.length > 4) intervals.shift(); }
     }
     lastStompT = now;
-    beatSec = intervals.length ? median(intervals) : 0; // one beat = one stomp
+
+    let when = now;
+    if (!beatSec && intervals.length) {
+      // Second stomp: tempo known, start the clock on this stomp.
+      beatSec = median(intervals); startClock(now);
+    } else if (beatSec) {
+      // Update tempo smoothly, keeping the grid continuous through the last anchor.
+      const newBeat = median(intervals);
+      beatSec += 0.5 * (newBeat - beatSec);
+      // Quantize: snap to the nearest grid line (8ths or 16ths of the beat).
+      const g = quant ? beatSec / quant : beatSec;
+      const k = Math.round((now - anchor) / g);
+      const grid = anchor + k * g;
+      if (quant) when = grid >= now - 0.005 ? grid : now; // early → wait for the line; late → play now
+      // Soft phase lock: pull the grid a third of the way toward where the player actually hit.
+      const errBeat = now - (anchor + Math.round((now - anchor) / beatSec) * beatSec);
+      anchor += 0.33 * errBeat;
+      // Re-align the hat scheduler to the nudged grid.
+      const sub = hatMode === 2 ? beatSec / 2 : beatSec;
+      nextHat = anchor + Math.ceil((Math.max(nextHat, now) - anchor) / sub - 1e-4) * sub;
+      if (!clockOn) startClock(now);
+    }
     $('bpm').textContent = beatSec ? Math.round(60 / beatSec) : '—';
+    play[kind](when, vel); flashAt(kind, when);
     const beatIdx = (stomps - 1) % 4;
     for (let i = 0; i < 4; i++) $('b' + i).className = '';
     $('b' + beatIdx).className = kind === 'snare' ? 's' : 'k';
-
-    clearPending();
-    if (!beatSec) return; // need two stomps before we know the tempo
-    const q = beatSec, e = q / 2;
-    // Hats: on the beat now, plus the off-beat; also pre-lay the next beat in case the
-    // next stomp is a hair late, so the hat never stutters.
-    if (hatMode >= 1) { if (now - lastHatT > 0.12) hat(now, 0.7); at('hat', now + q, 0.7); }
-    if (hatMode === 2) { at('hat', now + e, 0.5); at('hat', now + q + e, 0.5); }
-    clearTimeout(stopTimer);
-    stopTimer = setTimeout(() => { clearPending(); intervals = []; lastStompT = 0; $('bpm').textContent = '—'; }, q * 1000 * 2.2);
   }
   // ---------- Motion detection ----------
   let lastHit = 0, peak = 0, peakT = 0, gx = 0, gy = 0, gz = 0;
@@ -255,6 +292,7 @@
     [...$(id).children].forEach(x => x.classList.toggle('on', x === b)); cb(b.dataset[attr]);
   });
   seg('hatSeg', 'hat', v => hatMode = +v);
+  seg('qSeg', 'q', v => quant = +v);
 
   let running = false, wakeLock = null;
   async function start() {
@@ -277,7 +315,7 @@
   }
   function stop() {
     window.removeEventListener('devicemotion', onMotion);
-    clearPending(); clearTimeout(stopTimer); intervals = []; lastStompT = 0;
+    stopClock();
     try { wakeLock?.release(); } catch (e) {}
     running = false;
     $('go').textContent = 'Start'; $('go').classList.remove('live'); statusEl.textContent = 'idle';
