@@ -76,12 +76,7 @@
   </div>
 </div>
 
-<h2>Where do you stomp?</h2>
-<div class="seg" id="modeSeg">
-  <button type="button" data-mode="13" class="on">Beats 1 &amp; 3</button>
-  <button type="button" data-mode="every">Every beat</button>
-</div>
-<h2>Hi-hat</h2>
+<h2>Hi-hat (automatic, follows your tempo)</h2>
 <div class="seg" id="hatSeg">
   <button type="button" data-hat="0">Off</button>
   <button type="button" data-hat="1">Quarters</button>
@@ -89,8 +84,12 @@
 </div>
 
 <div class="ctl">
-  <label for="thr">Stomp sensitivity</label><output id="thrOut"></output>
+  <label for="thr">Kick: soft stomp above</label><output id="thrOut"></output>
   <input type="range" id="thr" min="0.15" max="2.5" step="0.05" value="0.45">
+</div>
+<div class="ctl">
+  <label for="sthr">Snare: hard stomp above</label><output id="sthrOut"></output>
+  <input type="range" id="sthr" min="0.3" max="6" step="0.05" value="1.4">
 </div>
 <div class="ctl">
   <label for="gap">Minimum gap between stomps</label><output id="gapOut"></output>
@@ -100,7 +99,7 @@
   <label for="vol">Volume</label><output id="volOut"></output>
   <input type="range" id="vol" min="0" max="100" step="1" value="85">
 </div>
-<p class="hint">Every stomp is a kick. Keep a steady foot: the app measures your tempo and drops the snare on the backbeat and hi-hats in between on its own. Stop stomping for two beats and the groove stops. Lower the sensitivity slider if stomps are missed; raise it if walking sets it off.</p>
+<p class="hint">Soft stomp = kick, hard stomp = snare. The hi-hat is automatic: the app measures the time between your stomps and keeps hats ticking at that tempo until you stop for two beats. Watch the meter: the orange line is the kick threshold, the yellow line is the snare threshold. Drag them until your soft and hard stomps land on opposite sides.</p>
 <p class="err" id="err" hidden></p>
 <p class="hint" id="diag"></p>
 <button class="big" id="go" type="button">Start</button>
@@ -110,7 +109,7 @@
   const $ = id => document.getElementById(id);
   const statusEl = $('status'), lastEl = $('last'), flash = $('flash'), err = $('err');
   const colors = { kick: '#ff6a3d', snare: '#ffd166', hat: '#7bdff2' };
-  let mode = '13', hatMode = 2, stomps = 0;
+  let hatMode = 2, stomps = 0;
 
   // ---------- Synth drums ----------
   let ctx = null, master = null, noise = null;
@@ -140,7 +139,9 @@
     og.gain.setValueAtTime(0.6 * vel, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
     o.connect(og).connect(master); o.start(t); o.stop(t + 0.15);
   }
+  let lastHatT = 0;
   function hat(t, vel = 1) {
+    lastHatT = t;
     const n = ctx.createBufferSource(); n.buffer = noise;
     const f = ctx.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 7000;
     const g = ctx.createGain(); g.gain.setValueAtTime(0.45 * vel, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
@@ -162,48 +163,37 @@
   function clearPending() { pending.forEach(clearTimeout); pending = []; }
 
   // ---------- Groove engine ----------
-  // Tempo comes from the gap between stomps. In "1 & 3" mode a stomp is a half-note
-  // apart from the next one; in "every beat" mode it's a quarter note.
+  // Tempo comes from the gap between stomps (one stomp = one beat).
   let intervals = [], lastStompT = 0, beatSec = 0, stopTimer = null;
   function median(a) { const s = [...a].sort((x, y) => x - y); return s[(s.length - 1) >> 1]; }
 
-  function onStomp(vel) {
+  // Each stomp is one beat. Soft = kick, hard = snare. Hats are laid down automatically
+  // at the measured stomp tempo and keep ticking until the stomps stop.
+  function onStomp(kind, vel) {
     const now = ctx.currentTime;
     stomps++; $('nKick').textContent = stomps;
-    kick(now, vel); show('kick');
+    play[kind](now, vel); show(kind);
 
     if (lastStompT) {
       const dt = now - lastStompT;
       if (dt > 0.2 && dt < 2.5) { intervals.push(dt); if (intervals.length > 4) intervals.shift(); }
     }
     lastStompT = now;
-    const period = intervals.length ? median(intervals) : 0;    // seconds between stomps
-    beatSec = mode === '13' ? period / 2 : period;                 // one quarter note
+    beatSec = intervals.length ? median(intervals) : 0; // one beat = one stomp
     $('bpm').textContent = beatSec ? Math.round(60 / beatSec) : '—';
-    // beat lights: which of the 4 beats this stomp lands on
-    const beatIdx = mode === '13' ? ((stomps - 1) % 2) * 2 : (stomps - 1) % 4;
+    const beatIdx = (stomps - 1) % 4;
     for (let i = 0; i < 4; i++) $('b' + i).className = '';
-    $('b' + beatIdx).className = mode === 'every' && stomps % 2 === 0 ? 's' : 'k';
+    $('b' + beatIdx).className = kind === 'snare' ? 's' : 'k';
 
     clearPending();
     if (!beatSec) return; // need two stomps before we know the tempo
-
     const q = beatSec, e = q / 2;
-    if (mode === '13') {
-      // stomp = beat 1 (or 3). Snare on the next beat, hats fill the two beats.
-      at('snare', now + q, 0.9);
-      $('b' + (beatIdx + 1)).className = 's';
-      if (hatMode === 1) { hat(now, 0.7); at('hat', now + q, 0.7); }
-      if (hatMode === 2) { hat(now, 0.7); at('hat', now + e, 0.5); at('hat', now + q, 0.7); at('hat', now + q + e, 0.5); }
-    } else {
-      // stomp on every beat: even stomps are the backbeat.
-      if (stomps % 2 === 0) at('snare', now, 0.9);
-      if (hatMode >= 1) hat(now, 0.7);
-      if (hatMode === 2) at('hat', now + e, 0.5);
-    }
-    // Groove stops if the next stomp doesn't arrive.
+    // Hats: on the beat now, plus the off-beat; also pre-lay the next beat in case the
+    // next stomp is a hair late, so the hat never stutters.
+    if (hatMode >= 1) { if (now - lastHatT > 0.12) hat(now, 0.7); at('hat', now + q, 0.7); }
+    if (hatMode === 2) { at('hat', now + e, 0.5); at('hat', now + q + e, 0.5); }
     clearTimeout(stopTimer);
-    stopTimer = setTimeout(() => { clearPending(); intervals = []; lastStompT = 0; $('bpm').textContent = '—'; }, (mode === '13' ? 2 * q : q) * 1000 * 2.2);
+    stopTimer = setTimeout(() => { clearPending(); intervals = []; lastStompT = 0; $('bpm').textContent = '—'; }, q * 1000 * 2.2);
   }
   // ---------- Motion detection ----------
   let lastHit = 0, peak = 0, peakT = 0, gx = 0, gy = 0, gz = 0;
@@ -228,18 +218,21 @@
     } else if (peakT) fire(now);
   }
   function fire(now) {
-    const p = peak, thr = +$('thr').value; peak = 0; peakT = 0; lastHit = now;
-    onStomp(Math.min(1, 0.6 + 0.4 * (p / (thr * 3))));
+    const p = peak, thr = +$('thr').value, sthr = +$('sthr').value; peak = 0; peakT = 0; lastHit = now;
+    if (p >= sthr) onStomp('snare', Math.min(1, 0.7 + 0.3 * (p / (sthr * 2))));
+    else onStomp('kick', Math.min(1, 0.6 + 0.4 * (p / sthr)));
   }
 
   // ---------- Scope ----------
   const cv = $('scope'), g2 = cv.getContext('2d');
   function draw() {
-    const w = cv.width, h = cv.height, thr = +$('thr').value, scale = Math.max(thr * 3, 1.5);
+    const w = cv.width, h = cv.height, thr = +$('thr').value, sthr = +$('sthr').value, scale = Math.max(sthr * 1.5, 1.5);
     g2.clearRect(0, 0, w, h);
     const y = v => h - Math.min(1, v / scale) * h;
-    g2.strokeStyle = colors.kick; g2.lineWidth = 2; g2.setLineDash([8, 8]);
-    g2.beginPath(); g2.moveTo(0, y(thr)); g2.lineTo(w, y(thr)); g2.stroke();
+    g2.lineWidth = 2; g2.setLineDash([8, 8]);
+    for (const [v, c] of [[thr, colors.kick], [sthr, colors.snare]]) {
+      g2.strokeStyle = c; g2.beginPath(); g2.moveTo(0, y(v)); g2.lineTo(w, y(v)); g2.stroke();
+    }
     g2.setLineDash([]); g2.strokeStyle = '#f2efe6'; g2.lineWidth = 3; g2.beginPath();
     for (let i = 0; i < trace.length; i++) {
       const v = trace[(ti + i) % trace.length], x = (i / (trace.length - 1)) * w;
@@ -253,6 +246,7 @@
   // ---------- Controls ----------
   const bind = (id, out, fmt) => { const el = $(id); const f = () => $(out).textContent = fmt(el.value); el.addEventListener('input', f); f(); };
   bind('thr', 'thrOut', v => (+v).toFixed(2) + ' g');
+  bind('sthr', 'sthrOut', v => (+v).toFixed(2) + ' g');
   bind('gap', 'gapOut', v => v + ' ms');
   bind('vol', 'volOut', v => v + '%');
   $('vol').addEventListener('input', () => { if (master) master.gain.value = $('vol').value / 100; });
@@ -260,7 +254,6 @@
     const b = e.target.closest('button'); if (!b) return;
     [...$(id).children].forEach(x => x.classList.toggle('on', x === b)); cb(b.dataset[attr]);
   });
-  seg('modeSeg', 'mode', v => { mode = v; intervals = []; lastStompT = 0; stomps = 0; $('nKick').textContent = 0; });
   seg('hatSeg', 'hat', v => hatMode = +v);
 
   let running = false, wakeLock = null;
