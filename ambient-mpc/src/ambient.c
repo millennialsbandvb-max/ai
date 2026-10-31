@@ -1104,9 +1104,9 @@ static void setParameter(AEffect *e, int32_t i, float v) {
         s->automate |= 1u << i;
         return;
     }
-    if (i == kPreset) {   /* a move off an entry (the data wheel, a Q-Link) steps one; an exact value (a project loading) only names it */
+    if (i == kPreset) {   /* a small move (a Q-Link nudge) steps one; an exact value (a project loading) only names it */
         const float pos = v * (float)(NPRESETS - 1), cur = s->preset >= 0 ? (float)s->preset : s->norm[i] * (float)(NPRESETS - 1);
-        if (fabsf(pos - roundf(pos)) > 0.001f) { setParameter(e, pos > cur ? kPresetNext : kPresetPrev, 1); return; }
+        if (fabsf(pos - roundf(pos)) > 0.001f && fabsf(pos - cur) < 1) { setParameter(e, pos > cur ? kPresetNext : kPresetPrev, 1); return; }
         s->preset = (int)lrintf(pos);
         s->norm[i] = v;
         s->update_display = 1;

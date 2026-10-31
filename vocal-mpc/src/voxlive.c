@@ -225,9 +225,9 @@ static void setParameter(AEffect *e, int32_t i, float v) {
         s->norm[i] = 0;
         return;
     }
-    if (i == kStyle) {   /* a move off an entry (the data wheel, a Q-Link) steps one; an exact value (a project loading) only names it */
+    if (i == kStyle) {   /* a small move (a Q-Link nudge) steps one; an exact value (a project loading) only names it */
         const float pos = v * (float)(NSTYLES - 1), cur = s->style >= 0 ? (float)s->style : s->norm[i] * (float)(NSTYLES - 1);
-        if (fabsf(pos - roundf(pos)) > 0.001f) { load_style(s, ((int)lrintf(cur) + (pos > cur ? 1 : -1) + NSTYLES) % NSTYLES); return; }
+        if (fabsf(pos - roundf(pos)) > 0.001f && fabsf(pos - cur) < 1) { load_style(s, ((int)lrintf(cur) + (pos > cur ? 1 : -1) + NSTYLES) % NSTYLES); return; }
         s->style = (int)lrintf(pos);
         s->norm[i] = v;
         s->update_display = 1;

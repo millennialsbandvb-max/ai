@@ -253,11 +253,13 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   overlay) and on a tap of its value text (a clear field over it). Lists share one panel picture. Device-untested:
   the panel and rows on MPC (field pattern = the device-proven popups'), the repaint of row text, and whether an
   action's handleName other than Data works (the value-text tap is the fallback).
-  Data wheel (Oct 2026, the user's ask): a tap on a list stepper's name or its < > also runs Q-Link on a "Step"
-  handle mapped to the stepper's own param, so the wheel then steps presets; the plugins step one for any value off
-  an entry (no "within one" limit: a wheel detent can jump several entries of a long list). Device-untested (relies
-  on an action handleName other than Data, like the knob lists; if MPC ignores it, the wheel moves the arrow's own
-  param and wheel-up steps in that arrow's direction).
+  Data wheel (Oct 2026, the user's ask): a touch on a stepper's < or > runs Q-Link on the arrow itself (its Data;
+  a first try with an action on another handle, "Step", did nothing on the MPC: actions seem to act on Data only,
+  so the knob lists' double tap on "List" likely doesn't work either). picklist.h finds the plugin's arrows by name
+  ("<x> <" with "<x> >"), shows them to the host at rest 0.5, and turns a wheel move (0 < v < 1, off 0.5) into
+  the partner's or its own press by direction (up = >, down = <); a press (1) is the arrow's own step, 0 its
+  release, 0.5 a restore. The MIDI Ch arrows do the same. Preset params keep the "within one" nudge rule (a looser
+  one broke Quad Rig's state restore). Device-untested.
 - **Pedal look** (Oct 2026, the user's pick): our pages (not Airwindows/Dragonfly: PEDAL_LOOK=0 in their build.sh)
   are drawn by the kit's browser renderer (html_art.py) with `tools/pedal_look.css`: an enclosure in the page's
   colour (theme_plate_hi / theme_plate_lo, a hammertone filter on the base background), recessed frames, metal knob

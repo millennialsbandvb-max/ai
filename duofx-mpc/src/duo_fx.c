@@ -1707,7 +1707,7 @@ static void setParameter(AEffect *e, int32_t i, float v) {
             return;
         }
         const float pos = v * (float)(NPROGRAMS - 1), cur = s->program >= 0 ? (float)s->program : s->norm[i] * (float)(NPROGRAMS - 1);
-        if (fabsf(pos - roundf(pos)) > 0.001f) {
+        if (fabsf(pos - roundf(pos)) > 0.001f && fabsf(pos - cur) < 1) {
             load_program(s, ((int)lrintf(cur) + (pos > cur ? 1 : -1) + NPROGRAMS) % NPROGRAMS);
             return;
         }
@@ -1724,10 +1724,10 @@ static void setParameter(AEffect *e, int32_t i, float v) {
             s->automate |= 1ull << i;   /* (its light goes out) */
             return;
         }
-        /* the preset itself: a move off an entry (the data wheel, a Q-Link) steps one; an exact value (a project being loaded)
+        /* the preset itself: a small move (a Q-Link nudge) steps one; an exact value (a project being loaded)
          * only shows which preset it was, without overwriting the knobs saved with it */
         const float pos = v * (float)(NPRESETS - 1), cur = s->preset[k] >= 0 ? (float)s->preset[k] : s->norm[i] * (float)(NPRESETS - 1);
-        if (fabsf(pos - roundf(pos)) > 0.001f) { step_preset(s, k, pos > cur ? 1 : -1); return; }
+        if (fabsf(pos - roundf(pos)) > 0.001f && fabsf(pos - cur) < 1) { step_preset(s, k, pos > cur ? 1 : -1); return; }
         s->preset[k] = (int)lrintf(pos);
         s->norm[i] = v;
         s->update_display = 1;
