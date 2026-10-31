@@ -61,11 +61,28 @@ typedef struct {
     char *chunk;                 /* the plugin's chunk + our trailer */
     int *arrow;                  /* per plugin param: 0, or a "< " / " >" stepper arrow: +-(its partner's index + 1) */
     unsigned char *rest;         /* an arrow to report back at rest */
+    float *alast;                /* per arrow (plugin's, then ours): the value the host last sent */
+    unsigned char *rsent;        /* rest reported to the host since (it may or may not have taken it) */
 } PickWrap;
 /* The < > arrows and the data wheel: the page points the wheel at an arrow when it's touched (Q-Link). An arrow
- * rests at 0.5 (as the host sees it), so the wheel can move it either way: up (over 0.5) steps on, down steps back,
- * whichever arrow it is; a press (1) is the arrow's own step, and its release (0) does nothing. */
-#define PL_REST 0.5f
+ * rests at 0.45, just under the middle: the page's toggle takes it to 1 on a tap (from 0.5 it went to 0, and taps
+ * were lost), and the wheel can move it either way: up steps on, down steps back, whichever arrow it is. 0 (a
+ * button's release, or an old project's saved value) does nothing. After each, it goes back to rest (the host takes
+ * the values we report: the list rows rest the same way). */
+#define PL_REST 0.45f
+/* a new value for arrow k: +1 / -1 a step that way (the wheel), 2 the arrow's own press, 0 nothing. The wheel's
+ * direction is against the value before: rest, or (if the host hasn't taken rest yet) the last one it sent */
+static int pl_arrow(PickWrap *w, int k, float v) {
+    if (!w->alast || !w->rsent) return v >= 0.999f ? 2 : 0;
+    float last = w->alast[k];
+    if (w->rsent[k]) { if (fabsf(v - PL_REST) <= fabsf(v - last)) last = PL_REST; w->rsent[k] = 0; }
+    int r = 0;
+    if (v >= 0.999f) r = 2;
+    else if (v > 0.001f && fabsf(v - last) > 0.0001f) r = v > last ? 1 : -1;
+    w->alast[k] = v;
+    w->rest[k] = 1;
+    return r;
+}
 
 static PickWrap *pl_all[64];
 static audioMasterCallback pl_real_master;
@@ -88,7 +105,10 @@ static intptr_t pl_host(AEffect *e, int32_t op, int32_t idx, intptr_t val, void 
         PickWrap *w = pl_all[i];
         if (w && w->in == e) {
             pl_sync(w);
-            if (op == audioMasterAutomate && w->arrow && idx >= 0 && idx < w->base && w->arrow[idx] && opt < PL_REST) opt = PL_REST;
+            if (op == audioMasterAutomate && w->arrow && w->rsent && idx >= 0 && idx < w->base && w->arrow[idx]) {   /* (its own reports: rest) */
+                opt = PL_REST;
+                w->rsent[idx] = 1;
+            }
             return w->master ? w->master(&w->fx, op, idx, val, p, opt) : 0;
         }
     }
@@ -127,14 +147,13 @@ static void pl_setParameter(AEffect *e, int32_t i, float v) {
     PickWrap *w = (PickWrap *)e->object;
     if (i < w->base) {
         const int a = w->arrow ? w->arrow[i] : 0;
-        if (a && v > 0.001f && v < 0.999f) {   /* the wheel on an arrow: a step by its direction, then back to rest */
-            if (fabsf(v - PL_REST) > 0.001f) {
-                const int prev = a < 0, partner = (a < 0 ? -a : a) - 1;   /* (a < 0: this one is "<") */
-                const int target = (v > PL_REST) == prev ? partner : i;
+        if (a) {   /* an arrow: its press, or the wheel's step either way; then back to rest */
+            const int r = pl_arrow(w, i, v), prev = a < 0, partner = (a < 0 ? -a : a) - 1;   /* (a < 0: this one is "<") */
+            if (r) {
+                const int target = r == 2 ? i : (r > 0) == prev ? partner : i;
                 w->in->setParameter(w->in, target, 1);
                 w->in->setParameter(w->in, target, 0);
             }
-            w->rest[i] = 1;
             return;
         }
         w->in->setParameter(w->in, i, v);
@@ -192,16 +211,19 @@ static void pl_setParameter(AEffect *e, int32_t i, float v) {
         pl_set_ch(w, ch < 0 ? 0 : ch > 16 ? 16 : ch);
         return;
     }
-    if (r == PL_MCH_PREV || r == PL_MCH_NEXT) {   /* (at rest 0.5, like the plugin's arrows: the wheel moves it either way) */
-        const int wheel = v > 0.001f && v < 0.999f;
-        if (wheel && fabsf(v - PL_REST) > 0.001f) pl_set_ch(w, (w->ch + (v > PL_REST ? 1 : 16)) % 17);
-        else if (!wheel && press) pl_set_ch(w, (w->ch + (r == PL_MCH_NEXT ? 1 : 16)) % 17);
+    if (r == PL_MCH_PREV || r == PL_MCH_NEXT) {   /* (like the plugin's arrows) */
+        const int s = pl_arrow(w, w->base + j, v), d = s == 2 ? (r == PL_MCH_NEXT ? 1 : -1) : s;
+        w->rest[w->base + j] = 0;
+        if (d) pl_set_ch(w, (w->ch + (d > 0 ? 1 : 16)) % 17);
         pl_set(w, j, PL_REST);
     }
 }
 static float pl_getParameter(AEffect *e, int32_t i) {
     PickWrap *w = (PickWrap *)e->object;
-    if (i < w->base) { const float v = w->in->getParameter(w->in, i); return w->arrow && w->arrow[i] && v < PL_REST ? PL_REST : v; }
+    if (i < w->base) {
+        if (w->arrow && w->arrow[i] && w->alast) return w->rsent[i] ? PL_REST : w->alast[i];   /* (an arrow: as the host has it) */
+        return w->in->getParameter(w->in, i);
+    }
     return i - w->base < pl_nparams(w->pl) ? w->norm[i - w->base] : 0;
 }
 
@@ -259,6 +281,8 @@ static intptr_t pl_dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t v, v
         free(w->chunk);
         free(w->arrow);
         free(w->rest);
+        free(w->alast);
+        free(w->rsent);
         free(w);
         return r;
     }
@@ -290,9 +314,10 @@ static void pl_flush(PickWrap *w) {
     if (!w->master) return;
     int any = 0;
     if (w->rest) for (int i = 0; i < w->base; i++)
-        if (w->rest[i]) { w->rest[i] = 0; w->master(&w->fx, audioMasterAutomate, i, 0, NULL, PL_REST); any = 1; }
+        if (w->rest[i]) { w->rest[i] = 0; w->rsent[i] = 1; w->master(&w->fx, audioMasterAutomate, i, 0, NULL, PL_REST); any = 1; }
     for (int j = 0; j < pl_nparams(w->pl); j++)
         if (w->report[j]) {
+            if (w->rsent && w->norm[j] == PL_REST) w->rsent[w->base + j] = 1;
             if (w->report[j] == 2) w->master(&w->fx, audioMasterAutomate, w->base + j, 0, NULL, 0.001f);   /* (a change) */
             w->report[j] = 0;
             any = 1;
@@ -353,9 +378,13 @@ static AEffect *pl_wrap(audioMasterCallback master, AEffect *(*make)(audioMaster
     w->nl = pl->n + (pl->midi ? 1 : 0);
     w->midi_pos = 0xffffffffu;   /* (from now on) */
     w->arrow = (int *)calloc((size_t)(in->numParams > 0 ? in->numParams : 1), sizeof *w->arrow);
-    w->rest = (unsigned char *)calloc((size_t)(in->numParams > 0 ? in->numParams : 1), 1);
+    const int nall = in->numParams + pl_nparams(pl);
+    w->rest = (unsigned char *)calloc((size_t)nall, 1);
+    w->alast = (float *)calloc((size_t)nall, sizeof *w->alast);
+    w->rsent = (unsigned char *)calloc((size_t)nall, 1);
+    for (int k = 0; w->alast && k < nall; k++) w->alast[k] = PL_REST;
     if (pl->midi) w->norm[w->nl + PL_MCH_PREV] = w->norm[w->nl + PL_MCH_NEXT] = PL_REST;
-    if (w->arrow && w->rest) {   /* the arrows: "<name> <" with its "<name> >" */
+    if (w->arrow && w->rest && w->alast && w->rsent) {   /* the arrows: "<name> <" with its "<name> >" */
         static char nm[1024][40];
         const int np = in->numParams < 1024 ? in->numParams : 1024;
         for (int i = 0; i < np; i++) { nm[i][0] = 0; in->dispatcher(in, effGetParamName, i, 0, nm[i], 0); nm[i][39] = 0; }

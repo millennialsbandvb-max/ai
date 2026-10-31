@@ -256,10 +256,12 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   Data wheel (Oct 2026, the user's ask): a touch on a stepper's < or > runs Q-Link on the arrow itself (its Data;
   a first try with an action on another handle, "Step", did nothing on the MPC: actions seem to act on Data only,
   so the knob lists' double tap on "List" likely doesn't work either). picklist.h finds the plugin's arrows by name
-  ("<x> <" with "<x> >"), shows them to the host at rest 0.5, and turns a wheel move (0 < v < 1, off 0.5) into
-  the partner's or its own press by direction (up = >, down = <); a press (1) is the arrow's own step, 0 its
-  release, 0.5 a restore. The MIDI Ch arrows do the same. Preset params keep the "within one" nudge rule (a looser
-  one broke Quad Rig's state restore). Device-untested.
+  ("<x> <" with "<x> >") and keeps them at rest 0.45 as the host sees them: 1 = a press (the page's toggle from
+  under 0.5 goes to 1; resting at 0.5 the toggle went to 0 and taps were lost), 0 = release / old saved value
+  (nothing), anything else = the wheel, stepping by its direction against the value before (rest, or the last one
+  sent if the host hasn't taken rest yet). Back to rest after each. The MIDI Ch arrows do the same. Preset params
+  keep the "within one" nudge rule (a looser one broke Quad Rig's state restore). On the device: rest 0.5 version
+  stepped with the wheel ("a little wonky") but taps didn't press; the 0.45 version is untested.
 - **Pedal look** (Oct 2026, the user's pick): our pages (not Airwindows/Dragonfly: PEDAL_LOOK=0 in their build.sh)
   are drawn by the kit's browser renderer (html_art.py) with `tools/pedal_look.css`: an enclosure in the page's
   colour (theme_plate_hi / theme_plate_lo, a hammertone filter on the base background), recessed frames, metal knob
