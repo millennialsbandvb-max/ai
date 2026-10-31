@@ -42,10 +42,12 @@ patch('''                key = "shStepText_%s%dx%d" % ("dot_" if dot else "", w[
                 if li is not None:
                     fw = w["w"] - 2 * h - 6
                     key = "shStepList_%s%dx%d" % ("dot_" if dot else "", fw, h)
-                    defs.setdefault(key, _local(key, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch")],
+                    # (a touch also points the data wheel and Q-Link at the stepper itself: its "Step" handle)
+                    defs.setdefault(key, _local(key, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch"),
+                                                      dict(_action("Mouse Down", "Q-Link"), handleName="Step")],
                                                 [_focus(fw, h), _value_label(8, 0, fw - 16, h, 26.0, DISPLAY_INK if dot else ACCENT,
                                                                              handle="Text")]))
-                    kids.append(_placed(key, name, li, x0 + h + 3, y0, fw, h, extra={"Text": gi}))
+                    kids.append(_placed(key, name, li, x0 + h + 3, y0, fw, h, extra={"Text": gi, "Step": i}))
                     on_top += pick_panel(t, w, li)
                 else:
                     key = "shStepText_%s%dx%d" % ("dot_" if dot else "", w["w"] - 2 * h - 6, h)
@@ -217,5 +219,18 @@ patch('''    if not lab or k in ("knob", "toggle", "slider_v", "slider_h"):
         return ["text|%d|%d|%s|%s|%s" % (w["cx"], w["cy"] + w["h"] // 2 + 18, 0.95, INK, lab)]
     if not lab or k in ("knob", "toggle", "slider_v", "slider_h"):
         return []''')
+
+# the < > arrows: a touch also points the data wheel (and Q-Link) at the stepper itself, so turning the wheel after
+# tapping an arrow steps on (the plugins step one for any move off an entry)
+patch('''                    defs.setdefault(akey, _local(akey, [_action("Enter Pressed", "Toggle Switch")],
+                                                 [_button(aimg, aimg, 1, 1, aw, ah)]))
+                    side_key = w.get(side, w["key"] + "_" + side)
+                    kids.append(_placed(akey, "%s %s" % (name, side), index[side_key], ax, ay, aw, ah, focus="No"))''', '''                    defs.setdefault(akey, _local(akey, [_action("Enter Pressed", "Toggle Switch"),
+                                                        dict(_action("Mouse Down", "Q-Link"), handleName="Step")],
+                                                 [_button(aimg, aimg, 1, 1, aw, ah)]))
+                    side_key = w.get(side, w["key"] + "_" + side)
+                    kids.append(_placed(akey, "%s %s" % (name, side), index[side_key], ax, ay, aw, ah, focus="No",
+                                        extra={"Step": i}))''')
+
 
 open(path, "w").write(s)

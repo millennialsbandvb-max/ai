@@ -162,9 +162,9 @@ static void pl_setParameter(AEffect *e, int32_t i, float v) {
         pl_set(w, j, 0);
         return;
     }
-    if (r == PL_MCH) {   /* on an entry: that one; between (a Q-Link nudge): one step */
+    if (r == PL_MCH) {   /* on an entry: that one; off one (the data wheel, a Q-Link): one step */
         const float pos = v * 16;
-        int ch = fabsf(pos - roundf(pos)) > 0.001f && fabsf(pos - (float)w->ch) < 1 ? w->ch + (pos > (float)w->ch ? 1 : -1) : (int)lrintf(pos);
+        int ch = fabsf(pos - roundf(pos)) > 0.001f ? w->ch + (pos > (float)w->ch ? 1 : -1) : (int)lrintf(pos);
         pl_set_ch(w, ch < 0 ? 0 : ch > 16 ? 16 : ch);
         return;
     }

@@ -253,6 +253,11 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   overlay) and on a tap of its value text (a clear field over it). Lists share one panel picture. Device-untested:
   the panel and rows on MPC (field pattern = the device-proven popups'), the repaint of row text, and whether an
   action's handleName other than Data works (the value-text tap is the fallback).
+  Data wheel (Oct 2026, the user's ask): a tap on a list stepper's name or its < > also runs Q-Link on a "Step"
+  handle mapped to the stepper's own param, so the wheel then steps presets; the plugins step one for any value off
+  an entry (no "within one" limit: a wheel detent can jump several entries of a long list). Device-untested (relies
+  on an action handleName other than Data, like the knob lists; if MPC ignores it, the wheel moves the arrow's own
+  param and wheel-up steps in that arrow's direction).
 - **Pedal look** (Oct 2026, the user's pick): our pages (not Airwindows/Dragonfly: PEDAL_LOOK=0 in their build.sh)
   are drawn by the kit's browser renderer (html_art.py) with `tools/pedal_look.css`: an enclosure in the page's
   colour (theme_plate_hi / theme_plate_lo, a hammertone filter on the base background), recessed frames, metal knob
