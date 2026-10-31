@@ -718,6 +718,166 @@ static void learn_done(void) {
     broadcast_text(m);
 }
 
+/* ---- shortcuts ------------------------------------------------------------------------------------------------
+ * Things MPC has no MIDI or key for (its Tuner): recorded once from the page (Record, then do it on the MPC: its
+ * buttons and touches, then Stop) and done again on MIDI CC 89-92 (shortcuts 1-4, any channel, value 64+) from a
+ * controller, or the page's Play. The CC comes from extmidi.c (inside MPC) through the FIFO SC_FIFO. A recording is
+ * the panel's MIDI messages (sent back into MPC's panel input, like the remote's buttons) and the touchscreen's own
+ * events (written back into its device), with their timing (pauses over 0.7 s shortened); kept in
+ * /data/mpc-remote/shortcut<n>. */
+#define NSC 4
+#define SC_MAX 1024
+#define SC_FIFO "/tmp/mpc-shortcut"
+typedef struct { uint32_t t; uint8_t touch, m[3]; uint16_t type, code; int32_t value; } ScStep;
+static struct { ScStep st[SC_MAX]; int n; } sc[NSC];
+static struct { int idx, fd; uint64_t t0, last; } screc = {.idx = -1, .fd = -1};
+static struct { int idx, pos; uint64_t t0; } scplay = {.idx = -1};
+static int sc_fifo = -1, sc_fifo_w = -1;
+
+static void sc_add(int touch, int a, int b, int c) {   /* touch: type, code, value; else a MIDI message */
+    ScStep *st;
+    if (screc.idx < 0 || sc[screc.idx].n >= SC_MAX) return;
+    const uint64_t t = now_ms();
+    uint64_t gap = t - screc.last;
+    if (sc[screc.idx].n == 0) gap = 0;
+    else if (gap > 700) gap = 700;   /* (the pauses a person takes, shortened) */
+    screc.last = t;
+    st = &sc[screc.idx].st[sc[screc.idx].n];
+    memset(st, 0, sizeof *st);
+    st->t = (sc[screc.idx].n ? sc[screc.idx].st[sc[screc.idx].n - 1].t : 0) + (uint32_t)gap;
+    st->touch = (uint8_t)touch;
+    if (touch) { st->type = (uint16_t)a; st->code = (uint16_t)b; st->value = c; }
+    else { st->m[0] = (uint8_t)a; st->m[1] = (uint8_t)b; st->m[2] = (uint8_t)c; }
+    sc[screc.idx].n++;
+}
+
+static void sc_status(void) {
+    char m[160];
+    snprintf(m, sizeof m, "{\"type\":\"sc\",\"n\":[%d,%d,%d,%d],\"rec\":%d,\"play\":%d}", sc[0].n, sc[1].n, sc[2].n, sc[3].n,
+             screc.idx, scplay.idx);
+    broadcast_text(m);
+}
+
+static void sc_save(int k) {
+    char f[64], tmp[72];
+    snprintf(f, sizeof f, CONF_DIR "/shortcut%d", k + 1);
+    snprintf(tmp, sizeof tmp, "%s.new", f);
+    mkdir(CONF_DIR, 0755);
+    if (!sc[k].n) { unlink(f); sync(); return; }
+    FILE *o = fopen(tmp, "w");
+    if (!o) { LOG("can't save %s: %s", f, strerror(errno)); return; }
+    for (int i = 0; i < sc[k].n; i++) {
+        const ScStep *st = &sc[k].st[i];
+        if (st->touch) fprintf(o, "t %u %u %u %d\n", st->t, st->type, st->code, st->value);
+        else fprintf(o, "m %u %02x %02x %02x\n", st->t, st->m[0], st->m[1], st->m[2]);
+    }
+    fclose(o);
+    rename(tmp, f);
+    sync();
+}
+
+static void sc_load(void) {
+    for (int k = 0; k < NSC; k++) {
+        char f[64], line[96];
+        snprintf(f, sizeof f, CONF_DIR "/shortcut%d", k + 1);
+        FILE *i = fopen(f, "r");
+        sc[k].n = 0;
+        if (!i) continue;
+        while (sc[k].n < SC_MAX && fgets(line, sizeof line, i)) {
+            ScStep *st = &sc[k].st[sc[k].n];
+            unsigned t, a, b, c;
+            int v;
+            memset(st, 0, sizeof *st);
+            if (sscanf(line, "t %u %u %u %d", &t, &a, &b, &v) == 4) { st->t = t; st->touch = 1; st->type = (uint16_t)a; st->code = (uint16_t)b; st->value = v; sc[k].n++; }
+            else if (sscanf(line, "m %u %x %x %x", &t, &a, &b, &c) == 4) { st->t = t; st->m[0] = (uint8_t)a; st->m[1] = (uint8_t)b; st->m[2] = (uint8_t)c; sc[k].n++; }
+        }
+        fclose(i);
+        LOG("shortcut %d: %d steps", k + 1, sc[k].n);
+    }
+}
+
+static void sc_rec_stop(void) {
+    if (screc.idx < 0) return;
+    const int k = screc.idx;
+    screc.idx = -1;
+    if (learn.idx < 0) learn_subscribe(0);
+    if (screc.fd >= 0) close(screc.fd);
+    screc.fd = -1;
+    /* (a touch still down at the end, from reaching for Stop on the MPC itself: let it go) */
+    int down = 0;
+    for (int i = 0; i < sc[k].n; i++) if (sc[k].st[i].touch && sc[k].st[i].type == EV_KEY && sc[k].st[i].code == BTN_TOUCH) down = sc[k].st[i].value != 0;
+    if (down && sc[k].n + 4 <= SC_MAX) {
+        const uint32_t t = sc[k].st[sc[k].n - 1].t + 20;
+        static const uint16_t TY[4] = {EV_ABS, EV_ABS, EV_KEY, EV_SYN}, CO[4] = {ABS_MT_SLOT, ABS_MT_TRACKING_ID, BTN_TOUCH, SYN_REPORT};
+        static const int32_t VA[4] = {0, -1, 0, 0};
+        for (int j = 0; j < 4; j++) { ScStep *st = &sc[k].st[sc[k].n++]; memset(st, 0, sizeof *st); st->t = t; st->touch = 1; st->type = TY[j]; st->code = CO[j]; st->value = VA[j]; }
+    }
+    sc_save(k);
+    LOG("shortcut %d recorded: %d steps", k + 1, sc[k].n);
+    sc_status();
+}
+
+static void sc_rec_start(int k) {
+    if (k < 0 || k >= NSC) return;
+    learn_stop();
+    sc_rec_stop();
+#ifndef MPC_REMOTE_FAKE   /* (the PC test records only its fake touches) */
+    struct snd_seq_addr virt;
+    seq_open_();
+    if (seq_fd < 0 || btn_where(&virt, &learn.hw, NULL)) {
+        broadcast_text("{\"type\":\"sc\",\"error\":\"MPC's button input isn't available (details: /log)\"}");
+        return;
+    }
+    learn_subscribe(1);
+    if (!learn.subscribed) { broadcast_text("{\"type\":\"sc\",\"error\":\"can't listen to the MPC's buttons\"}"); return; }
+    if (touch_dev[0] == '/') screc.fd = open(touch_dev, O_RDONLY | O_NONBLOCK | O_CLOEXEC);   /* (not grabbed: MPC sees the taps) */
+#endif
+    sc[k].n = 0;
+    screc.idx = k;
+    screc.t0 = screc.last = now_ms();
+    LOG("shortcut %d: recording", k + 1);
+    sc_status();
+}
+
+static void sc_play(int k) {
+    if (k < 0 || k >= NSC || !sc[k].n || scplay.idx >= 0 || screc.idx >= 0) return;
+    scplay.idx = k; scplay.pos = 0; scplay.t0 = now_ms();
+    LOG("shortcut %d: playing (%d steps)", k + 1, sc[k].n);
+}
+
+static void sc_tick(void) {
+    if (screc.idx >= 0 && now_ms() - screc.t0 > 60000) sc_rec_stop();   /* (a minute at most) */
+    if (scplay.idx < 0) return;
+    const int k = scplay.idx;
+    struct snd_seq_addr virt, hw;
+    const int have_btn = seq_fd >= 0 && !btn_where(&virt, &hw, NULL);
+    while (scplay.pos < sc[k].n && now_ms() - scplay.t0 >= sc[k].st[scplay.pos].t) {
+        const ScStep *st = &sc[k].st[scplay.pos++];
+        if (st->touch) {
+            struct input_event ev;
+            memset(&ev, 0, sizeof ev);
+            ev.type = st->type; ev.code = st->code; ev.value = st->value;
+            emit(&ev, 1);
+        } else if (have_btn) seq_send(st->m, virt);
+    }
+    if (scplay.pos >= sc[k].n) { scplay.idx = -1; sc_status(); }
+}
+
+static void sc_fifo_open(void) {   /* where extmidi.c (in MPC) says which shortcut a controller asked for */
+    if (sc_fifo >= 0) return;
+    unlink(SC_FIFO);
+    if (mkfifo(SC_FIFO, 0666)) { LOG("shortcuts: can't make %s: %s", SC_FIFO, strerror(errno)); return; }
+    chmod(SC_FIFO, 0666);
+    sc_fifo = open(SC_FIFO, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    sc_fifo_w = open(SC_FIFO, O_WRONLY | O_NONBLOCK | O_CLOEXEC);   /* (kept open: no hang-ups between writers) */
+}
+
+static void sc_fifo_read(void) {
+    char b[64];
+    const ssize_t r = read(sc_fifo, b, sizeof b);
+    for (ssize_t i = 0; i < r; i++) if (b[i] >= '1' && b[i] < '1' + NSC) sc_play(b[i] - '1');
+}
+
 static void seq_read(void) {   /* the controller's messages, while learning */
     uint8_t buf[4096];
     const ssize_t r = read(seq_fd, buf, sizeof buf);
@@ -726,7 +886,7 @@ static void seq_read(void) {   /* the controller's messages, while learning */
         memcpy(&ev, buf + p, sizeof ev);
         p += (ssize_t)sizeof ev;
         if ((ev.flags & SNDRV_SEQ_EVENT_LENGTH_MASK) == SNDRV_SEQ_EVENT_LENGTH_VARIABLE) p += ev.data.ext.len;
-        if (learn.idx < 0 || ev.source.client != learn.hw.client || ev.source.port != learn.hw.port) continue;
+        if ((learn.idx < 0 && screc.idx < 0) || ev.source.client != learn.hw.client || ev.source.port != learn.hw.port) continue;
         uint8_t m[3];
         int press, key;
         if (ev.type == SNDRV_SEQ_EVENT_NOTEON || ev.type == SNDRV_SEQ_EVENT_NOTEOFF) {
@@ -740,6 +900,7 @@ static void seq_read(void) {   /* the controller's messages, while learning */
             press = m[2] != 0;
             key = 0x200 | m[1];
         } else continue;
+        if (screc.idx >= 0) { sc_add(0, m[0], m[1], m[2]); continue; }
         LOG("learn: controller sent %02x %02x %02x", m[0], m[1], m[2]);
         const int i = learn.idx;
         if (!learn.have_on) {
@@ -2044,6 +2205,15 @@ static void handle_command(Client *c, char *s) {   /* a text message from the pa
     else if (!strncmp(s, "bu ", 3)) btn_press(s + 3, 0);
     else if (!strncmp(s, "learn ", 6)) learn_start(s + 6);
     else if (!strcmp(s, "learncancel")) learn_stop();
+    else if (sscanf(s, "sc rec %d", &x) == 1) sc_rec_start(x - 1);
+    else if (!strcmp(s, "sc stop")) sc_rec_stop();
+    else if (sscanf(s, "sc play %d", &x) == 1) { sc_play(x - 1); sc_status(); }
+    else if (sscanf(s, "sc clear %d", &x) == 1) { if (x >= 1 && x <= NSC && screc.idx < 0) { sc[x - 1].n = 0; sc_save(x - 1); } sc_status(); }
+    else if (!strcmp(s, "sc status")) sc_status();
+#ifdef MPC_REMOTE_FAKE
+    else if (sscanf(s, "fakesc %d", &x) == 1) { char b = (char)('0' + x); if (sc_fifo_w >= 0 && write(sc_fifo_w, &b, 1) != 1) LOG("fifo write failed"); }
+    else if (sscanf(s, "faketouch %d %d", &x, &y) == 2) sc_add(1, EV_ABS, x, y);   /* test hook: a raw touch event while recording */
+#endif
     else if (!strcmp(s, "buttons off") || !strcmp(s, "buttons on")) {   /* takes effect when MPC next starts */
         mkdir(CONF_DIR, 0755);
         if (s[9] == 'f') { FILE *f = fopen(NO_BUTTONS, "w"); if (f) fclose(f); }
@@ -2304,6 +2474,8 @@ int main(int argc, char **argv) {
     find_touch();
     load_conf();
     btn_load();
+    sc_load();
+    sc_fifo_open();
     seq_open_();
     webin_map();
 
@@ -2335,11 +2507,15 @@ int main(int argc, char **argv) {
         if (seq_fd >= 0) pf[np++] = (struct pollfd){.fd = seq_fd, .events = POLLIN};
         const int mvidx = np;
         if (mv_fd >= 0) pf[np++] = (struct pollfd){.fd = mv_fd, .events = POLLIN};
+        const int scidx = np;
+        if (sc_fifo >= 0) pf[np++] = (struct pollfd){.fd = sc_fifo, .events = POLLIN};
+        const int screcidx = np;
+        if (screc.fd >= 0) pf[np++] = (struct pollfd){.fd = screc.fd, .events = POLLIN};
         const int upidx = np;   /* browser DevTools tunnels: their browser side */
         for (int i = 0; i < MAX_CLIENTS; i++)
             if (clients[i].fd >= 0 && clients[i].ws == 3) pf[np++] = (struct pollfd){.fd = clients[i].up, .events = POLLIN};
         const uint64_t t = now_ms();
-        int wait = (ovs && ovs->visible) ? 30 : learn.idx >= 0 ? 200 : !viewers ? 1000 : !screen_ready ? 500 : (int)(next_frame > t ? next_frame - t : 0);
+        int wait = scplay.idx >= 0 ? 5 : (ovs && ovs->visible) ? 30 : learn.idx >= 0 || screc.idx >= 0 ? 200 : !viewers ? 1000 : !screen_ready ? 500 : (int)(next_frame > t ? next_frame - t : 0);
         poll(pf, (nfds_t)np, wait);
 
         if (pf[0].revents & POLLIN) {
@@ -2398,6 +2574,14 @@ int main(int argc, char **argv) {
         static uint64_t next_bstat;
         if ((browser_pid > 0 || install_pid > 0) && now_ms() >= next_bstat) { next_bstat = now_ms() + 3000; browser_status(); }
         learn_tick();
+        if (sc_fifo >= 0 && np > scidx && pf[scidx].fd == sc_fifo && (pf[scidx].revents & POLLIN)) sc_fifo_read();
+        if (screc.fd >= 0 && np > screcidx && pf[screcidx].fd == screc.fd && (pf[screcidx].revents & POLLIN)) {   /* a touch, recording */
+            struct input_event ev[64];
+            const ssize_t r = read(screc.fd, ev, sizeof ev);
+            for (ssize_t i = 0; i < r / (ssize_t)sizeof *ev; i++)
+                if (ev[i].type == EV_ABS || ev[i].type == EV_KEY || ev[i].type == EV_SYN) sc_add(1, ev[i].type, ev[i].code, ev[i].value);
+        }
+        sc_tick();
         static uint64_t next_launch_check;
         if (now_ms() >= next_launch_check) { next_launch_check = now_ms() + 10000; launch_ok(); }
         if (mdns_fd >= 0 && now_ms() >= next_join) { next_join = now_ms() + 15000; mdns_join(); }   /* Wi-Fi (re)connects */

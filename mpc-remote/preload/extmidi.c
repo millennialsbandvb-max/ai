@@ -2,9 +2,13 @@
  * insert effects, so this copies what MPC itself reads from MIDI inputs (5-pin or USB, through ALSA raw MIDI or the
  * sequencer) into a ring that the plugins read, from the same process: they find mpc_ext_midi_read by dlsym
  * (tools/picklist.h) and take the messages on their MIDI Ch. Only Control Change and Program Change are kept, never
- * the MPC's own panel (its private port). MPC still gets everything as before: this only looks. */
+ * the MPC's own panel (its private port). MPC still gets everything as before: this only looks.
+ * CC 89-92 (any channel, going to 64 or more) also ask mpc-remote to do its recorded shortcut 1-4 (MPC's Tuner, say),
+ * through its FIFO /tmp/mpc-shortcut. */
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <fcntl.h>
+#include <unistd.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -17,7 +21,20 @@ typedef struct _snd_seq snd_seq_t;
 static unsigned char ring[RING][3];
 static unsigned head;   /* messages written so far (the ring keeps the last RING) */
 
+static void shortcut(unsigned char d1, unsigned char d2) {
+    static unsigned char high[4];
+    const int k = d1 - 89;
+    if (k < 0 || k > 3) return;
+    const int on = d2 >= 64;
+    if (on && !high[k]) {
+        const int fd = open("/tmp/mpc-shortcut", O_WRONLY | O_NONBLOCK | O_CLOEXEC);   /* (no mpc-remote: nothing) */
+        if (fd >= 0) { const char c = (char)('1' + k); if (write(fd, &c, 1) < 0) {} close(fd); }
+    }
+    high[k] = (unsigned char)on;
+}
+
 static void put(unsigned char st, unsigned char d1, unsigned char d2) {
+    if ((st & 0xf0) == 0xb0) shortcut(d1, d2);
     const unsigned at = __atomic_load_n(&head, __ATOMIC_ACQUIRE);
     ring[at % RING][0] = st; ring[at % RING][1] = d1; ring[at % RING][2] = d2;
     __atomic_store_n(&head, at + 1, __ATOMIC_RELEASE);   /* (MPC reads its inputs from one thread at a time) */

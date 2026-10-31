@@ -279,6 +279,11 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   on a chunk plugin's chunk). The CCs are the plugins' own (Duo 80-88 + PC, Quad 81-85 + 64, Ambient 64 + PC 0-14 preset / 16-26 machine).
   Test: `tools/midi_test.c` (stands in for the add-on; steps set/send/expect/reload). Device-untested: which read
   path MPC uses for 5-pin/USB MIDI (both are hooked; /tmp/mpc-buttons.log names the raw MIDI inputs MPC opens).
+- **Shortcuts** (Oct 2026; MPC's Tuner has no key or MIDI command, the user found no shortcut): the remote's Learn
+  buttons dialog records up to 4 shortcuts (Record, do it on the MPC: panel MIDI from the controller's port + the
+  touchscreen's raw evdev events, unGRABbed, pauses capped at 0.7 s; Stop) into /data/mpc-remote/shortcut<n>;
+  MIDI CC 89-92 (any channel, rising past 64) replays 1-4: extmidi.c writes the digit to mpc-remote's FIFO
+  /tmp/mpc-shortcut. Tested offline with the fake build (fakesc / faketouch hooks); device-untested.
 - **Narrow sliders** (`slider_v ... narrow=1`, tools/page_lists.py): the kit's slider is a 130+ px component (square
   filmstrip, live name/value under it), so GQ31's 31 bands side by side would overlap and a touch could move the next
   band. A narrow one is exactly its own size, with its own filmstrip (`fader_strip`: a fader drawn with PIL, frames

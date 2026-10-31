@@ -57,6 +57,7 @@
   #bstat { color: var(--dim); font-size: 13px; }
   #bview { cursor: default; }
   #lrn .small { margin-top: 18px; font-size: 13px; color: var(--dim); }
+  #scs div { margin: 6px 0; } #scs span { display: inline-block; min-width: 150px; }
 </style>
 </head>
 <body>
@@ -123,6 +124,10 @@
   <h2>Learn buttons</h2>
   <p id="lrntext"></p>
   <button id="lrnskip" type="button">Skip</button> <button id="lrncancel" type="button">Done</button>
+  <h2 style="margin-top:22px">Shortcuts</h2>
+  <p class="small" id="sctext">For what MPC has no button for (its Tuner): press Record, do it on the MPC itself (press
+    MENU, tap Tuner), then press Stop. MIDI CC 89-92 (any channel) from a controller then does it again.</p>
+  <div id="scs"></div>
   <p class="small">If the MPC's own buttons or pads ever act up with this firmware, switch the button input off here
     and restart the MPC: <button id="lrnoff" type="button">Button input off</button></p>
 </div></div>
@@ -174,6 +179,7 @@ function onText(m) {
     if (m.name) { lrnText.innerHTML = "On the MPC, press and release <b>" + LABEL[m.name] + "</b>."; return; }
     if (m.done) { learned.add(m.done); showPad(); return learnNext(); }
     if (m.error) { lrnEl.classList.remove("on"); learning = -1; setStatus("learn buttons: " + m.error); }
+  } else if (m.type === "sc") { showShortcuts(m);
   } else if (m.type === "bnote") { bStat.textContent = m.note;
   } else if (m.type === "browser") { onBrowser(m);
   } else if (m.type === "btn") {
@@ -288,7 +294,31 @@ function learnNext() {
   if (++learning >= todo.length) { lrnEl.classList.remove("on"); learning = -1; setStatus("buttons learned"); return; }
   send("learn " + todo[learning]);
 }
+// shortcuts: recorded on the MPC, done again on MIDI CC 89-92 (mpc-remote.c)
+const scEl = document.getElementById("scs"), scText = document.getElementById("sctext");
+function showShortcuts(m) {
+  if (m.error) { scText.textContent = "Shortcuts: " + m.error; return; }
+  scEl.textContent = "";
+  for (let k = 0; k < 4; k++) {
+    const row = document.createElement("div"), label = document.createElement("span");
+    const rec = m.rec === k;
+    label.textContent = (k + 1) + " (CC " + (89 + k) + "): " + (rec ? "recording…" : m.n[k] ? m.n[k] + " steps" : "empty");
+    row.appendChild(label);
+    const add = (text, cmd, off) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.textContent = text; b.disabled = !!off;
+      b.onclick = () => send(cmd);
+      row.appendChild(b); row.appendChild(document.createTextNode(" "));
+    };
+    if (rec) add("Stop", "sc stop");
+    else add("Record", "sc rec " + (k + 1), m.rec >= 0);
+    add("Play", "sc play " + (k + 1), !m.n[k] || m.rec >= 0);
+    add("Clear", "sc clear " + (k + 1), !m.n[k] || m.rec >= 0);
+    scEl.appendChild(row);
+  }
+}
 document.getElementById("lrnbtn").onclick = () => {
+  send("sc status");
   todo = ORDER.filter((n) => !learned.has(n));   // new ones only; everything again once all are learned
   if (!todo.length) todo = ORDER;
   learning = -1; lrnText.textContent = "…"; lrnEl.classList.add("on"); learnNext(); };
