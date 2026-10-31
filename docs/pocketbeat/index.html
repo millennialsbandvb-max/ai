@@ -99,8 +99,8 @@
   <input type="range" id="thr" min="0.3" max="3" step="0.05" value="0.8">
 </div>
 <div class="ctl" id="liftCtl">
-  <label for="lthr">Snare: lift above (last lift: <span id="liftLast">—</span>)</label><output id="lthrOut"></output>
-  <input type="range" id="lthr" min="0.05" max="1.5" step="0.01" value="0.35">
+  <label for="lthr">Snare: air time above (last: <span id="liftLast">—</span>)</label><output id="lthrOut"></output>
+  <input type="range" id="lthr" min="100" max="900" step="10" value="320">
 </div>
 <div class="ctl" id="hardCtl" hidden>
   <label for="sthr">Snare: hard stomp above</label><output id="sthrOut"></output>
@@ -114,7 +114,7 @@
   <label for="vol">Volume</label><output id="volOut"></output>
   <input type="range" id="vol" min="0" max="100" step="1" value="85">
 </div>
-<p class="hint">Tap = kick. For a snare, lift your foot higher before it lands (or switch to hard-stomp mode). The lift number is how much the phone moved in the half second before impact; set the slider between your normal tap's number and your high lift's number. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each stomp is nudged onto the nearest grid line so kicks and snares sit square with the hats. Stop for two beats and the clock stops. Orange line = kick threshold, yellow line = snare threshold.</p>
+<p class="hint">Tap = kick. For a snare, lift your foot higher before it lands (or switch to hard-stomp mode). The app times how long your foot was in motion before it landed: a quick tap is short, a high lift is long. Do a few taps and a few high lifts, read the "last" number for each, and set the slider between them. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each stomp is nudged onto the nearest grid line so kicks and snares sit square with the hats. Stop for two beats and the clock stops. Orange line = kick threshold, yellow line = snare threshold.</p>
 <p class="err" id="err" hidden></p>
 <p class="hint" id="diag"></p>
 <button class="big" id="go" type="button">Start</button>
@@ -266,21 +266,30 @@
       }
     } else if (peakT) fire(now);
   }
-  // Lift = average movement (g) in the window 500 ms → 50 ms before the impact.
-  // A foot that comes up high swings the phone more before it lands.
+  // Air time = how long the foot was moving before it landed. Walk back from the impact
+  // through the history until we find a stretch of ~60 ms where the phone was nearly still
+  // (below the quiet level); the lift started when that stillness ended. A quick tap is
+  // ~150-250 ms; a high lift is 400 ms or more.
   function liftBefore(t) {
-    let sum = 0, n = 0;
-    for (let i = 0; i < HN; i++) {
-      const dt = t - hT[i];
-      if (dt > 50 && dt < 500) { sum += hM[i]; n++; }
+    const quiet = Math.max(0.08, +$('thr').value * 0.2);
+    // collect samples in the last 1.2 s, newest first
+    const idx = [];
+    for (let k = 1; k <= HN; k++) { const i = (hi - k + HN) % HN; if (t - hT[i] > 1200 || hT[i] === 0) break; idx.push(i); }
+    let stillSince = -1;
+    for (const i of idx) {
+      if (t - hT[i] < 40) continue;            // skip the impact spike itself
+      if (hM[i] < quiet) {
+        if (stillSince < 0) stillSince = hT[i];
+        else if (stillSince - hT[i] >= 60) return t - stillSince; // found 60 ms of stillness
+      } else stillSince = -1;
     }
-    return n ? sum / n : 0;
+    return idx.length ? t - hT[idx[idx.length - 1]] : 0; // never still: moving the whole window
   }
   function fire(now) {
     const p = peak, sthr = +$('sthr').value, lthr = +$('lthr').value;
     const lift = liftBefore(peakT || now);
     peak = 0; peakT = 0; lastHit = now;
-    $('liftLast').textContent = lift.toFixed(2) + ' g';
+    $('liftLast').textContent = Math.round(lift) + ' ms';
     const isSnare = snareMode === 'lift' ? lift >= lthr : p >= sthr;
     if (isSnare) onStomp('snare', Math.min(1, 0.7 + 0.3 * (p / (sthr * 2))));
     else onStomp('kick', Math.min(1, 0.6 + 0.4 * (p / sthr)));
@@ -310,7 +319,7 @@
   const bind = (id, out, fmt) => { const el = $(id); const f = () => $(out).textContent = fmt(el.value); el.addEventListener('input', f); f(); };
   bind('thr', 'thrOut', v => (+v).toFixed(2) + ' g');
   bind('sthr', 'sthrOut', v => (+v).toFixed(2) + ' g');
-  bind('lthr', 'lthrOut', v => (+v).toFixed(2) + ' g');
+  bind('lthr', 'lthrOut', v => v + ' ms');
   bind('gap', 'gapOut', v => v + ' ms');
   bind('vol', 'volOut', v => v + '%');
   $('vol').addEventListener('input', () => { if (master) master.gain.value = $('vol').value / 100; });
