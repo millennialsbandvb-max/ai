@@ -3,7 +3,9 @@
  * 10 s of silence stays finite and under the +12 dB ceiling, and (except at maximum, where feedback / decay may hold)
  * dies away. Then what some should do: Rainbow Mchn +12 makes the octave, Data Korrupt's /2 sub is an octave under,
  * Tensr at half speed is an octave down, Hedr4's voice repeats after its Time, Mikrocosm's Hold keeps sounding after
- * you stop, NiteSky / Cloudbrst ring on; every preset plays; CPU per machine. */
+ * you stop, NiteSky / Cloudbrst ring on; each of Mikrocosm's 44 effects makes sound and stays sane; Hedr4 in key
+ * corrects a voice onto the scale; Moodd's loop keeps playing when held; each machine has 15 presets and every one
+ * plays; CPU per machine. */
 #include <dlfcn.h>
 #include <math.h>
 #include <stdio.h>
@@ -133,7 +135,7 @@ int main(int argc, char **argv) {
     }
     {   /* Tensr at half speed: an octave down */
         AEffect *e = make(3, 1.0f);
-        set_text(e, "Speed", "0.50x"); set_text(e, "Stretch", "1.00x"); set_text(e, "Chance", "0%"); set_text(e, "Wow", "0%");
+        set_text(e, "Speed", "0.50x"); set_text(e, "Stretch", "1.00x"); set_text(e, "Chance", "0%"); set_text(e, "Direction", "Fwd");
         set_text(e, "Pitch", "+0"); set_text(e, "Tone", "100%"); set_text(e, "Length", "4.00");
         hz_in = 440;
         render(e, 3, g_sine, &peak);
@@ -181,24 +183,74 @@ int main(int argc, char **argv) {
         CHECK(tail > 0.003, "a reverb machine doesn't ring on");
         e->dispatcher(e, effClose, 0, 0, NULL, 0);
     }
-    {   /* every preset */
-        AEffect *e = make(0, 0.5f);
-        int n = 0, bad = 0;
-        char first[64] = "", t[64];
-        for (;;) {
-            e->setParameter(e, kPresetNext, 1);
-            e->dispatcher(e, effGetParamDisplay, kPreset, 0, t, 0);
-            if (!strcmp(t, first)) break;
-            if (!n) strcpy(first, t);
-            n++;
-            e->dispatcher(e, effMainsChanged, 0, 1, NULL, 0);
-            const int ok = render(e, 10, g_music, &peak);
-            if (!ok || peak >= 3.99f) { printf("  FAIL  preset %s (peak %.2f)\n", t, peak); bad++; }
-            if (n > 100) break;
+    {   /* Mikrocosm: every effect at its defaults, random Activity / Shape */
+        int quiet = 0, bad = 0;
+        for (int fx = 0; fx < 44; fx++) {
+            AEffect *e = make(0, 1.0f);
+            e->setParameter(e, kK, (float)fx / 43);
+            char t[64] = {0};
+            e->dispatcher(e, effGetParamDisplay, kK, 0, t, 0);
+            for (int k = 1; k < 3; k++) e->setParameter(e, kK + k, (float)rand() / RAND_MAX);
+            const int ok = render(e, 8, g_music, &peak);
+            const double during = rms(FS, 6 * FS);
+            if (!ok || peak >= 3.99f) { printf("  FAIL  Mikrocosm %s: %s (peak %.2f)\n", t, ok ? "ceiling" : "not finite", peak); bad++; }
+            if (during < 0.01) { printf("  FAIL  Mikrocosm %s is quiet (rms %.4f)\n", t, during); quiet++; }
+            e->dispatcher(e, effClose, 0, 0, NULL, 0);
         }
-        printf("  presets: %d played, %d bad\n", n, bad);
-        CHECK(n >= 30 && !bad, "the presets");
+        printf("  Mikrocosm's 44 effects: %d quiet, %d bad\n", quiet, bad);
+        failures += quiet + bad;
+    }
+    {   /* Hedr4: Pitch +1 on A 440: in C Major it lands on the scale (A), Off makes Bb */
+        for (int sc = 0; sc < 2; sc++) {
+            AEffect *e = make(7, 1.0f);
+            set_text(e, "Pitch 1", "+1"); set_text(e, "Pitch 2", "+1"); set_text(e, "Pitch 3", "+1");
+            set_text(e, "Time", "20"); set_text(e, "Feedback", "0%"); set_text(e, "Key", "C"); set_text(e, "Scale", sc ? "Major" : "Off");
+            hz_in = 440;
+            render(e, 3, g_sine, &peak);
+            const double a4 = tone(FS, 3 * FS, 440), bb = tone(FS, 3 * FS, 466.16);
+            printf("  Hedr4 +1 on 440 Hz, Scale %s: 440 Hz %.3f, 466 Hz %.3f\n", sc ? "C Major" : "Off", a4, bb);
+            CHECK(sc ? a4 > 3 * bb : bb > 3 * a4, sc ? "Hedr4 in key doesn't correct onto the scale" : "Hedr4 doesn't shift a semitone");
+            e->dispatcher(e, effClose, 0, 0, NULL, 0);
+        }
+    }
+    {   /* Moodd MK2: the loop alone, held, keeps playing */
+        AEffect *e = make(1, 1.0f);
+        set_text(e, "Balance", "100%"); set_text(e, "Loop", "Tape");
+        render(e, 3, g_music, &peak);
+        e->setParameter(e, kHold, 1);
+        render(e, 4, g_zero, &peak);
+        const double held = rms(2 * FS, 4 * FS);
+        printf("  Moodd MK2 loop held, 2-4 s after the input stops: rms %.4f\n", held);
+        CHECK(held > 0.01, "Moodd's held loop doesn't keep playing");
         e->dispatcher(e, effClose, 0, 0, NULL, 0);
+    }
+    {   /* every preset: 15 per machine, stepped with > */
+        int total = 0, bad = 0;
+        for (int m = 0; m < NM; m++) {
+            AEffect *e = make(m, 0.5f);
+            int n = 0;
+            char first[64] = "", t[64];
+            for (;;) {
+                e->setParameter(e, kPresetNext, 1);
+                e->dispatcher(e, effGetParamDisplay, kPreset, 0, t, 0);
+                if (!strcmp(t, first)) break;
+                if (!n) strcpy(first, t);
+                char mn[64] = {0};
+                e->dispatcher(e, effGetParamDisplay, kMachine, 0, mn, 0);
+                if (strcmp(mn, names[m])) { printf("  FAIL  preset %s left %s\n", t, names[m]); bad++; }
+                n++;
+                e->dispatcher(e, effMainsChanged, 0, 1, NULL, 0);
+                const int ok = render(e, 8, g_music, &peak);
+                const double during = rms(FS, 6 * FS);
+                if (!ok || peak >= 3.99f || during < 0.005) { printf("  FAIL  preset %s (peak %.2f, rms %.4f)\n", t, peak, during); bad++; }
+                if (n > 30) break;
+            }
+            if (n != 15) { printf("  FAIL  %s has %d presets\n", names[m], n); bad++; }
+            total += n;
+            e->dispatcher(e, effClose, 0, 0, NULL, 0);
+        }
+        printf("  presets: %d played, %d bad\n", total, bad);
+        CHECK(total == 165 && !bad, "the presets");
     }
     printf("CPU (128-frame blocks at 48 kHz, this machine)\n");
     for (int m = 0; m < NM; m++) {

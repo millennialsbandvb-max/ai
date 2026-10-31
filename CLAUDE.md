@@ -44,7 +44,7 @@ Tools needed: arm-linux-gnueabihf-gcc/g++, cmake, ninja, qemu-arm, python3 + PIL
 | `duofx-mpc/` | **Duo FX**, an H90-style dual multi-effect (our own DSP, `src/duo_fx.c`): slots A and B, each one of 57 algorithms in 6 groups (delay, distortion, pitch, modulation, reverb, granular; table `ALGOS[]`), series/parallel; page in `page/` (PROGRAM, A, B tabs, Eventide-Control-like dark theme); `test/duo_test.c` | ours |
 | `trichorus-mpc/` | **Tri Chorus**: a three-voice bucket-brigade chorus in the spirit of the classic tri-chorus (our own DSP, `src/tri_chorus.c`; no Eventide name/art): voices 120 degrees apart panned L/C/R, slow LFO + ensemble wobble, Chorus/Vibrato, pitch-shifted Shimmer layer; page in `page/`; `test/tri_test.c` | ours |
 | `vocal-mpc/` | **Vocal plugins** (our own DSP; shared `src/vocal_core.h`: param table + params.json, biquads, FDN reverb, YIN tracker, scales/chords, held MIDI, TD-PSOLA voice): **VoxLive 3X** (`voxlive.c`, VoiceLive-3-Extreme-like: 4 voices, Scale / MIDI Chord / MIDI Notes, lead tune, double, humanize, gender, 21 styles), **HedRush Harmony** (`rush_harmony.c`, HeadRush-style 2-voice key/scale harmonizer), **Vocal Rack** (`vocal_rack.c`: gate, EQ, de-ess, comp, tune, FX, double, delay, reverb, 17 presets); pages in `page/<voxlive|rush|rack>/`; `test/vocal_test.c` | ours |
-| `ambient-mpc/` | **Ambient Lab** (our own DSP, `src/ambient.c`, using `vocal-mpc/src/vocal_core.h`): 11 machines after ambient pedals (Mikrocosm granular looper, Moodd MK2 micro-looper, Partikle granular delay, Tensr tape stretch, NiteSky sequenced-filter shimmer, Cloudbrst swell/ensemble reverb, Polym00n cascading delays, Hedr4 3-voice pitched delay, Aftrneath delay swarm, Rainbow Mchn warbling shifter, Data Korrupt subharmonic synth); 8 knobs per machine (`MACHINES[]`, names live via effGetParamName), Hold (freeze; MIDI CC 64), 35 presets; `test/ambient_test.c` | ours |
+| `ambient-mpc/` | **Ambient Lab** (our own DSP, `src/ambient.c`, using `vocal-mpc/src/vocal_core.h`): 11 machines after ambient pedals (Mikrocosm granular looper with 44 effects, Moodd MK2 wet channel + micro-looper, Partikle granular delay with 8 modes, Tensr tape stretch, NiteSky sequenced-filter shimmer, Cloudbrst swell/ensemble reverb, Polym00n cascading delays, Hedr4 3-voice pitched delay in key, Aftrneath delay swarm, Rainbow Mchn warbling shifter, Data Korrupt subharmonic synth); 8 knobs per machine (`MACHINES[]`, names live via effGetParamName), Hold (freeze; MIDI CC 64), 15 presets per machine (165); `test/ambient_test.c` | ours |
 | `quadrig-mpc/` | **Quad Rig** (`src/quad_rig.c`): four effect slots (each any Duo FX algorithm or Ambient Lab machine, or Off) + a NAM MPC amp at a movable position; it hosts the real engines (duo_fx.c, ambient.c, nam_mpc.cpp compiled with VSTPluginMain renamed duo_entry / amb_entry / nam_entry) and passes parameters through; page RIG / FX 1-4 / AMP; `test/quad_test.c` | ours |
 | `eq-mpc/` | **EQs** (our own DSP, on `vocal-mpc/src/vocal_core.h`): **31 Smashly** (the user's name for it; files/folder key still GQ31: `graphic_eq.c`, page `gq31`; rack-graphic style, the classic light green-grey face: 31 ISO 1/3-octave constant-Q bands, Range +/-12 / +/-6, 18 dB/oct High-Pass / Low-Pass, Level, EQ, Flat; page of 31 `narrow=1` sliders) and **X-Para EQ** (`para_eq.c`, console channel EQ like the X32's: Low Cut + 4 bands of Type LCut/LShv/PEQ/VEQ/HShv/HCut, Freq, Gain +/-15, Q 0.3-10); and **Fairchyld 670** (`fair_comp.c`, a 660/670-style vari-mu compressor laid out like the X32's "fair" one: Input, Threshold 0-10, Time 1-6 (the original's constants, 5 and 6 program dependent), Bias (knee/ratio), Output, Mix, Mode Linked/Dual/Lat-Vert, a feedback detector, tube colour; read-only GR drives the page's VU needle); pages in `page/<gq31|xpara|fair>/`; `test/eq_test.c` measures the EQs' responses, `test/comp_test.c` the compressor | ours |
 | `browser-mpc/` | **MPC Browser** plugin: its page's lower area is painted `OVERLAY_MARKER`; the browser shows there on the MPC's own screen (see `mpc-remote/overlay.h`) | ours |
@@ -213,6 +213,18 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   weights sum to one; Rainbow's Magic is reduced with the Second voice): the random-settings test found each.
   Grains read the recording by "samples ago" (d += recording - rate). Untested on the device (CPU: 0.3-2.5% of a
   PC core per machine).
+  Rework (Oct 2026, the user's ask, "factory preset copies or as close as you can get"): Mikrocosm = the Microcosm's
+  11 algorithms x A-D (Effect knob, 44; Activity, Shape, Time = the beat, Repeats (feedback, divided by how loud the
+  grains add up and by the filter's resonance peak), Filter, Space, Reso; an onset detector feeds Strum / Tunnel);
+  Moodd MK2 = Wet (Reverb/Delay/Slip) + Loop (Env/Tape/Stretch), Clock (lo-fi), Balance; Partikle Mode (8);
+  Tensr Direction (Fwd/Rev/Alt); Hedr4 Key + Scale (Off = semitones; else each voice lands on the scale note nearest
+  its interval, from the tracked pitch of what that voice reads, ties toward the input). Grains can glide (r0 -> r1)
+  and have a shaped envelope (smoothstep halves: 50% overlap still sums to one) and a bus. Presets: 15 per machine,
+  machine-major; Polym00n's and Hedr4's are 15 of the pedals' 16 factory preset names with their tempos (settings
+  guessed from the names: the sheets' knob positions are pictures), Mikrocosm's are 15 of its effects, the rest are
+  ours. The preset stepper, list and < > stay within the current machine. MIDI: Program Change 0-14 = the machine's
+  preset 1-15, 16-26 = the machine. Saved projects with the old Mikrocosm/Moodd/Partikle/Tensr/Hedr4 knobs come
+  back with other meanings (knob indices unchanged).
 - **Quad Rig** (shown as "0Quad Rig" since Oct 2026, so it lists first; files and page folder key stay Quad-Rig /
   "Other Things - VST - 0Quad Rig"; nam-mpc-boot.sh replaces an MPC.settings entry whose name= changed): 4 Duo FX engines (slot A only, B Off), 4 Ambient Lab engines and 1 NAM engine per instance (~60 MB);
   only a slot's chosen engine runs. Engines report automation through engine_host (it finds the owner by AEffect
@@ -264,7 +276,7 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   ring; `mpc_ext_midi_read` is found by the plugins as a weak symbol (no dlsym, no -ldl). picklist.h with
   PickLists.midi=1 (Duo FX, Ambient Lab, Quad Rig) reads it each block and sends the plugin those on its MIDI Ch
   (midi_ch: Omni / 1..16, a stepper with its own list; saved as a parameter, or as a 16-byte "PLWMIDI NN" trailer
-  on a chunk plugin's chunk). The CCs are the plugins' own (Duo 80-88 + PC, Quad 81-85 + 64, Ambient 64 + PC).
+  on a chunk plugin's chunk). The CCs are the plugins' own (Duo 80-88 + PC, Quad 81-85 + 64, Ambient 64 + PC 0-14 preset / 16-26 machine).
   Test: `tools/midi_test.c` (stands in for the add-on; steps set/send/expect/reload). Device-untested: which read
   path MPC uses for 5-pin/USB MIDI (both are hooked; /tmp/mpc-buttons.log names the raw MIDI inputs MPC opens).
 - **Narrow sliders** (`slider_v ... narrow=1`, tools/page_lists.py): the kit's slider is a 130+ px component (square

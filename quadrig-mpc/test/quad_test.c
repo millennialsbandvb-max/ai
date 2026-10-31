@@ -107,7 +107,7 @@ int main(int argc, char **argv) {
     set_text(e, fx1, "Mikrocosm");
     e->dispatcher(e, effGetParamName, mix1 + 1, 0, k1, 0);
     printf("  FX1 = Mikrocosm: knob 1 \"%s\"\n", k1);
-    CHECK(!strcmp(k1, "Activity"), "knob 1 isn't Mikrocosm's Activity");
+    CHECK(!strcmp(k1, "Effect"), "knob 1 isn't Mikrocosm's Effect");
     /* a preset step (Duo FX's) changes the knobs */
     set_text(e, fx1, "Tape Echo");
     const float before = e->getParameter(e, mix1 + 1);
