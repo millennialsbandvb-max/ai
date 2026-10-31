@@ -186,8 +186,8 @@
   function tick() {
     if (!clockOn) return;
     const now = ctx.currentTime;
-    // Stop if the player has gone quiet for ~2 beats.
-    if (now - lastStompT > beatSec * 2.2) { stopClock(); return; }
+    // Keep going until the player has been quiet for a whole bar (4 beats, plus a little slack).
+    if (now - lastStompT > beatSec * 4.5) { stopClock(); return; }
     const sub = hatMode === 2 ? beatSec / 2 : beatSec; // hat spacing
     if (hatMode === 0) { nextHat = now + sub; return; }
     while (nextHat < now + LOOKAHEAD) {
@@ -211,8 +211,15 @@
     const now = ctx.currentTime;
     stomps++; $('nKick').textContent = stomps;
     if (lastStompT) {
-      const dt = now - lastStompT;
-      if (dt > 0.2 && dt < 2.5) { intervals.push(dt); if (intervals.length > 4) intervals.shift(); }
+      let dt = now - lastStompT;
+      if (beatSec) {
+        // Only trust gaps that look like a beat. A gap near two beats means a beat was
+        // skipped (count it as two); half-beat gaps (double-time fills) are ignored.
+        const r = dt / beatSec;
+        if (r > 1.7 && r < 2.3) dt /= 2;
+        else if (r < 0.75 || r > 1.33) dt = 0;
+      }
+      if (dt > 0.2 && dt < 2.5) { intervals.push(dt); if (intervals.length > 8) intervals.shift(); }
     }
     lastStompT = now;
 
@@ -222,16 +229,18 @@
       beatSec = median(intervals); startClock(now);
     } else if (beatSec) {
       // Update tempo smoothly, keeping the grid continuous through the last anchor.
+      // Tempo moves slowly toward the median of the last 8 good gaps, so one rushed
+      // or dragged hit barely moves it, while a real tempo change follows over a few bars.
       const newBeat = median(intervals);
-      beatSec += 0.5 * (newBeat - beatSec);
+      beatSec += 0.15 * (newBeat - beatSec);
       // Quantize: snap to the nearest grid line (8ths or 16ths of the beat).
       const g = quant ? beatSec / quant : beatSec;
       const k = Math.round((now - anchor) / g);
       const grid = anchor + k * g;
-      if (quant) when = grid >= now - 0.005 ? grid : now; // early → wait for the line; late → play now
+      if (quant && grid - now < 0.09) when = grid >= now - 0.005 ? grid : now; // early → wait for the line (up to 90 ms); late → play now
       // Soft phase lock: pull the grid a third of the way toward where the player actually hit.
       const errBeat = now - (anchor + Math.round((now - anchor) / beatSec) * beatSec);
-      anchor += 0.33 * errBeat;
+      anchor += 0.2 * errBeat;
       // Re-align the hat scheduler to the nudged grid.
       const sub = hatMode === 2 ? beatSec / 2 : beatSec;
       nextHat = anchor + Math.ceil((Math.max(nextHat, now) - anchor) / sub - 1e-4) * sub;
