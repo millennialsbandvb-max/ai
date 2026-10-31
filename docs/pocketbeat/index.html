@@ -47,7 +47,7 @@
   .beats i { flex: 1; height: 10px; border-radius: 5px; background: var(--line); }
   .beats i.k { background: var(--kick); } .beats i.s { background: var(--snare); }
   .seg { flex: none; display: flex; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
-  .seg button { flex: 1; background: none; border: 0; color: var(--muted); padding: 10px 4px; font-size: 13px; cursor: pointer; }
+  .seg button { flex: 1; background: none; border: 0; color: var(--muted); padding: 10px 4px; font-size: 12px; line-height: 1.2; cursor: pointer; }
   .seg button.on { background: var(--fg); color: var(--bg); font-weight: 600; }
   .ctl { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px; }
   .ctl label { font-size: 13px; }
@@ -90,7 +90,8 @@
 <h2>Snare trigger</h2>
 <div class="seg" id="snSeg">
   <button type="button" data-sn="swing" class="on">Swing right</button>
-  <button type="button" data-sn="hard">Hard stomp</button>
+  <button type="button" data-sn="hardkick">Tap = snare, stomp = kick</button>
+  <button type="button" data-sn="hard">Tap = kick, stomp = snare</button>
 </div>
 <div class="tile" id="measures" style="flex:none">
   <div class="mrow"><div><b id="mPeak">—</b><span>last stomp · g</span></div><div><b id="mSwing">—</b><span>last swing · m/s</span></div><div><b id="calState">not set</b><span>right direction</span></div></div>
@@ -110,7 +111,7 @@
 </div>
 
 <div class="ctl">
-  <label for="thr">Kick: tap above</label><output id="thrOut"></output>
+  <label for="thr">Tap above</label><output id="thrOut"></output>
   <input type="range" id="thr" min="0.3" max="12" step="0.05" value="0.8">
 </div>
 <div class="ctl" id="swingCtl">
@@ -118,7 +119,7 @@
   <input type="range" id="swthr" min="0.05" max="3" step="0.05" value="0.35">
 </div>
 <div class="ctl" id="hardCtl" hidden>
-  <label for="sthr">Snare: hard stomp above</label><output id="sthrOut"></output>
+  <label for="sthr">Hard stomp above</label><output id="sthrOut"></output>
   <input type="range" id="sthr" min="0.5" max="20" step="0.05" value="1.8">
 </div>
 <div class="ctl">
@@ -129,7 +130,7 @@
   <label for="vol">Volume</label><output id="volOut"></output>
   <input type="range" id="vol" min="0" max="100" step="1" value="85">
 </div>
-<p class="hint">Pocket / Sock just sets starting thresholds (impacts read several times harder in a sock); fine-tune with the sliders. Stomp = kick. Snare is either a swing out to the right, or in Hard stomp mode, any stomp that reads above the yellow line. Once, with the phone in your pocket: tap "Set right", then do one clear swing to the right; the app remembers that direction (saved on this phone). After that, any swing that way faster than the slider's speed is a snare, and the stomp detector ignores the swing so you don't get a kick at the same time. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each hit is nudged onto the nearest grid line.</p>
+<p class="hint">Pocket / Sock just sets starting thresholds (impacts read several times harder in a sock); fine-tune with the sliders. Stomp = kick. Snare is either a swing out to the right, or in the stomp modes, a light tap and a hard stomp are told apart by the two lines on the meter (pick which one is the kick). Once, with the phone in your pocket: tap "Set right", then do one clear swing to the right; the app remembers that direction (saved on this phone). After that, any swing that way faster than the slider's speed is a snare, and the stomp detector ignores the swing so you don't get a kick at the same time. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each hit is nudged onto the nearest grid line.</p>
 <p class="err" id="err" hidden></p>
 <p class="hint" id="diag"></p>
 <button class="big" id="go" type="button">Start</button>
@@ -341,8 +342,10 @@
   function fire(now) {
     const p = peak, sthr = +$('sthr').value; peak = 0; peakT = 0; lastHit = now;
     $('mPeak').textContent = p.toFixed(2);
-    if (snareMode === 'hard' && p >= sthr) onStomp('snare', Math.min(1, 0.7 + 0.3 * (p / (sthr * 2))));
-    else onStomp('kick', Math.min(1, 0.6 + 0.4 * (p / (snareMode === 'hard' ? sthr : 2))));
+    const hardMode = snareMode !== 'swing', isHard = hardMode && p >= sthr;
+    const hardKind = snareMode === 'hardkick' ? 'kick' : 'snare', softKind = snareMode === 'hardkick' ? 'snare' : 'kick';
+    if (isHard) onStomp(hardKind, Math.min(1, 0.7 + 0.3 * (p / (sthr * 2))));
+    else onStomp(hardMode ? softKind : 'kick', Math.min(1, 0.6 + 0.4 * (p / (hardMode ? sthr : 2))));
   }
   function startCal() {
     calibrating = true; calBest = 0; calEnd = performance.now() + 2500;
@@ -361,11 +364,11 @@
   // ---------- Scope ----------
   const cv = $('scope'), g2 = cv.getContext('2d');
   function draw() {
-    const w = cv.width, h = cv.height, thr = +$('thr').value, sthr = +$('sthr').value, scale = snareMode === 'hard' ? Math.max(sthr * 1.5, 1.5) : Math.max(thr * 3, 1.5);
+    const w = cv.width, h = cv.height, thr = +$('thr').value, sthr = +$('sthr').value, scale = snareMode !== 'swing' ? Math.max(sthr * 1.5, 1.5) : Math.max(thr * 3, 1.5);
     g2.clearRect(0, 0, w, h);
     const y = v => h - Math.min(1, v / scale) * h;
     g2.lineWidth = 2; g2.setLineDash([8, 8]);
-    for (const [v, c] of snareMode === 'hard' ? [[thr, colors.kick], [sthr, colors.snare]] : [[thr, colors.kick]]) {
+    for (const [v, c] of snareMode === 'hard' ? [[thr, colors.kick], [sthr, colors.snare]] : snareMode === 'hardkick' ? [[thr, colors.snare], [sthr, colors.kick]] : [[thr, colors.kick]]) {
       g2.strokeStyle = c; g2.beginPath(); g2.moveTo(0, y(v)); g2.lineTo(w, y(v)); g2.stroke();
     }
     g2.setLineDash([]); g2.strokeStyle = '#f2efe6'; g2.lineWidth = 3; g2.beginPath();
@@ -394,7 +397,7 @@
   });
   seg('hatSeg', 'hat', v => { hatMode = +v; if (clockOn && beatSec) { nextHat = lastHatSched + hatSub(); } });
   seg('qSeg', 'q', v => quant = +v);
-  seg('snSeg', 'sn', v => { snareMode = v; $('swingCtl').hidden = v !== 'swing'; $('hardCtl').hidden = v !== 'hard'; });
+  seg('snSeg', 'sn', v => { snareMode = v; $('swingCtl').hidden = v !== 'swing'; $('hardCtl').hidden = v === 'swing'; });
   seg('placeSeg', 'place', v => { const p = presets[v]; setRange('thr', p.thr); setRange('sthr', p.sthr); setRange('gap', p.gap); });
 
   let running = false, wakeLock = null;
