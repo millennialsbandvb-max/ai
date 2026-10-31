@@ -33,7 +33,7 @@
   .meter .flash.on { opacity: .45; transition: none; }
   .meter .label { position: absolute; left: 14px; top: 10px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
   .meter .last { position: absolute; right: 14px; top: 8px; font-family: var(--font-display); font-size: 40px; font-weight: 700; letter-spacing: .04em; line-height: 1; }
-  .mrow { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 4px; }
+  .mrow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 4px; }
   .mrow b { font-size: 22px !important; }
   .mrow span { font-size: 10px !important; }
   .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -81,14 +81,15 @@
 
 <h2>Snare trigger</h2>
 <div class="seg" id="snSeg">
-  <button type="button" data-sn="up" class="on">Up speed</button>
+  <button type="button" data-sn="dir" class="on">Up / Down</button>
+  <button type="button" data-sn="up">Up speed</button>
   <button type="button" data-sn="move">Movement</button>
   <button type="button" data-sn="lift">Air time</button>
   <button type="button" data-sn="hard">Hard stomp</button>
 </div>
 <div class="tile" id="measures" style="flex:none">
   <span>last stomp measured</span>
-  <div class="mrow"><div><b id="mUp">—</b><span>up speed · m/s</span></div><div><b id="mMove">—</b><span>movement · g</span></div><div><b id="mAir">—</b><span>air time · ms</span></div><div><b id="mPeak">—</b><span>impact · g</span></div></div>
+  <div class="mrow"><div><b id="mDir">—</b><span>dir · m/s</span></div><div><b id="mUp">—</b><span>up speed · m/s</span></div><div><b id="mMove">—</b><span>movement · g</span></div><div><b id="mAir">—</b><span>air time · ms</span></div><div><b id="mPeak">—</b><span>impact · g</span></div></div>
 </div>
 <h2>Quantize stomps to</h2>
 <div class="seg" id="qSeg">
@@ -107,7 +108,11 @@
   <label for="thr">Kick: soft stomp above</label><output id="thrOut"></output>
   <input type="range" id="thr" min="0.3" max="3" step="0.05" value="0.8">
 </div>
-<div class="ctl" id="upCtl">
+<div class="ctl" id="dirCtl">
+  <label for="dthr">Direction sensitivity (how clearly up/down must read)</label><output id="dthrOut"></output>
+  <input type="range" id="dthr" min="0" max="0.6" step="0.01" value="0.08">
+</div>
+<div class="ctl" id="upCtl" hidden>
   <label for="uthr">Snare: up speed above</label><output id="uthrOut"></output>
   <input type="range" id="uthr" min="0.1" max="3" step="0.02" value="0.8">
 </div>
@@ -131,7 +136,7 @@
   <label for="vol">Volume</label><output id="volOut"></output>
   <input type="range" id="vol" min="0" max="100" step="1" value="85">
 </div>
-<p class="hint">Tap = kick, high lift = snare. Four ways to tell them apart; the panel above shows every measure for your last stomp. Do a few taps, then a few lifts, and pick the measure whose numbers separate best; set its slider between the two. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each stomp is nudged onto the nearest grid line so kicks and snares sit square with the hats. Stop for two beats and the clock stops. Orange line = kick threshold, yellow line = snare threshold.</p>
+<p class="hint">Up / Down mode: a jolt while your foot is coming <b>down</b> (landing) is a kick, a jolt while it's going <b>up</b> (lift-off) is a snare. So a normal tap gives a kick, and a sharp upward flick of the foot gives a snare. The readout shows "dir" as the vertical speed at the moment of the jolt (negative = down). Other modes: the panel above shows every measure for your last stomp. Do a few taps, then a few lifts, and pick the measure whose numbers separate best; set its slider between the two. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each stomp is nudged onto the nearest grid line so kicks and snares sit square with the hats. Stop for two beats and the clock stops. Orange line = kick threshold, yellow line = snare threshold.</p>
 <p class="err" id="err" hidden></p>
 <p class="hint" id="diag"></p>
 <button class="big" id="go" type="button">Start</button>
@@ -259,11 +264,12 @@
     $('b' + beatIdx).className = kind === 'snare' ? 's' : 'k';
   }
   // ---------- Motion detection ----------
-  let lastHit = 0, peak = 0, peakT = 0, gx = 0, gy = 0, gz = 0, snareMode = 'up';
+  let lastHit = 0, peak = 0, peakT = 0, gx = 0, gy = 0, gz = 0, snareMode = 'dir';
   // Vertical velocity: project acceleration onto the gravity direction and integrate,
   // with a leak so sensor bias doesn't run away. Track the biggest upward value since
   // the phone was last still; that's the swing speed of the lift.
   let vVert = 0, upMax = 0, lastT = 0;
+  const hV = new Float32Array(HN); // vertical velocity history, parallel to hT/hM
   const trace = new Float32Array(240); let ti = 0;
   // ~1 s history of (time, magnitude) for the lift measurement
   const HN = 200, hT = new Float64Array(HN), hM = new Float32Array(HN); let hi = 0;
@@ -286,7 +292,7 @@
     if (vVert > upMax) upMax = vVert;
     trace[ti] = mag; ti = (ti + 1) % trace.length;
     const now = performance.now(), thr = +$('thr').value, gap = +$('gap').value;
-    hT[hi] = now; hM[hi] = mag; hi = (hi + 1) % HN;
+    hT[hi] = now; hM[hi] = mag; hV[hi] = vVert; hi = (hi + 1) % HN;
     if (mag > thr) {
       if (now - lastHit > gap) {
         if (mag > peak) { peak = mag; if (!peakT) peakT = now; }
@@ -318,14 +324,23 @@
     for (let i = 0; i < HN; i++) { const dt = t - hT[i]; if (dt > 50 && dt < 500) { sum += hM[i]; n++; } }
     return n ? sum / n : 0;
   }
+  // Vertical velocity around the jolt (40 ms before to 60 ms after). A landing is moving
+  // down going in and stops (negative average); a lift-off starts still and ends moving up
+  // (positive average).
+  function dirBefore(t) {
+    let sum = 0, n = 0;
+    for (let i = 0; i < HN; i++) { const dt = t - hT[i]; if (dt > -60 && dt < 40 && hT[i] > 0) { sum += hV[i]; n++; } }
+    return n ? sum / n : 0;
+  }
   function fire(now) {
     const p = peak, sthr = +$('sthr').value, lthr = +$('lthr').value, mthr = +$('mthr').value, uthr = +$('uthr').value;
     const t0 = peakT || now;
-    const air = liftBefore(t0), move = moveBefore(t0), up = upMax;
+    const air = liftBefore(t0), move = moveBefore(t0), up = upMax, dir = dirBefore(t0), dthr = +$('dthr').value;
     peak = 0; peakT = 0; lastHit = now; upMax = 0; vVert = 0;
-    $('mUp').textContent = up.toFixed(2); $('mMove').textContent = move.toFixed(2);
+    $('mDir').textContent = (dir > 0 ? '+' : '') + dir.toFixed(2); $('mUp').textContent = up.toFixed(2); $('mMove').textContent = move.toFixed(2);
     $('mAir').textContent = Math.round(air); $('mPeak').textContent = p.toFixed(2);
-    const isSnare = snareMode === 'up' ? up >= uthr : snareMode === 'move' ? move >= mthr : snareMode === 'lift' ? air >= lthr : p >= sthr;
+    if (snareMode === 'dir' && Math.abs(dir) < dthr) return; // ambiguous direction: ignore the jolt
+    const isSnare = snareMode === 'dir' ? dir > 0 : snareMode === 'up' ? up >= uthr : snareMode === 'move' ? move >= mthr : snareMode === 'lift' ? air >= lthr : p >= sthr;
     if (isSnare) onStomp('snare', Math.min(1, 0.7 + 0.3 * (p / (sthr * 2))));
     else onStomp('kick', Math.min(1, 0.6 + 0.4 * (p / sthr)));
   }
@@ -357,6 +372,7 @@
   bind('lthr', 'lthrOut', v => v + ' ms');
   bind('mthr', 'mthrOut', v => (+v).toFixed(2) + ' g');
   bind('uthr', 'uthrOut', v => (+v).toFixed(2) + ' m/s');
+  bind('dthr', 'dthrOut', v => (+v).toFixed(2) + ' m/s');
   bind('gap', 'gapOut', v => v + ' ms');
   bind('vol', 'volOut', v => v + '%');
   $('vol').addEventListener('input', () => { if (master) master.gain.value = $('vol').value / 100; });
@@ -366,7 +382,7 @@
   });
   seg('hatSeg', 'hat', v => hatMode = +v);
   seg('qSeg', 'q', v => quant = +v);
-  seg('snSeg', 'sn', v => { snareMode = v; for (const m of ['up', 'move', 'lift', 'hard']) $(m + 'Ctl').hidden = v !== m; });
+  seg('snSeg', 'sn', v => { snareMode = v; for (const m of ['dir', 'up', 'move', 'lift', 'hard']) $(m + 'Ctl').hidden = v !== m; });
 
   let running = false, wakeLock = null;
   async function start() {
