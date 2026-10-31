@@ -172,79 +172,94 @@
     requestAnimationFrame(() => requestAnimationFrame(() => flash.classList.remove('on')));
   }
   // ---------- Clock + groove engine ----------
-  // After two stomps we run a beat clock (anchor + beatSec). Hats are scheduled from the
-  // clock with a short lookahead, in audio time, so they never drift. Each stomp nudges
-  // the clock's phase a little (a soft PLL) so the grid follows the player.
-  let intervals = [], lastStompT = 0, beatSec = 0, anchor = 0, nextHat = 0, clockOn = false, quant = 2;
+  // A beat clock (anchor + beatSec) runs once the player has given 3 evenly spaced hits.
+  // Hats are scheduled from the clock in audio time with a short lookahead. Each hit nudges
+  // the clock's phase a little so the grid follows the player; the tempo itself moves slowly.
+  let intervals = [], rejected = [], lastStompT = 0, beatSec = 0, anchor = 0, nextHat = 0, lastHatSched = -1, clockOn = false, quant = 2;
   let tickTimer = null;
   function median(a) { const s = [...a].sort((x, y) => x - y); return s[(s.length - 1) >> 1]; }
-  const LOOKAHEAD = 0.12; // seconds of audio scheduled ahead
+  const LOOKAHEAD = 0.15; // seconds of audio scheduled ahead
 
   function flashAt(kind, when) {
     setTimeout(() => show(kind), Math.max(0, (when - ctx.currentTime) * 1000));
   }
+  function hatSub() { return hatMode === 2 ? beatSec / 2 : beatSec; }
+  let hatIdx = 0, drift = 0;      // hatIdx: even = on the beat when hats are eighths; drift: pending phase shift
   function tick() {
     if (!clockOn) return;
     const now = ctx.currentTime;
-    // Keep going until the player has been quiet for a whole bar (4 beats, plus a little slack).
+    // Keep going until the player has been quiet for a whole bar (4 beats, plus slack).
     if (now - lastStompT > beatSec * 4.5) { stopClock(); return; }
-    const sub = hatMode === 2 ? beatSec / 2 : beatSec; // hat spacing
-    if (hatMode === 0) { nextHat = now + sub; return; }
+    if (hatMode === 0) { nextHat = now; return; }
+    const sub = hatSub();
+    // Hats free-run: each one is placed one subdivision after the previous one, so they are
+    // always even. Tempo changes and phase nudges shift them a little at a time.
     while (nextHat < now + LOOKAHEAD) {
-      if (nextHat >= now - 0.01) {
-        const onBeat = Math.abs(((nextHat - anchor) / beatSec) % 1) < 0.01 || Math.abs((((nextHat - anchor) / beatSec) % 1) - 1) < 0.01;
-        hat(Math.max(nextHat, now), onBeat ? 0.7 : 0.45); flashAt('hat', nextHat);
-      }
+      // apply any pending phase nudge a third at a time, so no single gap jumps
+      if (drift) { const d = drift * 0.35; nextHat += d; anchor += d; drift -= d; if (Math.abs(drift) < 0.001) drift = 0; }
+      const onBeat = hatMode === 2 ? hatIdx % 2 === 0 : true;
+      if (nextHat >= now - 0.02) { hat(Math.max(nextHat, now), onBeat ? 0.7 : 0.45); flashAt('hat', nextHat); }
+      if (onBeat) anchor = nextHat;   // the beat grid lives on the on-beat hats
+      lastHatSched = nextHat; hatIdx++;
       nextHat += sub;
     }
   }
+  // Nudge the hat grid toward where the player hit, by at most 12% of a subdivision.
+  function nudgeHats(now) {
+    const sub = hatSub();
+    const nearest = lastHatSched + Math.round((now - lastHatSched) / sub) * sub;
+    const err = now - nearest;
+    drift = Math.max(-0.15 * sub, Math.min(0.15 * sub, 0.5 * err));
+  }
   function startClock(now) {
-    anchor = now; nextHat = now; clockOn = true;
+    anchor = now; nextHat = now; lastHatSched = now; hatIdx = 0; drift = 0; clockOn = true;
     clearInterval(tickTimer); tickTimer = setInterval(tick, 25);
   }
   function stopClock() {
     clockOn = false; clearInterval(tickTimer); tickTimer = null;
-    intervals = []; lastStompT = 0; beatSec = 0; $('bpm').textContent = '—';
+    intervals = []; rejected = []; lastStompT = 0; beatSec = 0; $('bpm').textContent = '—';
   }
+  const consistent = (arr, tol) => { const m = median(arr); return arr.every(x => Math.abs(x - m) / m < tol); };
 
   function onStomp(kind, vel) {
     const now = ctx.currentTime;
     stomps++; $('nKick').textContent = stomps;
     if (lastStompT) {
       let dt = now - lastStompT;
-      if (beatSec) {
-        // Only trust gaps that look like a beat. A gap near two beats means a beat was
-        // skipped (count it as two); half-beat gaps (double-time fills) are ignored.
+      if (!beatSec) {
+        // Learning: need 3 hits (2 gaps) that agree within 20% before the clock starts.
+        if (dt > 0.25 && dt < 2.0) intervals.push(dt); else intervals = [];
+        if (intervals.length > 2) intervals.shift();
+      } else {
         const r = dt / beatSec;
-        if (r > 1.7 && r < 2.3) dt /= 2;
-        else if (r < 0.75 || r > 1.33) dt = 0;
+        if (r > 1.7 && r < 2.3) dt /= 2;           // skipped a beat: counts as two
+        if (dt / beatSec > 0.8 && dt / beatSec < 1.25) {
+          intervals.push(dt); if (intervals.length > 6) intervals.shift(); rejected = [];
+        } else if (dt > 0.25 && dt < 2.0) {
+          // Off-tempo hit. If several in a row agree with each other, the player has
+          // changed tempo on purpose: re-learn from them.
+          rejected.push(dt); if (rejected.length > 3) rejected.shift();
+          if (rejected.length === 3 && consistent(rejected, 0.2)) {
+            intervals = [...rejected]; rejected = []; beatSec = median(intervals);
+          }
+        }
       }
-      if (dt > 0.2 && dt < 2.5) { intervals.push(dt); if (intervals.length > 8) intervals.shift(); }
     }
     lastStompT = now;
 
     let when = now;
-    if (!beatSec && intervals.length) {
-      // Second stomp: tempo known, start the clock on this stomp.
-      beatSec = median(intervals); startClock(now);
-    } else if (beatSec) {
-      // Update tempo smoothly, keeping the grid continuous through the last anchor.
-      // Tempo moves slowly toward the median of the last 8 good gaps, so one rushed
-      // or dragged hit barely moves it, while a real tempo change follows over a few bars.
+    if (!beatSec) {
+      if (intervals.length === 2 && consistent(intervals, 0.2)) { beatSec = median(intervals); startClock(now); }
+    } else {
+      // Tempo moves slowly toward the median of the last 6 good gaps.
       const newBeat = median(intervals);
-      beatSec += 0.15 * (newBeat - beatSec);
-      // Quantize: snap to the nearest grid line (8ths or 16ths of the beat).
+      beatSec += 0.25 * (newBeat - beatSec);
+      // Quantize: snap to the nearest grid line (8ths or 16ths of the beat), holding
+      // an early hit back at most 90 ms.
       const g = quant ? beatSec / quant : beatSec;
-      const k = Math.round((now - anchor) / g);
-      const grid = anchor + k * g;
-      if (quant && grid - now < 0.09) when = grid >= now - 0.005 ? grid : now; // early → wait for the line (up to 90 ms); late → play now
-      // Soft phase lock: pull the grid a third of the way toward where the player actually hit.
-      const errBeat = now - (anchor + Math.round((now - anchor) / beatSec) * beatSec);
-      anchor += 0.2 * errBeat;
-      // Re-align the hat scheduler to the nudged grid.
-      const sub = hatMode === 2 ? beatSec / 2 : beatSec;
-      nextHat = anchor + Math.ceil((Math.max(nextHat, now) - anchor) / sub - 1e-4) * sub;
-      if (!clockOn) startClock(now);
+      const grid = anchor + Math.round((now - anchor) / g) * g;
+      if (quant && grid - now < 0.09) when = grid >= now - 0.005 ? grid : now;
+      if (!clockOn) startClock(now); else nudgeHats(now);
     }
     $('bpm').textContent = beatSec ? Math.round(60 / beatSec) : '—';
     play[kind](when, vel); flashAt(kind, when);
@@ -359,7 +374,7 @@
     const b = e.target.closest('button'); if (!b) return;
     [...$(id).children].forEach(x => x.classList.toggle('on', x === b)); cb(b.dataset[attr]);
   });
-  seg('hatSeg', 'hat', v => hatMode = +v);
+  seg('hatSeg', 'hat', v => { hatMode = +v; if (clockOn && beatSec) { nextHat = lastHatSched + hatSub(); } });
   seg('qSeg', 'q', v => quant = +v);
 
   let running = false, wakeLock = null;
