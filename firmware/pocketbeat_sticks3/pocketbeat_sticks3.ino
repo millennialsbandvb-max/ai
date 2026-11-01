@@ -27,7 +27,7 @@ struct Cfg {
   float swthr = 0.35f;   // swing speed threshold, m/s
   int gap = 120;         // ms between hits
   int snare = 3;         // 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare, 3 high lift, 4 bounce=hat/stomp=kick/lift=snare
-  float lthr = 150.0f;   // lift threshold, deg/s (peak rotation rate before the landing)
+  float lthr = 35.0f;    // lift threshold, degrees of rotation since the foot last went still
   int kit = 0;           // 0 acoustic, 1 electro
   int out = 0;           // 0 board speaker, 1 phone, 2 both
   int quant = 2;         // 0 off, 2 eighths, 4 sixteenths
@@ -162,23 +162,24 @@ float vRight = 0; uint32_t lastSwingT = 0; bool inSwing = false; float swingPeak
 bool calibrating = false; uint32_t calEnd = 0; float calBest = 0, calX = 0, calY = 0, calZ = 0;
 float meterBuf[12]; int nMeter = 0; uint32_t lastMeterSend = 0;
 float gyroMag = 0, liftMax = 0;   // deg/s; liftMax = fastest rotation since the last landing, decays slowly
+float liftAngle = 0, stillMs = 0; // degrees rotated since the foot last went still
 uint32_t lastT = 0;
 
 void fireStomp(float p, float now) {
   if (cfg.snare == 4) {   // bounce = hat, stomp = kick, lift = snare
-    float lift = liftMax; liftMax = 0;
+    float lift = liftAngle; liftAngle = 0; liftMax = 0;
     if (lift >= cfg.lthr) onHit(SNARE, constrain(0.7f + 0.3f * (lift / (2 * cfg.lthr)), 0, 1), p, -1, now, lift);
     else if (p >= cfg.kthr) onHit(KICK, constrain(0.6f + 0.4f * (p / (cfg.kthr * 2)), 0, 1), p, -1, now, lift);
     else hit(HAT, constrain(0.5f + 0.5f * (p / cfg.kthr), 0, 1), p, -1, lift);   // live hat, doesn't drive the clock
     return;
   }
-  if (cfg.snare == 3) {   // high lift: judge by how fast the leg rotated on the way in
-    float lift = liftMax; liftMax = 0;
+  if (cfg.snare == 3) {   // high lift: judge by how far the foot rotated on the way in (degrees)
+    float lift = liftAngle; liftAngle = 0; liftMax = 0;
     Kind k = lift >= cfg.lthr ? SNARE : KICK;
     onHit(k, constrain(0.6f + 0.4f * (p / (cfg.thr * 2.5f)), 0, 1), p, -1, now, lift);
     return;
   }
-  liftMax = 0;
+  liftMax = 0; liftAngle = 0;
   bool hardMode = cfg.snare == 1 || cfg.snare == 2, isHard = hardMode && p >= cfg.sthr;
   Kind hardKind = cfg.snare == 1 ? KICK : SNARE, softKind = cfg.snare == 1 ? SNARE : KICK;
   if (isHard) onHit(hardKind, constrain(0.7f + 0.3f * (p / (cfg.sthr * 2)), 0, 1), p, -1, now);
@@ -189,6 +190,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   float dt = lastT ? min((uint32_t)50, now - lastT) / 1000.0f : 0; lastT = now;
   gyroMag = sqrtf(wx * wx + wy * wy + wz * wz);
   if (gyroMag > liftMax) liftMax = gyroMag; else liftMax *= (1.0f - 1.2f * dt);  // forgets a lift after ~1 s
+  if (gyroMag > 20) { liftAngle += gyroMag * dt; stillMs = 0; } else { stillMs += dt * 1000; if (stillMs > 250) liftAngle = 0; }
   const float k = 0.05f; gx += k * (ax - gx); gy += k * (ay - gy); gz += k * (az - gz);
   float lx = ax - gx, ly = ay - gy, lz = az - gz;               // linear accel, g
   float mag = sqrtf(lx * lx + ly * ly + lz * lz);

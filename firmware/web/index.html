@@ -71,6 +71,8 @@
   <div class="tile"><b id="batt">—</b><span>board battery</span></div>
 </div>
 
+<h2>Recent landings (newest first)</h2>
+<div class="tile" style="flex:none; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.5; min-height: 60px; white-space: pre" id="log">—</div>
 <h2>Snare trigger</h2>
 <div class="seg" data-key="snare">
   <button type="button" data-v="3">Stomp = kick, lift = snare</button>
@@ -82,7 +84,7 @@
 <div class="row"><button type="button" id="calBtn">Set right: tap, then swing right once</button></div>
 <div class="tiles">
   <div class="tile"><b id="mSwing">—</b><span>last swing · m/s</span></div>
-  <div class="tile"><b id="mLift">—</b><span>last lift · °/s</span></div>
+  <div class="tile"><b id="mLift">—</b><span>last lift · degrees</span></div>
   <div class="tile"><b id="calState">?</b><span>right direction</span></div>
 </div>
 
@@ -118,8 +120,8 @@
   <input type="range" id="sthr" data-key="sthr" min="0.1" max="3" step="0.005" value="2.5"></div>
 <div class="ctl"><label for="swthr">Snare: swing speed above</label><output id="swthrOut"></output>
   <input type="range" id="swthr" data-key="swthr" min="0.02" max="2" step="0.01" value="0.35"></div>
-<div class="ctl"><label for="lthr">Snare: lift rotation above</label><output id="lthrOut"></output>
-  <input type="range" id="lthr" data-key="lthr" min="10" max="400" step="2" value="150"></div>
+<div class="ctl"><label for="lthr">Snare: lift angle above</label><output id="lthrOut"></output>
+  <input type="range" id="lthr" data-key="lthr" min="5" max="180" step="1" value="35"></div>
 <div class="ctl"><label for="gap">Minimum gap between hits</label><output id="gapOut"></output>
   <input type="range" id="gap" data-key="gap" min="60" max="400" step="10" value="120"></div>
 <div class="ctl"><label for="vol">Board speaker volume</label><output id="volOut"></output>
@@ -135,7 +137,7 @@
 (() => {
   const $ = id => document.getElementById(id);
   const colors = { kick: '#ff6a3d', snare: '#ffd166', hat: '#7bdff2' };
-  let cfg = {}, ws = null, phoneSound = false;
+  let cfg = {}, ws = null, phoneSound = false; const logRows = [];
 
   // ---------- Phone audio (optional) ----------
   let ctx = null, master = null, kit = 0;
@@ -178,7 +180,7 @@
   }
 
   // ---------- Settings UI ----------
-  const fmt = { thr: v => (+v).toFixed(3) + ' g', sthr: v => (+v).toFixed(3) + ' g', swthr: v => (+v).toFixed(2) + ' m/s', lthr: v => v + ' °/s', kthr: v => (+v).toFixed(3) + ' g', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
+  const fmt = { thr: v => (+v).toFixed(3) + ' g', sthr: v => (+v).toFixed(3) + ' g', swthr: v => (+v).toFixed(2) + ' m/s', lthr: v => v + '°', kthr: v => (+v).toFixed(3) + ' g', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
   function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function applyCfg(c) {
     cfg = c;
@@ -210,7 +212,8 @@
       if (m.cfg) applyCfg(m.cfg);
       if (m.m) { for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; } }
       if (m.hit) {
-        show(m.hit); if (m.g !== undefined) $('mPeak').textContent = m.g.toFixed(2); if (m.sw !== undefined) $('mSwing').textContent = m.sw.toFixed(2); if (m.lift !== undefined) $('mLift').textContent = Math.round(m.lift);
+        show(m.hit);
+        if (m.hit !== 'hat' || m.g !== undefined) { logRows.unshift((m.hit + '     ').slice(0, 5) + ' ' + (m.g !== undefined ? m.g.toFixed(2) + ' g' : '      ') + (m.lift !== undefined ? '  angle ' + String(Math.round(m.lift)).padStart(3) + '°' : '') + (m.sw !== undefined ? '  swing ' + m.sw.toFixed(2) : '')); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); } if (m.g !== undefined) $('mPeak').textContent = m.g.toFixed(2); if (m.sw !== undefined) $('mSwing').textContent = m.sw.toFixed(2); if (m.lift !== undefined) $('mLift').textContent = Math.round(m.lift);
         const out = +(cfg.out || 0); if (phoneSound && (out === 1 || out === 2)) playPhone(m.hit, m.v || 1);
       }
       if (m.bpm !== undefined) $('bpm').textContent = m.bpm || '—';
