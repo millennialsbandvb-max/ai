@@ -12,7 +12,7 @@ Wearable foot drum. The board does all the detection; settings live on the board
 ## Use it
 
 - **Power on.** Screen shows BPM, last hit, Bluetooth and Wi-Fi status, battery.
-- **Stomp = kick.** Snare is a swing to the right by default (see Set right), or a hard stomp if you change the mode.
+- **Stomp = kick.** Snare is a swing to the right by default (see Set right), a hard stomp, or a high lift (gyro-based: lift the foot higher before it lands) — pick the mode on the tuning page.
 - **Set right (once):** press the front button **A**, then within 2.5 s swing your leg out to the right. The screen changes from "SET RIGHT" to "snare: swing R". Saved on the board.
 - **Hi-hat** starts after 3 even hits and runs until you stop for a full bar.
 - **Hold A for 2 s** = reset all settings.

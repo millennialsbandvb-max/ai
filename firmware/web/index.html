@@ -74,9 +74,14 @@
   <button type="button" data-v="0">Swing right</button>
   <button type="button" data-v="1">Tap = snare, stomp = kick</button>
   <button type="button" data-v="2">Tap = kick, stomp = snare</button>
+  <button type="button" data-v="3">High lift</button>
 </div>
 <div class="row"><button type="button" id="calBtn">Set right: tap, then swing right once</button></div>
-<div class="tile" style="flex:none"><b id="mSwing">—</b><span>last swing · m/s · right direction: <span id="calState">?</span></span></div>
+<div class="tiles">
+  <div class="tile"><b id="mSwing">—</b><span>last swing · m/s</span></div>
+  <div class="tile"><b id="mLift">—</b><span>last lift · °/s</span></div>
+  <div class="tile"><b id="calState">?</b><span>right direction</span></div>
+</div>
 
 <h2>Drum kit</h2>
 <div class="seg" data-key="kit">
@@ -108,6 +113,8 @@
   <input type="range" id="sthr" data-key="sthr" min="0.5" max="20" step="0.05" value="5"></div>
 <div class="ctl"><label for="swthr">Snare: swing speed above</label><output id="swthrOut"></output>
   <input type="range" id="swthr" data-key="swthr" min="0.05" max="3" step="0.05" value="0.35"></div>
+<div class="ctl"><label for="lthr">Snare: lift rotation above</label><output id="lthrOut"></output>
+  <input type="range" id="lthr" data-key="lthr" min="50" max="1200" step="10" value="250"></div>
 <div class="ctl"><label for="gap">Minimum gap between hits</label><output id="gapOut"></output>
   <input type="range" id="gap" data-key="gap" min="60" max="400" step="10" value="120"></div>
 <div class="ctl"><label for="vol">Board speaker volume</label><output id="volOut"></output>
@@ -149,7 +156,7 @@
   const cv = $('scope'), g2 = cv.getContext('2d');
   function draw() {
     const w = cv.width, h = cv.height, thr = +$('thr').value, sthr = +$('sthr').value, mode = +(cfg.snare || 0);
-    const scale = mode ? Math.max(sthr * 1.5, 1.5) : Math.max(thr * 3, 1.5);
+    const scale = (mode === 1 || mode === 2) ? Math.max(sthr * 1.5, 1.5) : Math.max(thr * 3, 1.5);
     g2.clearRect(0, 0, w, h); const y = v => h - Math.min(1, v / scale) * h;
     g2.lineWidth = 2; g2.setLineDash([8, 8]);
     const lines = mode === 1 ? [[thr, colors.snare], [sthr, colors.kick]] : mode === 2 ? [[thr, colors.kick], [sthr, colors.snare]] : [[thr, colors.kick]];
@@ -166,7 +173,7 @@
   }
 
   // ---------- Settings UI ----------
-  const fmt = { thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => (+v).toFixed(2) + ' m/s', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
+  const fmt = { thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => (+v).toFixed(2) + ' m/s', lthr: v => v + ' °/s', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
   function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function applyCfg(c) {
     cfg = c;
@@ -198,7 +205,7 @@
       if (m.cfg) applyCfg(m.cfg);
       if (m.m) { for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; } }
       if (m.hit) {
-        show(m.hit); if (m.g !== undefined) $('mPeak').textContent = m.g.toFixed(2); if (m.sw !== undefined) $('mSwing').textContent = m.sw.toFixed(2);
+        show(m.hit); if (m.g !== undefined) $('mPeak').textContent = m.g.toFixed(2); if (m.sw !== undefined) $('mSwing').textContent = m.sw.toFixed(2); if (m.lift !== undefined) $('mLift').textContent = Math.round(m.lift);
         const out = +(cfg.out || 0); if (phoneSound && (out === 1 || out === 2)) playPhone(m.hit, m.v || 1);
       }
       if (m.bpm !== undefined) $('bpm').textContent = m.bpm || '—';

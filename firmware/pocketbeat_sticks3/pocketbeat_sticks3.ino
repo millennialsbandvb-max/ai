@@ -25,7 +25,8 @@ struct Cfg {
   float sthr = 5.0f;     // hard stomp threshold, g
   float swthr = 0.35f;   // swing speed threshold, m/s
   int gap = 120;         // ms between hits
-  int snare = 0;         // 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare
+  int snare = 0;         // 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare, 3 high lift (gyro)
+  float lthr = 250.0f;   // lift threshold, deg/s (peak rotation rate before the landing)
   int kit = 0;           // 0 acoustic, 1 electro
   int out = 0;           // 0 board speaker, 1 phone, 2 both
   int quant = 2;         // 0 off, 2 eighths, 4 sixteenths
@@ -71,13 +72,14 @@ void sendMidi(Kind k, float vel) {
   MIDI.sendNoteOn(midiNote[k], v, 10);
   MIDI.sendNoteOff(midiNote[k], 0, 10);
 }
-void hit(Kind k, float vel, float g = 0, float sw = -1) {
+void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
   if (k != HAT) lastKind = kindName[k];
   playBoard(k, vel);
   sendMidi(k, vel);
   if (ws.count()) {
-    char buf[96];
+    char buf[128];
     if (sw >= 0) snprintf(buf, sizeof buf, "{\"hit\":\"%s\",\"v\":%.2f,\"sw\":%.2f}", kindName[k], vel, sw);
+    else if (lift >= 0) snprintf(buf, sizeof buf, "{\"hit\":\"%s\",\"v\":%.2f,\"g\":%.2f,\"lift\":%.0f}", kindName[k], vel, g, lift);
     else snprintf(buf, sizeof buf, "{\"hit\":\"%s\",\"v\":%.2f,\"g\":%.2f}", kindName[k], vel, g);
     ws.textAll(buf);
   }
@@ -117,9 +119,9 @@ void nudgeHats(float now) {
 }
 
 // Pending quantized hit (held back to the next grid line, at most 90 ms)
-struct Pending { bool on = false; float at = 0; Kind k; float vel, g, sw; } pending;
+struct Pending { bool on = false; float at = 0; Kind k; float vel, g, sw, lift; } pending;
 
-void onHit(Kind k, float vel, float g, float sw, float now) {
+void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
   if (lastHitMs) {
     float dt = now - lastHitMs;
     if (!beatMs) {
@@ -148,8 +150,8 @@ void onHit(Kind k, float vel, float g, float sw, float now) {
     if (!clockOn) startClock(now); else nudgeHats(now);
   }
   if (ws.count()) { char b[32]; snprintf(b, sizeof b, "{\"bpm\":%d}", beatMs ? (int)roundf(60000.0f / beatMs) : 0); ws.textAll(b); }
-  if (when > now + 1) { pending = { true, when, k, vel, g, sw }; }
-  else hit(k, vel, g, sw);
+  if (when > now + 1) { pending = { true, when, k, vel, g, sw, lift }; }
+  else hit(k, vel, g, sw, lift);
 }
 
 // ---------------- Motion detection ----------------
@@ -158,17 +160,27 @@ float peak = 0; uint32_t peakT = 0, lastStompT = 0;
 float vRight = 0; uint32_t lastSwingT = 0; bool inSwing = false; float swingPeak = 0;
 bool calibrating = false; uint32_t calEnd = 0; float calBest = 0, calX = 0, calY = 0, calZ = 0;
 float meterBuf[12]; int nMeter = 0; uint32_t lastMeterSend = 0;
+float gyroMag = 0, liftMax = 0;   // deg/s; liftMax = fastest rotation since the last landing, decays slowly
 uint32_t lastT = 0;
 
 void fireStomp(float p, float now) {
-  bool hardMode = cfg.snare != 0, isHard = hardMode && p >= cfg.sthr;
+  if (cfg.snare == 3) {   // high lift: judge by how fast the leg rotated on the way in
+    float lift = liftMax; liftMax = 0;
+    Kind k = lift >= cfg.lthr ? SNARE : KICK;
+    onHit(k, constrain(0.6f + 0.4f * (p / (cfg.thr * 2.5f)), 0, 1), p, -1, now, lift);
+    return;
+  }
+  liftMax = 0;
+  bool hardMode = cfg.snare != 0 && cfg.snare != 3, isHard = hardMode && p >= cfg.sthr;
   Kind hardKind = cfg.snare == 1 ? KICK : SNARE, softKind = cfg.snare == 1 ? SNARE : KICK;
   if (isHard) onHit(hardKind, constrain(0.7f + 0.3f * (p / (cfg.sthr * 2)), 0, 1), p, -1, now);
   else onHit(hardMode ? softKind : KICK, constrain(0.6f + 0.4f * (p / (hardMode ? cfg.sthr : cfg.thr * 2.5f)), 0, 1), p, -1, now);
 }
 
-void processMotion(float ax, float ay, float az, uint32_t now) {  // ax.. in g, including gravity
+void processMotion(float ax, float ay, float az, float wx, float wy, float wz, uint32_t now) {  // accel in g (incl. gravity), gyro in deg/s
   float dt = lastT ? min((uint32_t)50, now - lastT) / 1000.0f : 0; lastT = now;
+  gyroMag = sqrtf(wx * wx + wy * wy + wz * wz);
+  if (gyroMag > liftMax) liftMax = gyroMag; else liftMax *= (1.0f - 1.2f * dt);  // forgets a lift after ~1 s
   const float k = 0.05f; gx += k * (ax - gx); gy += k * (ay - gy); gz += k * (az - gz);
   float lx = ax - gx, ly = ay - gy, lz = az - gz;               // linear accel, g
   float mag = sqrtf(lx * lx + ly * ly + lz * lz);
@@ -216,8 +228,8 @@ void processMotion(float ax, float ay, float az, uint32_t now) {  // ax.. in g, 
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[320];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"sthr\":%.2f,\"swthr\":%.2f,\"gap\":%d,\"snare\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d}}",
-           cfg.thr, cfg.sthr, cfg.swthr, cfg.gap, cfg.snare, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0);
+  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"sthr\":%.2f,\"swthr\":%.2f,\"lthr\":%.0f,\"gap\":%d,\"snare\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d}}",
+           cfg.thr, cfg.sthr, cfg.swthr, cfg.lthr, cfg.gap, cfg.snare, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -238,6 +250,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "thr", &f); if (f) cfg.thr = v;
   v = jsonNum(s, "sthr", &f); if (f) cfg.sthr = v;
   v = jsonNum(s, "swthr", &f); if (f) cfg.swthr = v;
+  v = jsonNum(s, "lthr", &f); if (f) cfg.lthr = v;
   v = jsonNum(s, "gap", &f); if (f) cfg.gap = (int)v;
   v = jsonNum(s, "snare", &f); if (f) cfg.snare = (int)v;
   v = jsonNum(s, "kit", &f); if (f) cfg.kit = constrain((int)v, 0, 1);
@@ -276,7 +289,7 @@ void drawScreen() {
   d.setTextSize(1); d.setTextColor(TFT_DARKGREY);
   d.setCursor(4, 60); d.printf("BLE %s  WiFi %d", bleConnected ? "on" : "--", WiFi.softAPgetStationNum());
   d.setCursor(4, 72); d.printf("batt %d%%", M5.Power.getBatteryLevel());
-  d.setCursor(4, 84); d.print(cfg.snare == 0 ? (cfg.cal ? "snare: swing R" : "snare: SET RIGHT") : cfg.snare == 1 ? "tap=sn stomp=kk" : "tap=kk stomp=sn");
+  d.setCursor(4, 84); d.print(cfg.snare == 0 ? (cfg.cal ? "snare: swing R" : "snare: SET RIGHT") : cfg.snare == 1 ? "tap=sn stomp=kk" : cfg.snare == 2 ? "tap=kk stomp=sn" : "snare: high lift");
   d.endWrite();
 }
 
@@ -304,9 +317,10 @@ void loop() {
   if (M5.BtnA.pressedFor(2000)) { cfg = Cfg(); saveCfg(); sendCfg(nullptr); }
 
   float ax, ay, az;
-  if (M5.Imu.update() && M5.Imu.getAccel(&ax, &ay, &az)) processMotion(ax, ay, az, now);
+  float wx = 0, wy = 0, wz = 0;
+  if (M5.Imu.update() && M5.Imu.getAccel(&ax, &ay, &az)) { M5.Imu.getGyro(&wx, &wy, &wz); processMotion(ax, ay, az, wx, wy, wz, now); }
 
-  if (pending.on && now >= pending.at) { pending.on = false; hit(pending.k, pending.vel, pending.g, pending.sw); }
+  if (pending.on && now >= pending.at) { pending.on = false; hit(pending.k, pending.vel, pending.g, pending.sw, pending.lift); }
   clockTick(now);
 
   // meter stream to the page, ~40 Hz, a dozen samples per message
