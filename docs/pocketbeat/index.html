@@ -135,8 +135,8 @@
   <input type="range" id="swthr" min="0.02" max="2" step="0.01" value="0.35">
 </div>
 <div class="ctl" id="liftCtl">
-  <label for="lthr">Snare: lift rotation above (last lift: <span id="mLift">—</span> °/s)</label><output id="lthrOut"></output>
-  <input type="range" id="lthr" min="10" max="400" step="2" value="150">
+  <label for="lthr">Snare: lift angle above (last: <span id="mLift">—</span>°)</label><output id="lthrOut"></output>
+  <input type="range" id="lthr" min="5" max="180" step="1" value="35">
 </div>
 <div class="ctl" id="hardCtl" hidden>
   <label for="sthr">Hard stomp above</label><output id="sthrOut"></output>
@@ -150,7 +150,7 @@
   <label for="vol">Volume</label><output id="volOut"></output>
   <input type="range" id="vol" min="0" max="100" step="1" value="85">
 </div>
-<p class="hint">Default mode: stomp = kick, lift the foot high = snare (the gyro measures how fast the leg rotated before landing), hi-hat automatic from your tempo. The orange line is the lightest landing that counts. Pocket / Sock just sets starting thresholds (impacts read several times harder in a sock); fine-tune with the sliders. Stomp = kick. Snare is either a swing out to the right, or in the stomp modes, a light tap and a hard stomp are told apart by the two lines on the meter (pick which one is the kick). High lift uses the gyroscope: it measures how fast your leg rotated before landing; a high lift spins much faster than a tap. Once, with the phone in your pocket: tap "Set right", then do one clear swing to the right; the app remembers that direction (saved on this phone). After that, any swing that way faster than the slider's speed is a snare, and the stomp detector ignores the swing so you don't get a kick at the same time. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each hit is nudged onto the nearest grid line.</p>
+<p class="hint">Default mode: stomp = kick, lift the foot high = snare (the gyro measures how many degrees the leg rotated before landing), hi-hat automatic from your tempo. The orange line is the lightest landing that counts. Pocket / Sock just sets starting thresholds (impacts read several times harder in a sock); fine-tune with the sliders. Stomp = kick. Snare is either a swing out to the right, or in the stomp modes, a light tap and a hard stomp are told apart by the two lines on the meter (pick which one is the kick). High lift uses the gyroscope: it measures how fast your leg rotated before landing; a high lift spins much faster than a tap. Once, with the phone in your pocket: tap "Set right", then do one clear swing to the right; the app remembers that direction (saved on this phone). After that, any swing that way faster than the slider's speed is a snare, and the stomp detector ignores the swing so you don't get a kick at the same time. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each hit is nudged onto the nearest grid line.</p>
 <p class="err" id="err" hidden></p>
 <p class="hint" id="diag"></p>
 <button class="big" id="go" type="button">Start</button>
@@ -333,7 +333,7 @@
   // integrated along the calibrated "right" direction, with a leak.
   let snareMode = 'lift';
   let rx = 0, ry = 0, rz = 0, calibrated = false, calibrating = false, calEnd = 0, calAx = 0, calAy = 0, calAz = 0, calBest = 0;
-  let vRight = 0, lastT = 0, lastSwing = 0, swingPeak = 0, inSwing = false, liftMax = 0;
+  let vRight = 0, lastT = 0, lastSwing = 0, swingPeak = 0, inSwing = false, liftMax = 0, liftAngle = 0, stillMs = 0;
   try { const c = JSON.parse(localStorage.getItem('pb_right') || 'null'); if (c) { [rx, ry, rz] = c; calibrated = true; } } catch (e) {}
   $('calState').textContent = calibrated ? 'set' : 'not set';
 
@@ -349,7 +349,12 @@
     const mag = Math.sqrt(ax * ax + ay * ay + az * az) / G;
     // Gyro: fastest rotation of the leg since the last landing (deg/s), forgotten over ~1 s.
     const rr = e.rotationRate;
-    if (rr && rr.alpha !== null) { const w = Math.hypot(rr.alpha, rr.beta, rr.gamma); if (w > liftMax) liftMax = w; else liftMax *= (1 - 1.2 * dt); }
+    if (rr && rr.alpha !== null) {
+      const w = Math.hypot(rr.alpha, rr.beta, rr.gamma);
+      if (w > liftMax) liftMax = w; else liftMax *= (1 - 1.2 * dt);
+      // Angle: how far the leg has rotated since it last went still (degrees).
+      if (w > 20) { liftAngle += w * dt; stillMs = 0; } else { stillMs += dt * 1000; if (stillMs > 250) liftAngle = 0; }
+    }
     trace[ti] = mag; ti = (ti + 1) % trace.length;
 
     // horizontal part of the acceleration
@@ -387,8 +392,8 @@
     } else if (peakT) fire(now);
   }
   const logRows = [];
-  function logHit(kind, p, lift) {
-    logRows.unshift((kind + '     ').slice(0, 5) + '  impact ' + p.toFixed(3) + ' g   lift ' + String(Math.round(lift)).padStart(4) + ' °/s');
+  function logHit(kind, p, ang, rate) {
+    logRows.unshift((kind + '     ').slice(0, 5) + ' ' + p.toFixed(2) + ' g  angle ' + String(Math.round(ang)).padStart(3) + '°  rate ' + String(Math.round(rate)).padStart(3));
     if (logRows.length > 8) logRows.pop();
     $('log').textContent = logRows.join('\n'); $('log').style.whiteSpace = 'pre';
   }
@@ -396,18 +401,18 @@
     const p = peak, sthr = +$('sthr').value; peak = 0; peakT = 0; lastHit = now;
     $('mPeak').textContent = p.toFixed(3);
     if (snareMode === 'lift') {
-      const lift = liftMax; liftMax = 0; $('mLift').textContent = Math.round(lift);
-      const kind = lift >= +$('lthr').value ? 'snare' : 'kick';
-      logHit(kind, p, lift);
+      const lift = liftMax, ang = liftAngle; liftMax = 0; liftAngle = 0; $('mLift').textContent = Math.round(ang);
+      const kind = ang >= +$('lthr').value ? 'snare' : 'kick';
+      logHit(kind, p, ang, lift);
       onStomp(kind, Math.min(1, 0.6 + 0.4 * (p / 2)));
       return;
     }
     if (snareMode === 'gyro') {
       // Three levels from one landing: fast leg rotation = snare, hard impact = kick,
       // anything lighter = a hi-hat played live by the bounce (doesn't drive the clock).
-      const lift = liftMax, kthr = +$('kthr').value; liftMax = 0; $('mLift').textContent = Math.round(lift);
-      const kind = lift >= +$('lthr').value ? 'snare' : p >= kthr ? 'kick' : 'hat'; logHit(kind, p, lift);
-      if (kind === 'snare') onStomp('snare', Math.min(1, 0.7 + 0.3 * (lift / (2 * +$('lthr').value))));
+      const lift = liftMax, ang = liftAngle, kthr = +$('kthr').value; liftMax = 0; liftAngle = 0; $('mLift').textContent = Math.round(ang);
+      const kind = ang >= +$('lthr').value ? 'snare' : p >= kthr ? 'kick' : 'hat'; logHit(kind, p, ang, lift);
+      if (kind === 'snare') onStomp('snare', Math.min(1, 0.7 + 0.3 * (ang / (2 * +$('lthr').value))));
       else if (kind === 'kick') onStomp('kick', Math.min(1, 0.6 + 0.4 * (p / (kthr * 2))));
       else { if (ctx) { play.hat(ctx.currentTime, Math.min(1, 0.5 + 0.5 * (p / kthr))); show('hat'); } }
       return;
@@ -458,7 +463,7 @@
   bind('gap', 'gapOut', v => v + ' ms');
   bind('swthr', 'swthrOut', v => (+v).toFixed(2) + ' m/s');
   bind('sthr', 'sthrOut', v => (+v).toFixed(3) + ' g');
-  bind('lthr', 'lthrOut', v => v + ' °/s');
+  bind('lthr', 'lthrOut', v => v + '°');
   bind('kthr', 'kthrOut', v => (+v).toFixed(3) + ' g');
   const setRange = (id, v) => { $(id).value = v; $(id).dispatchEvent(new Event('input')); };
   const presets = { pocket: { thr: 0.4, sthr: 1.2, kthr: 0.9, gap: 140 }, sock: { thr: 0.8, sthr: 2.5, kthr: 1.8, gap: 110 } };
