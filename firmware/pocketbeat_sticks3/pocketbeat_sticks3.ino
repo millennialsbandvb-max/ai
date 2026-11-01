@@ -17,6 +17,7 @@
 #include <hardware/BLEMIDI_ESP32_NimBLE.h>
 #include "samples.h"
 #include "web_assets.h"
+#include "pb_types.h"
 
 // ---------------- Settings (persisted) ----------------
 struct Cfg {
@@ -51,7 +52,6 @@ AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 bool bleConnected = false;
 
-enum Kind { KICK = 0, SNARE = 1, HAT = 2 };
 const char* kindName[] = { "kick", "snare", "hat" };
 const char* lastKind = "";
 const uint8_t midiNote[] = { 36, 38, 42 };   // GM drums: kick, snare, closed hat
@@ -168,7 +168,7 @@ void fireStomp(float p, float now) {
 }
 
 void processMotion(float ax, float ay, float az, uint32_t now) {  // ax.. in g, including gravity
-  float dt = lastT ? min(50u, now - lastT) / 1000.0f : 0; lastT = now;
+  float dt = lastT ? min((uint32_t)50, now - lastT) / 1000.0f : 0; lastT = now;
   const float k = 0.05f; gx += k * (ax - gx); gy += k * (ay - gy); gz += k * (az - gz);
   float lx = ax - gx, ly = ay - gy, lz = az - gz;               // linear accel, g
   float mag = sqrtf(lx * lx + ly * ly + lz * lz);
