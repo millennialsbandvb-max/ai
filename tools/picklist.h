@@ -65,6 +65,8 @@ typedef struct {
     float *alast;                /* per arrow (plugin's, then ours): the value the host last sent */
     unsigned char *rsent;        /* rest reported to the host since (it may or may not have taken it) */
     int wpos, wlist;             /* the wheel's place in an open list (the plugin may take a moment to show it) */
+    int sel;                     /* the list selected by a first tap (-1: none), and when it was last touched */
+    double seltime;
     double wtime;
 } PickWrap;
 /* The < > arrows and the data wheel: the page points the wheel at an arrow when it's touched (Q-Link). An arrow
@@ -78,6 +80,11 @@ typedef struct {
  * open: close) and gives the wheel to it; while open, the wheel steps through the list's entries (each one taken,
  * the list stays open and follows), and the flag goes back to 0.5. */
 #define PL_OPEN 0.5f
+/* First tap on the field: selected (the wheel steps through the entries, the list stays shut), resting at 0.2 (place
+ * 0 of 3: shut on the page; the toggle from there goes to 1); a second tap (within PL_SEL_TIME of the last touch or
+ * turn) opens the list; a tap on the open list's field shuts it and leaves it selected. */
+#define PL_SEL 0.2f
+#define PL_SEL_TIME 8.0
 static double pl_now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (double)t.tv_sec + 1e-9 * (double)t.tv_nsec; }
 /* a new value for arrow k: +1 / -1 a step that way (the wheel), 2 the arrow's own press, 0 nothing. The wheel's
  * direction is against the value before: rest, or (if the host hasn't taken rest yet) the last one it sent */
@@ -146,8 +153,8 @@ static void pl_rows_changed(PickWrap *w) {   /* new text: reported as a change, 
     w->report[w->nl + PL_TITLE] = 2;
 }
 static void pl_set_ch(PickWrap *w, int ch) { w->ch = ch; pl_set(w, w->nl + PL_MCH, (float)ch / 16); }
-static void pl_close(PickWrap *w) {
-    if (w->open >= 0) pl_set(w, w->open, 0);
+static void pl_close(PickWrap *w) {   /* (the list shuts and stays selected: the wheel goes on stepping) */
+    if (w->open >= 0) { pl_set(w, w->open, PL_SEL); w->sel = w->open; w->seltime = pl_now(); }
     w->open = -1;
     pl_rows_changed(w);
 }
@@ -184,35 +191,40 @@ static void pl_setParameter(AEffect *e, int32_t i, float v) {
     const int j = i - w->base, n = w->nl;
     if (j >= pl_nparams(w->pl)) return;
     const int press = v > 0.5f;
-    if (j < n) {   /* a list's open flag (the stepper's field toggles it) */
-        const int k = w->base + j;
-        if (w->open == j && v > 0.001f) {   /* open: the wheel */
-            int d = 0;
-            if (v >= 0.999f) d = 1;   /* (a wheel that steps by whole places: up to the last) */
-            else if (w->alast && w->rsent) {
-                float last = w->alast[k];
-                if (w->rsent[k]) { if (fabsf(v - PL_OPEN) <= fabsf(v - last)) last = PL_OPEN; w->rsent[k] = 0; }
-                if (fabsf(v - last) > 0.0001f) d = v > last ? 1 : -1;
-            }
-            if (w->alast) w->alast[k] = v;
-            if (d) pl_wheel(w, j, d);
-            pl_set(w, j, PL_OPEN);
+    if (j < n) {   /* a list's open flag: a tap on the field selects it (the wheel steps), a second tap opens the list */
+        const int k = w->base + j, open = w->open == j;
+        const double now = pl_now();
+        const int sel = !open && w->sel == j && now - w->seltime < PL_SEL_TIME;
+        const float rest = open ? PL_OPEN : PL_SEL;
+        float last = w->alast ? w->alast[k] : rest;
+        if (w->rsent && w->rsent[k]) { if (fabsf(v - rest) <= fabsf(v - last)) last = rest; w->rsent[k] = 0; }
+        if (w->alast) w->alast[k] = v;
+        if (v > 0.001f && v < 0.999f) {   /* the wheel (selected or open): the next / previous entry */
+            if (!open && !sel) return;   /* (a project restoring a value: nothing) */
+            if (fabsf(v - last) > 0.0001f) pl_wheel(w, j, v > last ? 1 : -1);
+            if (sel) w->seltime = now;
+            pl_set(w, j, rest);
             return;
         }
-        if (w->alast) w->alast[k] = v;
-        if (press && pl_fn_of(w, j, PL_COUNT, 0, NULL, 0) < 0) { pl_set(w, j, 0); return; }   /* (nothing to list) */
-        if (press) {
+        if (v >= 0.999f) {   /* a tap from closed (the toggle goes to 1), or a wheel stepping by whole places */
+            if (open) { pl_wheel(w, j, 1); pl_set(w, j, PL_OPEN); return; }
+            if (pl_fn_of(w, j, PL_COUNT, 0, NULL, 0) < 0) { pl_set(w, j, 0); return; }   /* (nothing to list) */
+            if (!sel) { w->sel = j; w->seltime = now; pl_set(w, j, PL_SEL); return; }   /* first tap: selected */
             if (w->open >= 0 && w->open != j) pl_set(w, w->open, 0);
             w->open = j;
             pl_set(w, j, PL_OPEN);
             const int cur = pl_fn_of(w, j, PL_CURRENT, 0, NULL, 0);
             w->page = cur > 0 ? cur / PL_ROWS : 0;
             pl_rows_changed(w);
-        } else if (w->open == j) {
-            w->norm[j] = 0;
+            return;
+        }
+        if (open) {   /* a tap on the open list's field (the toggle goes to 0): closed, still selected */
             w->open = -1;
+            w->sel = j; w->seltime = now;
+            pl_set(w, j, PL_SEL);
             pl_rows_changed(w);
-        } else w->norm[j] = 0;
+        } else if (sel) pl_set(w, j, PL_SEL);
+        else w->norm[j] = 0;
         return;
     }
     const int r = j - n;
@@ -274,7 +286,7 @@ static void pl_name(PickWrap *w, int j, char *t, int max) {
 static void pl_display(PickWrap *w, int j, char *t, int max) {
     const int n = w->nl, r = j - n;
     t[0] = 0;
-    if (j < n) { pl_copy(t, w->norm[j] > 0.25f ? "Open" : "Closed", max); return; }
+    if (j < n) { pl_copy(t, w->open == j ? "Open" : w->norm[j] > 0.1f ? "Selected" : "Closed", max); return; }
     if (r == PL_MCH) { if (w->ch) snprintf(t, (size_t)max, "MIDI Ch %d", w->ch); else pl_copy(t, "MIDI Omni", max); return; }
     if (r == PL_MCH_PREV || r == PL_MCH_NEXT) { pl_copy(t, r == PL_MCH_PREV ? "<" : ">", max); return; }
     if (r < PL_ROWS) {
@@ -354,7 +366,7 @@ static void pl_flush(PickWrap *w) {
         if (w->rest[i]) { w->rest[i] = 0; w->rsent[i] = 1; w->master(&w->fx, audioMasterAutomate, i, 0, NULL, PL_REST); any = 1; }
     for (int j = 0; j < pl_nparams(w->pl); j++)
         if (w->report[j]) {
-            if (w->rsent && (w->norm[j] == PL_REST || (j < w->nl && w->norm[j] == PL_OPEN))) w->rsent[w->base + j] = 1;
+            if (w->rsent && (w->norm[j] == PL_REST || (j < w->nl && (w->norm[j] == PL_OPEN || w->norm[j] == PL_SEL)))) w->rsent[w->base + j] = 1;
             if (w->report[j] == 2) w->master(&w->fx, audioMasterAutomate, w->base + j, 0, NULL, 0.001f);   /* (a change) */
             w->report[j] = 0;
             any = 1;
@@ -412,6 +424,7 @@ static AEffect *pl_wrap(audioMasterCallback master, AEffect *(*make)(audioMaster
     w->pl = pl;
     w->base = in->numParams;
     w->open = -1;
+    w->sel = -1;
     w->nl = pl->n + (pl->midi ? 1 : 0);
     w->midi_pos = 0xffffffffu;   /* (from now on) */
     w->arrow = (int *)calloc((size_t)(in->numParams > 0 ? in->numParams : 1), sizeof *w->arrow);

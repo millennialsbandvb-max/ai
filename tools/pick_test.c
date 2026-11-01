@@ -3,7 +3,7 @@
  * (the settings first, e.g. "A Algorithm=DrivPdls" so its Pedal knob is a list; a list that stays shut, a knob
  * that isn't a choice, is skipped)
  * (NAM_MPC_DIR / SFZ_MPC_DIR as the plugin's own test wants them.)
- * For every "<title> List" parameter: opening it shows a title and rows, opening another closes it, the pages
+ * For every "<title> List" parameter: a first tap selects it, a second opens it; open, it shows a title and rows, opening another closes it, the pages
  * turn, a tap on the second entry of page 1 picks it and closes the list, and reopened, that entry is the one
  * marked "> " (the plugin took it). Close closes. */
 #include <dlfcn.h>
@@ -76,10 +76,14 @@ int main(int argc, char **argv) {
         const int f = lists[l];
         settings(argc, argv);
         name(f, t);
+        tap(f);   /* the first tap selects (the wheel's), the second opens */
+        disp(f, u);
+        if (!strcmp(u, "Closed")) { printf("  %s: shut (nothing to list now)\n", t); continue; }
+        CHECK(!strcmp(u, "Selected"), "%s: a first tap shows %s", t, u);
         tap(f);
         disp(f, u);
-        if (strcmp(u, "Open")) { printf("  %s: shut (nothing to list now)\n", t); continue; }
-        for (int o = 0; o < nl; o++) if (o != l) { char v[64]; disp(lists[o], v); CHECK(!strcmp(v, "Closed"), "%s open beside %s", v, t); }
+        CHECK(!strcmp(u, "Open"), "%s: a second tap didn't open it (%s)", t, u);
+        for (int o = 0; o < nl; o++) if (o != l) { char v[64]; disp(lists[o], v); CHECK(strcmp(v, "Open"), "%s open beside %s", v, t); }
         char ti[64];
         disp(title, ti);
         int rows = 0;
@@ -104,7 +108,7 @@ int main(int argc, char **argv) {
         printf(", first \"%s\", picking \"%s\"", (disp(row1, u), u), want);
         tap(row1 + pick);
         disp(f, u);
-        CHECK(!strcmp(u, "Closed"), "%s didn't close on a pick", t);
+        CHECK(!strcmp(u, "Selected"), "%s didn't close on a pick (%s)", t, u);
         for (int w = 0; w < 50; w++) { run(4); usleep(50000); }   /* (a model loads in the background) */
         tap(f);
         int marked = -1;
@@ -114,7 +118,7 @@ int main(int argc, char **argv) {
         CHECK(marked == pick && !strcmp(u + 2, want), "%s: the pick (\"%s\") isn't the current entry (row %d: %s)", t, want, marked + 1, u);
         tap(close);
         disp(f, u);
-        CHECK(!strcmp(u, "Closed"), "%s: Close didn't close", t);
+        CHECK(!strcmp(u, "Selected"), "%s: Close didn't close (%s)", t, u);
     }
     fx->dispatcher(fx, effClose, 0, 0, NULL, 0);
     printf(failures ? "FAILED (%d)\n" : "PASSED\n", failures);

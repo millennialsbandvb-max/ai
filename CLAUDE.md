@@ -271,7 +271,11 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   places (Closed 0, Open 0.5, Open 1; the panel shows at IndexedEnabling/1/3) and rests at 0.5 while open, so the
   wheel moves it either way: picklist.h's pl_wheel takes the next / previous entry (PL_CHOOSE; its own place for
   1.5 s, as NAM loads in the background), the list stays open and its page follows; 0 closes. Static params.json
-  list flags have three options (tools/pick_params.py). Device-untested.
+  list flags have three options (tools/pick_params.py).
+  Select first (the user's ask): a first tap on the field only selects (flag rests at PL_SEL 0.2, place 0: shut;
+  the wheel then steps through the entries with the list shut); a second tap within 8 s of the last touch / turn
+  (the toggle from 0.2 goes to 1) opens it; a tap on the open field (toggle to 0) or a pick / Close shuts it and
+  leaves it selected. Display: Closed / Selected / Open. Device-untested.
 - **Pedal look** (Oct 2026, the user's pick): our pages (not Airwindows/Dragonfly: PEDAL_LOOK=0 in their build.sh)
   are drawn by the kit's browser renderer (html_art.py) with `tools/pedal_look.css`: an enclosure in the page's
   colour (theme_plate_hi / theme_plate_lo, a hammertone filter on the base background), recessed frames, metal knob
