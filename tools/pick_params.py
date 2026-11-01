@@ -7,7 +7,7 @@ import sys
 d = json.load(open(sys.argv[1]))
 ps = d["params"] if isinstance(d, dict) else d
 lists = [a.split("=", 1) for a in sys.argv[2:]]
-ps += [{"key": k + "__list", "name": t + " List", "options": ["Closed", "Open"]} for k, t in lists]
+ps += [{"key": k + "__list", "name": t + " List", "options": ["Closed", "Open", "Open "]} for k, t in lists]
 ps += [{"key": "pick_%d" % (r + 1), "name": "List %d" % (r + 1), "options": ["Off", "On"], "display": "string"} for r in range(24)]
 ps += [{"key": "pick_" + k, "name": "List " + n, "options": ["Off", "On"], "momentary": True}
        for k, n in (("prev", "<"), ("next", ">"), ("close", "Close"))]

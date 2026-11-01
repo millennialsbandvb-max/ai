@@ -34,7 +34,7 @@
     {"key": "v4_pan", "name": "V4 Pan", "min": -100, "max": 100, "default": 0},
     {"key": "v4_gender", "name": "V4 Gender", "min": -50, "max": 50, "default": 0},
     {"key": "output", "name": "Output", "min": -24, "max": 12, "default": 0, "unit": "dB"},
-    {"key": "style__list", "name": "Styles List", "options": ["Closed", "Open"]},
+    {"key": "style__list", "name": "Styles List", "options": ["Closed", "Open", "Open "]},
     {"key": "pick_1", "name": "List 1", "options": ["Off", "On"], "display": "string"},
     {"key": "pick_2", "name": "List 2", "options": ["Off", "On"], "display": "string"},
     {"key": "pick_3", "name": "List 3", "options": ["Off", "On"], "display": "string"},

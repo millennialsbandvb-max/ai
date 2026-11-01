@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "../nam-mpc/src/vst2.h"
 
@@ -63,6 +64,8 @@ typedef struct {
     unsigned char *rest;         /* an arrow to report back at rest */
     float *alast;                /* per arrow (plugin's, then ours): the value the host last sent */
     unsigned char *rsent;        /* rest reported to the host since (it may or may not have taken it) */
+    int wpos, wlist;             /* the wheel's place in an open list (the plugin may take a moment to show it) */
+    double wtime;
 } PickWrap;
 /* The < > arrows and the data wheel: the page points the wheel at an arrow when it's touched (Q-Link). An arrow
  * rests at 0.45, just under the middle: the page's toggle takes it to 1 on a tap (from 0.5 it went to 0, and taps
@@ -70,6 +73,12 @@ typedef struct {
  * button's release, or an old project's saved value) does nothing. After each, it goes back to rest (the host takes
  * the values we report: the list rows rest the same way). */
 #define PL_REST 0.45f
+/* A list's open flag: Closed 0, Open 0.5 (the middle of three places on the page, so the wheel can move it either
+ * way; the page shows the list at place 1 of 3). A tap on the field toggles it (to 1 from closed: open; to 0 from
+ * open: close) and gives the wheel to it; while open, the wheel steps through the list's entries (each one taken,
+ * the list stays open and follows), and the flag goes back to 0.5. */
+#define PL_OPEN 0.5f
+static double pl_now(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return (double)t.tv_sec + 1e-9 * (double)t.tv_nsec; }
 /* a new value for arrow k: +1 / -1 a step that way (the wheel), 2 the arrow's own press, 0 nothing. The wheel's
  * direction is against the value before: rest, or (if the host hasn't taken rest yet) the last one it sent */
 static int pl_arrow(PickWrap *w, int k, float v) {
@@ -143,6 +152,19 @@ static void pl_close(PickWrap *w) {
     pl_rows_changed(w);
 }
 
+/* the wheel in open list j: the next / previous entry, taken; the page follows */
+static void pl_wheel(PickWrap *w, int j, int d) {
+    const int n = pl_fn_of(w, j, PL_COUNT, 0, NULL, 0);
+    if (n <= 0) return;
+    const double now = pl_now();
+    int cur = w->wlist == j && now - w->wtime < 1.5 ? w->wpos : pl_fn_of(w, j, PL_CURRENT, 0, NULL, 0);
+    cur = cur < 0 ? (d > 0 ? -1 : 0) : cur;
+    const int nx = ((cur + d) % n + n) % n;
+    pl_fn_of(w, j, PL_CHOOSE, nx, NULL, 0);
+    w->wlist = j; w->wpos = nx; w->wtime = now;
+    w->page = nx / PL_ROWS;
+    pl_rows_changed(w);
+}
 static void pl_setParameter(AEffect *e, int32_t i, float v) {
     PickWrap *w = (PickWrap *)e->object;
     if (i < w->base) {
@@ -163,11 +185,26 @@ static void pl_setParameter(AEffect *e, int32_t i, float v) {
     if (j >= pl_nparams(w->pl)) return;
     const int press = v > 0.5f;
     if (j < n) {   /* a list's open flag (the stepper's field toggles it) */
+        const int k = w->base + j;
+        if (w->open == j && v > 0.001f) {   /* open: the wheel */
+            int d = 0;
+            if (v >= 0.999f) d = 1;   /* (a wheel that steps by whole places: up to the last) */
+            else if (w->alast && w->rsent) {
+                float last = w->alast[k];
+                if (w->rsent[k]) { if (fabsf(v - PL_OPEN) <= fabsf(v - last)) last = PL_OPEN; w->rsent[k] = 0; }
+                if (fabsf(v - last) > 0.0001f) d = v > last ? 1 : -1;
+            }
+            if (w->alast) w->alast[k] = v;
+            if (d) pl_wheel(w, j, d);
+            pl_set(w, j, PL_OPEN);
+            return;
+        }
+        if (w->alast) w->alast[k] = v;
         if (press && pl_fn_of(w, j, PL_COUNT, 0, NULL, 0) < 0) { pl_set(w, j, 0); return; }   /* (nothing to list) */
         if (press) {
             if (w->open >= 0 && w->open != j) pl_set(w, w->open, 0);
             w->open = j;
-            w->norm[j] = 1;
+            pl_set(w, j, PL_OPEN);
             const int cur = pl_fn_of(w, j, PL_CURRENT, 0, NULL, 0);
             w->page = cur > 0 ? cur / PL_ROWS : 0;
             pl_rows_changed(w);
@@ -237,7 +274,7 @@ static void pl_name(PickWrap *w, int j, char *t, int max) {
 static void pl_display(PickWrap *w, int j, char *t, int max) {
     const int n = w->nl, r = j - n;
     t[0] = 0;
-    if (j < n) { pl_copy(t, w->norm[j] > 0.5f ? "Open" : "Closed", max); return; }
+    if (j < n) { pl_copy(t, w->norm[j] > 0.25f ? "Open" : "Closed", max); return; }
     if (r == PL_MCH) { if (w->ch) snprintf(t, (size_t)max, "MIDI Ch %d", w->ch); else pl_copy(t, "MIDI Omni", max); return; }
     if (r == PL_MCH_PREV || r == PL_MCH_NEXT) { pl_copy(t, r == PL_MCH_PREV ? "<" : ">", max); return; }
     if (r < PL_ROWS) {
@@ -317,7 +354,7 @@ static void pl_flush(PickWrap *w) {
         if (w->rest[i]) { w->rest[i] = 0; w->rsent[i] = 1; w->master(&w->fx, audioMasterAutomate, i, 0, NULL, PL_REST); any = 1; }
     for (int j = 0; j < pl_nparams(w->pl); j++)
         if (w->report[j]) {
-            if (w->rsent && w->norm[j] == PL_REST) w->rsent[w->base + j] = 1;
+            if (w->rsent && (w->norm[j] == PL_REST || (j < w->nl && w->norm[j] == PL_OPEN))) w->rsent[w->base + j] = 1;
             if (w->report[j] == 2) w->master(&w->fx, audioMasterAutomate, w->base + j, 0, NULL, 0.001f);   /* (a change) */
             w->report[j] = 0;
             any = 1;
@@ -417,8 +454,8 @@ static AEffect *pl_wrap(audioMasterCallback master, AEffect *(*make)(audioMaster
 /* params.json entries for the lists, to append after the plugin's own (each line starts with ",\n") */
 __attribute__((unused)) static void pl_params_json(const PickLists *pl, FILE *f) {
     for (int j = 0; j < pl->n; j++)
-        fprintf(f, ",\n    {\"key\": \"%s__list\", \"name\": \"%s List\", \"options\": [\"Closed\", \"Open\"]}", pl->keys[j], pl->titles[j]);
-    if (pl->midi) fprintf(f, ",\n    {\"key\": \"midi_ch__list\", \"name\": \"MIDI Ch List\", \"options\": [\"Closed\", \"Open\"]}");
+        fprintf(f, ",\n    {\"key\": \"%s__list\", \"name\": \"%s List\", \"options\": [\"Closed\", \"Open\", \"Open \"]}", pl->keys[j], pl->titles[j]);
+    if (pl->midi) fprintf(f, ",\n    {\"key\": \"midi_ch__list\", \"name\": \"MIDI Ch List\", \"options\": [\"Closed\", \"Open\", \"Open \"]}");
     for (int r = 0; r < PL_ROWS; r++)
         fprintf(f, ",\n    {\"key\": \"pick_%d\", \"name\": \"List %d\", \"options\": [\"Off\", \"On\"], \"display\": \"string\"}", r + 1, r + 1);
     fprintf(f, ",\n    {\"key\": \"pick_prev\", \"name\": \"List <\", \"options\": [\"Off\", \"On\"], \"momentary\": true}");

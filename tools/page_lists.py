@@ -42,7 +42,9 @@ patch('''                key = "shStepText_%s%dx%d" % ("dot_" if dot else "", w[
                 if li is not None:
                     fw = w["w"] - 2 * h - 6
                     key = "shStepList_%s%dx%d" % ("dot_" if dot else "", fw, h)
-                    defs.setdefault(key, _local(key, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch")],
+                    # (a tap also gives the data wheel to the list: turning it steps through the entries, list open)
+                    defs.setdefault(key, _local(key, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch"),
+                                                      _action("Mouse Down", "Q-Link")],
                                                 [_focus(fw, h), _value_label(8, 0, fw - 16, h, 26.0, DISPLAY_INK if dot else ACCENT,
                                                                              handle="Text")]))
                     kids.append(_placed(key, name, li, x0 + h + 3, y0, fw, h, extra={"Text": gi}))
@@ -62,7 +64,7 @@ patch('''    radii, sliders, looks = set(), set(), {}''', '''    defs_made = set
 
     def pick_panel(t, w, li):
         """The full-page list of a stepper with a "<key>__list" parameter (tools/page_lists.py)."""
-        shown = "IndexedEnabling/1/2/Parameter %d" % li
+        shown = "IndexedEnabling/1/3/Parameter %d" % li   # (tools/picklist.h: open rests at 0.5, the middle of three)
         bar_y, bar_h, m = Y_OFF + 12, 60, 16
         cols, rows, gap = 3, 8, 6
         top = bar_y + bar_h + 12
@@ -126,7 +128,8 @@ patch('''                kids.append(_placed(key, name, i, w["cx"] - cw // 2, w[
                                     extra={"List": li} if li is not None else None))
                 if li is not None:
                     vkey = "shKnobValueList_%d" % cw
-                    defs.setdefault(vkey, _local(vkey, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch")],
+                    defs.setdefault(vkey, _local(vkey, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch"),
+                                                        _action("Mouse Down", "Q-Link")],
                                                  [clear_label(_value_label(0, 0, cw, 26, 22.0, INK_DIM, handle="Text"))]))
                     kids.append(_placed(vkey, name + " list", li, w["cx"] - cw // 2, w["cy"] - s // 2 + value_y, cw, 26,
                                         focus="No", extra={"Text": i}))

@@ -266,6 +266,12 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   sent if the host hasn't taken rest yet). Back to rest after each. The MIDI Ch arrows do the same. Preset params
   keep the "within one" nudge rule (a looser one broke Quad Rig's state restore). On the device: rest 0.5 version
   stepped with the wheel ("a little wonky") but taps didn't press; the 0.45 version is untested.
+  The wheel in an open list (the user's ask: a tap on the name opened the list but the wheel did nothing): the list
+  field (and a knob's value-text field) also runs Q-Link on its Data, the `<key>__list` flag. The flag has three
+  places (Closed 0, Open 0.5, Open 1; the panel shows at IndexedEnabling/1/3) and rests at 0.5 while open, so the
+  wheel moves it either way: picklist.h's pl_wheel takes the next / previous entry (PL_CHOOSE; its own place for
+  1.5 s, as NAM loads in the background), the list stays open and its page follows; 0 closes. Static params.json
+  list flags have three options (tools/pick_params.py). Device-untested.
 - **Pedal look** (Oct 2026, the user's pick): our pages (not Airwindows/Dragonfly: PEDAL_LOOK=0 in their build.sh)
   are drawn by the kit's browser renderer (html_art.py) with `tools/pedal_look.css`: an enclosure in the page's
   colour (theme_plate_hi / theme_plate_lo, a hammertone filter on the base background), recessed frames, metal knob
