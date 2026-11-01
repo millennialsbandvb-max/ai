@@ -91,11 +91,11 @@
 </div>
 <h2>Snare trigger</h2>
 <div class="seg" id="snSeg">
-  <button type="button" data-sn="gyro" class="on">Bounce = hat, stomp = kick, lift = snare</button>
+  <button type="button" data-sn="lift" class="on">Stomp = kick, lift = snare</button>
+  <button type="button" data-sn="gyro">Bounce = hat, stomp = kick, lift = snare</button>
   <button type="button" data-sn="swing">Swing right</button>
   <button type="button" data-sn="hardkick">Tap = snare, stomp = kick</button>
   <button type="button" data-sn="hard">Tap = kick, stomp = snare</button>
-  <button type="button" data-sn="lift">High lift (gyro)</button>
 </div>
 <div class="tile" id="measures" style="flex:none">
   <div class="mrow"><div><b id="mPeak">—</b><span>last stomp · g</span></div><div><b id="mSwing">—</b><span>last swing · m/s</span></div><div><b id="calState">not set</b><span>right direction</span></div></div>
@@ -115,18 +115,18 @@
 </div>
 <h2>Hi-hat (automatic, follows your tempo)</h2>
 <div class="seg" id="hatSeg">
-  <button type="button" data-hat="0" class="on">Off</button>
+  <button type="button" data-hat="0">Off</button>
   <button type="button" data-hat="1">Quarters</button>
-  <button type="button" data-hat="2">Eighths</button>
+  <button type="button" data-hat="2" class="on">Eighths</button>
 </div>
 
 <div class="ctl">
   <label for="thr">Lightest landing that counts</label><output id="thrOut"></output>
-  <input type="range" id="thr" min="0.1" max="4" step="0.01" value="0.6">
+  <input type="range" id="thr" min="0.05" max="1.5" step="0.005" value="0.4">
 </div>
-<div class="ctl" id="gyroCtl">
+<div class="ctl" id="gyroCtl" hidden>
   <label for="kthr">Kick: stomp above (lighter = hi-hat)</label><output id="kthrOut"></output>
-  <input type="range" id="kthr" min="0.2" max="8" step="0.01" value="1.4">
+  <input type="range" id="kthr" min="0.1" max="3" step="0.005" value="0.9">
 </div>
 <div class="ctl" id="swingCtl" hidden>
   <label for="swthr">Snare: swing speed above</label><output id="swthrOut"></output>
@@ -134,11 +134,11 @@
 </div>
 <div class="ctl" id="liftCtl">
   <label for="lthr">Snare: lift rotation above (last lift: <span id="mLift">—</span> °/s)</label><output id="lthrOut"></output>
-  <input type="range" id="lthr" min="20" max="800" step="5" value="250">
+  <input type="range" id="lthr" min="10" max="400" step="2" value="150">
 </div>
 <div class="ctl" id="hardCtl" hidden>
   <label for="sthr">Hard stomp above</label><output id="sthrOut"></output>
-  <input type="range" id="sthr" min="0.3" max="10" step="0.01" value="1.8">
+  <input type="range" id="sthr" min="0.1" max="3" step="0.005" value="1.2">
 </div>
 <div class="ctl">
   <label for="gap">Minimum gap between stomps</label><output id="gapOut"></output>
@@ -148,7 +148,7 @@
   <label for="vol">Volume</label><output id="volOut"></output>
   <input type="range" id="vol" min="0" max="100" step="1" value="85">
 </div>
-<p class="hint">Default mode: bounce your leg for hi-hats (light landings), stomp harder for a kick, lift the foot high for a snare. The blue line is the lightest landing that counts, the orange line is where a landing becomes a kick, and the lift number tells you how fast the leg rotated. Pocket / Sock just sets starting thresholds (impacts read several times harder in a sock); fine-tune with the sliders. Stomp = kick. Snare is either a swing out to the right, or in the stomp modes, a light tap and a hard stomp are told apart by the two lines on the meter (pick which one is the kick). High lift uses the gyroscope: it measures how fast your leg rotated before landing; a high lift spins much faster than a tap. Once, with the phone in your pocket: tap "Set right", then do one clear swing to the right; the app remembers that direction (saved on this phone). After that, any swing that way faster than the slider's speed is a snare, and the stomp detector ignores the swing so you don't get a kick at the same time. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each hit is nudged onto the nearest grid line.</p>
+<p class="hint">Default mode: stomp = kick, lift the foot high = snare (the gyro measures how fast the leg rotated before landing), hi-hat automatic from your tempo. The orange line is the lightest landing that counts. Pocket / Sock just sets starting thresholds (impacts read several times harder in a sock); fine-tune with the sliders. Stomp = kick. Snare is either a swing out to the right, or in the stomp modes, a light tap and a hard stomp are told apart by the two lines on the meter (pick which one is the kick). High lift uses the gyroscope: it measures how fast your leg rotated before landing; a high lift spins much faster than a tap. Once, with the phone in your pocket: tap "Set right", then do one clear swing to the right; the app remembers that direction (saved on this phone). After that, any swing that way faster than the slider's speed is a snare, and the stomp detector ignores the swing so you don't get a kick at the same time. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each hit is nudged onto the nearest grid line.</p>
 <p class="err" id="err" hidden></p>
 <p class="hint" id="diag"></p>
 <button class="big" id="go" type="button">Start</button>
@@ -159,7 +159,7 @@
   const $ = id => document.getElementById(id);
   const statusEl = $('status'), lastEl = $('last'), flash = $('flash'), err = $('err');
   const colors = { kick: '#ff6a3d', snare: '#ffd166', hat: '#7bdff2' };
-  let hatMode = 0, stomps = 0;
+  let hatMode = 2, stomps = 0;
 
   // ---------- Synth drums ----------
   let ctx = null, master = null, noise = null;
@@ -329,7 +329,7 @@
   const G = 9.81;
   // Right-swing detection: horizontal acceleration (gravity removed, vertical part removed)
   // integrated along the calibrated "right" direction, with a leak.
-  let snareMode = 'gyro';
+  let snareMode = 'lift';
   let rx = 0, ry = 0, rz = 0, calibrated = false, calibrating = false, calEnd = 0, calAx = 0, calAy = 0, calAz = 0, calBest = 0;
   let vRight = 0, lastT = 0, lastSwing = 0, swingPeak = 0, inSwing = false, liftMax = 0;
   try { const c = JSON.parse(localStorage.getItem('pb_right') || 'null'); if (c) { [rx, ry, rz] = c; calibrated = true; } } catch (e) {}
@@ -443,14 +443,14 @@
 
   // ---------- Controls ----------
   const bind = (id, out, fmt) => { const el = $(id); const f = () => $(out).textContent = fmt(el.value); el.addEventListener('input', f); f(); };
-  bind('thr', 'thrOut', v => (+v).toFixed(2) + ' g');
+  bind('thr', 'thrOut', v => (+v).toFixed(3) + ' g');
   bind('gap', 'gapOut', v => v + ' ms');
   bind('swthr', 'swthrOut', v => (+v).toFixed(2) + ' m/s');
-  bind('sthr', 'sthrOut', v => (+v).toFixed(2) + ' g');
+  bind('sthr', 'sthrOut', v => (+v).toFixed(3) + ' g');
   bind('lthr', 'lthrOut', v => v + ' °/s');
-  bind('kthr', 'kthrOut', v => (+v).toFixed(2) + ' g');
+  bind('kthr', 'kthrOut', v => (+v).toFixed(3) + ' g');
   const setRange = (id, v) => { $(id).value = v; $(id).dispatchEvent(new Event('input')); };
-  const presets = { pocket: { thr: 0.6, sthr: 1.8, kthr: 1.4, gap: 140 }, sock: { thr: 1.5, sthr: 6, kthr: 3.5, gap: 110 } };
+  const presets = { pocket: { thr: 0.4, sthr: 1.2, kthr: 0.9, gap: 140 }, sock: { thr: 0.8, sthr: 2.5, kthr: 1.8, gap: 110 } };
   bind('vol', 'volOut', v => v + '%');
   $('vol').addEventListener('input', () => { if (master) master.gain.value = $('vol').value / 100; });
   const seg = (id, attr, cb) => $(id).addEventListener('click', e => {
@@ -499,7 +499,7 @@
     const wrap = document.createElement('span'); wrap.className = 'nud';
     for (const [txt, dir] of [['−', -1], ['+', 1]]) {
       const b = document.createElement('button'); b.type = 'button'; b.textContent = txt;
-      b.addEventListener('click', () => { r.value = (+r.value + dir * +r.step).toFixed(2); r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); });
+      b.addEventListener('click', () => { r.value = (+r.value + dir * +r.step).toFixed(3); r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); });
       wrap.appendChild(b);
     }
     out.after(wrap);

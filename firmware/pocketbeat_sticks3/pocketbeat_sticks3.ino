@@ -21,17 +21,17 @@
 
 // ---------------- Settings (persisted) ----------------
 struct Cfg {
-  float thr = 1.5f;      // lightest landing that counts, g (linear accel magnitude)
-  float sthr = 5.0f;     // hard stomp threshold, g (stomp modes)
-  float kthr = 3.5f;     // kick threshold in bounce/stomp/lift mode; lighter landings are hats
+  float thr = 0.8f;      // lightest landing that counts, g (linear accel magnitude)
+  float sthr = 2.5f;     // hard stomp threshold, g (stomp modes)
+  float kthr = 1.8f;     // kick threshold in bounce/stomp/lift mode; lighter landings are hats
   float swthr = 0.35f;   // swing speed threshold, m/s
   int gap = 120;         // ms between hits
-  int snare = 4;         // 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare, 3 high lift, 4 bounce=hat/stomp=kick/lift=snare
-  float lthr = 250.0f;   // lift threshold, deg/s (peak rotation rate before the landing)
+  int snare = 3;         // 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare, 3 high lift, 4 bounce=hat/stomp=kick/lift=snare
+  float lthr = 150.0f;   // lift threshold, deg/s (peak rotation rate before the landing)
   int kit = 0;           // 0 acoustic, 1 electro
   int out = 0;           // 0 board speaker, 1 phone, 2 both
   int quant = 2;         // 0 off, 2 eighths, 4 sixteenths
-  int hat = 0;           // 0 off, 1 quarters, 2 eighths (auto hats; off by default since bounces play hats)
+  int hat = 2;           // 0 off, 1 quarters, 2 eighths (auto hats)
   int vol = 200;         // speaker volume 0-255
   float rx = 0, ry = 0, rz = 0; bool cal = false;  // "right" direction in sensor frame
 } cfg;
@@ -236,7 +236,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[320];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"sthr\":%.2f,\"swthr\":%.2f,\"lthr\":%.0f,\"kthr\":%.2f,\"gap\":%d,\"snare\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d}}",
+  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.2f,\"lthr\":%.0f,\"kthr\":%.3f,\"gap\":%d,\"snare\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d}}",
            cfg.thr, cfg.sthr, cfg.swthr, cfg.lthr, cfg.kthr, cfg.gap, cfg.snare, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0);
   if (c) c->text(b); else ws.textAll(b);
 }

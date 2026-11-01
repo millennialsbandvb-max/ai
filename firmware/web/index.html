@@ -73,11 +73,11 @@
 
 <h2>Snare trigger</h2>
 <div class="seg" data-key="snare">
+  <button type="button" data-v="3">Stomp = kick, lift = snare</button>
   <button type="button" data-v="4">Bounce = hat, stomp = kick, lift = snare</button>
   <button type="button" data-v="0">Swing right</button>
   <button type="button" data-v="1">Tap = snare, stomp = kick</button>
   <button type="button" data-v="2">Tap = kick, stomp = snare</button>
-  <button type="button" data-v="3">High lift</button>
 </div>
 <div class="row"><button type="button" id="calBtn">Set right: tap, then swing right once</button></div>
 <div class="tiles">
@@ -111,22 +111,22 @@
 </div>
 
 <div class="ctl"><label for="thr">Lightest landing that counts</label><output id="thrOut"></output>
-  <input type="range" id="thr" data-key="thr" min="0.1" max="4" step="0.01" value="1.5"></div>
+  <input type="range" id="thr" data-key="thr" min="0.05" max="1.5" step="0.005" value="0.8"></div>
 <div class="ctl"><label for="kthr">Kick: stomp above (lighter = hi-hat)</label><output id="kthrOut"></output>
-  <input type="range" id="kthr" data-key="kthr" min="0.2" max="8" step="0.01" value="3.5"></div>
+  <input type="range" id="kthr" data-key="kthr" min="0.1" max="3" step="0.005" value="1.8"></div>
 <div class="ctl"><label for="sthr">Hard stomp above</label><output id="sthrOut"></output>
-  <input type="range" id="sthr" data-key="sthr" min="0.3" max="10" step="0.01" value="5"></div>
+  <input type="range" id="sthr" data-key="sthr" min="0.1" max="3" step="0.005" value="2.5"></div>
 <div class="ctl"><label for="swthr">Snare: swing speed above</label><output id="swthrOut"></output>
   <input type="range" id="swthr" data-key="swthr" min="0.02" max="2" step="0.01" value="0.35"></div>
 <div class="ctl"><label for="lthr">Snare: lift rotation above</label><output id="lthrOut"></output>
-  <input type="range" id="lthr" data-key="lthr" min="20" max="800" step="5" value="250"></div>
+  <input type="range" id="lthr" data-key="lthr" min="10" max="400" step="2" value="150"></div>
 <div class="ctl"><label for="gap">Minimum gap between hits</label><output id="gapOut"></output>
   <input type="range" id="gap" data-key="gap" min="60" max="400" step="10" value="120"></div>
 <div class="ctl"><label for="vol">Board speaker volume</label><output id="volOut"></output>
   <input type="range" id="vol" data-key="vol" min="0" max="255" step="1" value="200"></div>
 <div class="ctl"><label for="pvol">Phone volume</label><output id="pvolOut"></output>
   <input type="range" id="pvol" min="0" max="100" step="1" value="85"></div>
-<p class="hint">Default mode: bounce your leg for hi-hats (light landings), stomp harder for a kick, lift the foot high for a snare. Blue line = lightest landing that counts, orange line = where a landing becomes a kick; "last lift" is how fast the leg rotated before landing. Everything here is stored on the board, so once it's tuned you can close this page and just play. Bluetooth MIDI is always on: pair the board in GarageBand (Settings › Advanced › Bluetooth MIDI) to use the phone's drum sounds with the phone locked.</p>
+<p class="hint">Default mode: stomp = kick, lift the foot high = snare (gyro), hi-hat automatic from your tempo. "Last lift" is how fast the leg rotated before landing. Everything here is stored on the board, so once it's tuned you can close this page and just play. Bluetooth MIDI is always on: pair the board in GarageBand (Settings › Advanced › Bluetooth MIDI) to use the phone's drum sounds with the phone locked.</p>
 <p class="err" id="err" hidden></p>
 <button class="big" id="go" type="button">Enable sound on this phone</button>
 
@@ -178,7 +178,7 @@
   }
 
   // ---------- Settings UI ----------
-  const fmt = { thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => (+v).toFixed(2) + ' m/s', lthr: v => v + ' °/s', kthr: v => (+v).toFixed(2) + ' g', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
+  const fmt = { thr: v => (+v).toFixed(3) + ' g', sthr: v => (+v).toFixed(3) + ' g', swthr: v => (+v).toFixed(2) + ' m/s', lthr: v => v + ' °/s', kthr: v => (+v).toFixed(3) + ' g', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
   function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function applyCfg(c) {
     cfg = c;
@@ -225,7 +225,7 @@
     const wrap = document.createElement('span'); wrap.className = 'nud';
     for (const [txt, dir] of [['−', -1], ['+', 1]]) {
       const b = document.createElement('button'); b.type = 'button'; b.textContent = txt;
-      b.addEventListener('click', () => { r.value = (+r.value + dir * +r.step).toFixed(2); r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); });
+      b.addEventListener('click', () => { r.value = (+r.value + dir * +r.step).toFixed(3); r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); });
       wrap.appendChild(b);
     }
     out.after(wrap);
