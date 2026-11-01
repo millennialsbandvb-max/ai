@@ -39,6 +39,8 @@
   .ctl { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px; flex: none; }
   .ctl label { font-size: 13px; }
   .ctl output { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .ctl .nud { display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle; }
+  .ctl .nud button { width: 32px; height: 28px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); font-size: 16px; line-height: 1; cursor: pointer; padding: 0; }
   .ctl input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--fg); }
   .hint { font-size: 12px; color: var(--muted); line-height: 1.45; margin: 0; flex: none; }
   .row { display: flex; gap: 10px; flex: none; }
@@ -109,15 +111,15 @@
 </div>
 
 <div class="ctl"><label for="thr">Lightest landing that counts</label><output id="thrOut"></output>
-  <input type="range" id="thr" data-key="thr" min="0.3" max="12" step="0.05" value="1.5"></div>
+  <input type="range" id="thr" data-key="thr" min="0.1" max="4" step="0.01" value="1.5"></div>
 <div class="ctl"><label for="kthr">Kick: stomp above (lighter = hi-hat)</label><output id="kthrOut"></output>
-  <input type="range" id="kthr" data-key="kthr" min="0.5" max="20" step="0.05" value="3.5"></div>
+  <input type="range" id="kthr" data-key="kthr" min="0.2" max="8" step="0.01" value="3.5"></div>
 <div class="ctl"><label for="sthr">Hard stomp above</label><output id="sthrOut"></output>
-  <input type="range" id="sthr" data-key="sthr" min="0.5" max="20" step="0.05" value="5"></div>
+  <input type="range" id="sthr" data-key="sthr" min="0.3" max="10" step="0.01" value="5"></div>
 <div class="ctl"><label for="swthr">Snare: swing speed above</label><output id="swthrOut"></output>
-  <input type="range" id="swthr" data-key="swthr" min="0.05" max="3" step="0.05" value="0.35"></div>
+  <input type="range" id="swthr" data-key="swthr" min="0.02" max="2" step="0.01" value="0.35"></div>
 <div class="ctl"><label for="lthr">Snare: lift rotation above</label><output id="lthrOut"></output>
-  <input type="range" id="lthr" data-key="lthr" min="50" max="1200" step="10" value="250"></div>
+  <input type="range" id="lthr" data-key="lthr" min="20" max="800" step="5" value="250"></div>
 <div class="ctl"><label for="gap">Minimum gap between hits</label><output id="gapOut"></output>
   <input type="range" id="gap" data-key="gap" min="60" max="400" step="10" value="120"></div>
 <div class="ctl"><label for="vol">Board speaker volume</label><output id="volOut"></output>
@@ -217,6 +219,17 @@
     };
   }
   connect();
+  // −/+ nudge buttons beside every slider, one step at a time
+  for (const r of document.querySelectorAll('.ctl input[type=range]')) {
+    const out = document.getElementById(r.id + 'Out'); if (!out) continue;
+    const wrap = document.createElement('span'); wrap.className = 'nud';
+    for (const [txt, dir] of [['−', -1], ['+', 1]]) {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = txt;
+      b.addEventListener('click', () => { r.value = (+r.value + dir * +r.step).toFixed(2); r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); });
+      wrap.appendChild(b);
+    }
+    out.after(wrap);
+  }
 })();
 </script>
 </body>

@@ -52,6 +52,8 @@
   .ctl { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px; }
   .ctl label { font-size: 13px; }
   .ctl output { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .ctl .nud { display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle; }
+  .ctl .nud button { width: 32px; height: 28px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); font-size: 16px; line-height: 1; cursor: pointer; padding: 0; }
   .ctl input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--fg); }
   .hint { font-size: 12px; color: var(--muted); line-height: 1.45; margin: 0; }
   .big { margin-top: 4px; margin-bottom: 10px; font-family: var(--font-display); font-size: 24px; font-weight: 700; letter-spacing: .04em;
@@ -120,23 +122,23 @@
 
 <div class="ctl">
   <label for="thr">Lightest landing that counts</label><output id="thrOut"></output>
-  <input type="range" id="thr" min="0.3" max="12" step="0.05" value="0.6">
+  <input type="range" id="thr" min="0.1" max="4" step="0.01" value="0.6">
 </div>
 <div class="ctl" id="gyroCtl">
   <label for="kthr">Kick: stomp above (lighter = hi-hat)</label><output id="kthrOut"></output>
-  <input type="range" id="kthr" min="0.5" max="20" step="0.05" value="1.4">
+  <input type="range" id="kthr" min="0.2" max="8" step="0.01" value="1.4">
 </div>
 <div class="ctl" id="swingCtl" hidden>
   <label for="swthr">Snare: swing speed above</label><output id="swthrOut"></output>
-  <input type="range" id="swthr" min="0.05" max="3" step="0.05" value="0.35">
+  <input type="range" id="swthr" min="0.02" max="2" step="0.01" value="0.35">
 </div>
 <div class="ctl" id="liftCtl">
   <label for="lthr">Snare: lift rotation above (last lift: <span id="mLift">—</span> °/s)</label><output id="lthrOut"></output>
-  <input type="range" id="lthr" min="50" max="1200" step="10" value="250">
+  <input type="range" id="lthr" min="20" max="800" step="5" value="250">
 </div>
 <div class="ctl" id="hardCtl" hidden>
   <label for="sthr">Hard stomp above</label><output id="sthrOut"></output>
-  <input type="range" id="sthr" min="0.5" max="20" step="0.05" value="1.8">
+  <input type="range" id="sthr" min="0.3" max="10" step="0.01" value="1.8">
 </div>
 <div class="ctl">
   <label for="gap">Minimum gap between stomps</label><output id="gapOut"></output>
@@ -491,6 +493,17 @@
   document.addEventListener('visibilitychange', () => { if (!document.hidden && ctx) ctx.resume(); });
   const hasDM = typeof DeviceMotionEvent !== 'undefined';
   $('diag').textContent = 'https: ' + (location.protocol === 'https:') + ' · motion API: ' + hasDM + ' · prompt required: ' + (hasDM && typeof DeviceMotionEvent.requestPermission === 'function') + ' · ' + navigator.userAgent.replace(/^.*?(iPhone; CPU iPhone OS [\d_]+|Android [\d.]+).*$/, '$1').replace(/_/g, '.');
+  // −/+ nudge buttons beside every slider, one step at a time
+  for (const r of document.querySelectorAll('.ctl input[type=range]')) {
+    const out = document.getElementById(r.id + 'Out'); if (!out) continue;
+    const wrap = document.createElement('span'); wrap.className = 'nud';
+    for (const [txt, dir] of [['−', -1], ['+', 1]]) {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = txt;
+      b.addEventListener('click', () => { r.value = (+r.value + dir * +r.step).toFixed(2); r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); });
+      wrap.appendChild(b);
+    }
+    out.after(wrap);
+  }
 })();
 </script>
 </body>
