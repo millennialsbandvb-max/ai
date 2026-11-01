@@ -89,6 +89,8 @@
   <button type="button" data-place="pocket" class="on">Pocket</button>
   <button type="button" data-place="sock">Sock</button>
 </div>
+<h2>Recent landings (newest first)</h2>
+<div class="tile" style="flex:none; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.5; min-height: 60px" id="log">—</div>
 <h2>Snare trigger</h2>
 <div class="seg" id="snSeg">
   <button type="button" data-sn="lift" class="on">Stomp = kick, lift = snare</button>
@@ -384,20 +386,29 @@
       }
     } else if (peakT) fire(now);
   }
+  const logRows = [];
+  function logHit(kind, p, lift) {
+    logRows.unshift((kind + '     ').slice(0, 5) + '  impact ' + p.toFixed(3) + ' g   lift ' + String(Math.round(lift)).padStart(4) + ' °/s');
+    if (logRows.length > 8) logRows.pop();
+    $('log').textContent = logRows.join('\n'); $('log').style.whiteSpace = 'pre';
+  }
   function fire(now) {
     const p = peak, sthr = +$('sthr').value; peak = 0; peakT = 0; lastHit = now;
-    $('mPeak').textContent = p.toFixed(2);
+    $('mPeak').textContent = p.toFixed(3);
     if (snareMode === 'lift') {
       const lift = liftMax; liftMax = 0; $('mLift').textContent = Math.round(lift);
-      onStomp(lift >= +$('lthr').value ? 'snare' : 'kick', Math.min(1, 0.6 + 0.4 * (p / 2)));
+      const kind = lift >= +$('lthr').value ? 'snare' : 'kick';
+      logHit(kind, p, lift);
+      onStomp(kind, Math.min(1, 0.6 + 0.4 * (p / 2)));
       return;
     }
     if (snareMode === 'gyro') {
       // Three levels from one landing: fast leg rotation = snare, hard impact = kick,
       // anything lighter = a hi-hat played live by the bounce (doesn't drive the clock).
       const lift = liftMax, kthr = +$('kthr').value; liftMax = 0; $('mLift').textContent = Math.round(lift);
-      if (lift >= +$('lthr').value) onStomp('snare', Math.min(1, 0.7 + 0.3 * (lift / (2 * +$('lthr').value))));
-      else if (p >= kthr) onStomp('kick', Math.min(1, 0.6 + 0.4 * (p / (kthr * 2))));
+      const kind = lift >= +$('lthr').value ? 'snare' : p >= kthr ? 'kick' : 'hat'; logHit(kind, p, lift);
+      if (kind === 'snare') onStomp('snare', Math.min(1, 0.7 + 0.3 * (lift / (2 * +$('lthr').value))));
+      else if (kind === 'kick') onStomp('kick', Math.min(1, 0.6 + 0.4 * (p / (kthr * 2))));
       else { if (ctx) { play.hat(ctx.currentTime, Math.min(1, 0.5 + 0.5 * (p / kthr))); show('hat'); } }
       return;
     }
