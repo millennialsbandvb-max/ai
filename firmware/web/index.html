@@ -71,6 +71,7 @@
 
 <h2>Snare trigger</h2>
 <div class="seg" data-key="snare">
+  <button type="button" data-v="4">Bounce = hat, stomp = kick, lift = snare</button>
   <button type="button" data-v="0">Swing right</button>
   <button type="button" data-v="1">Tap = snare, stomp = kick</button>
   <button type="button" data-v="2">Tap = kick, stomp = snare</button>
@@ -107,8 +108,10 @@
   <button type="button" data-v="2">Eighths</button>
 </div>
 
-<div class="ctl"><label for="thr">Tap above</label><output id="thrOut"></output>
-  <input type="range" id="thr" data-key="thr" min="0.3" max="12" step="0.05" value="2.0"></div>
+<div class="ctl"><label for="thr">Lightest landing that counts</label><output id="thrOut"></output>
+  <input type="range" id="thr" data-key="thr" min="0.3" max="12" step="0.05" value="1.5"></div>
+<div class="ctl"><label for="kthr">Kick: stomp above (lighter = hi-hat)</label><output id="kthrOut"></output>
+  <input type="range" id="kthr" data-key="kthr" min="0.5" max="20" step="0.05" value="3.5"></div>
 <div class="ctl"><label for="sthr">Hard stomp above</label><output id="sthrOut"></output>
   <input type="range" id="sthr" data-key="sthr" min="0.5" max="20" step="0.05" value="5"></div>
 <div class="ctl"><label for="swthr">Snare: swing speed above</label><output id="swthrOut"></output>
@@ -121,7 +124,7 @@
   <input type="range" id="vol" data-key="vol" min="0" max="255" step="1" value="200"></div>
 <div class="ctl"><label for="pvol">Phone volume</label><output id="pvolOut"></output>
   <input type="range" id="pvol" min="0" max="100" step="1" value="85"></div>
-<p class="hint">Everything here is stored on the board, so once it's tuned you can close this page and just play. Bluetooth MIDI is always on: pair the board in GarageBand (Settings › Advanced › Bluetooth MIDI) to use the phone's drum sounds with the phone locked.</p>
+<p class="hint">Default mode: bounce your leg for hi-hats (light landings), stomp harder for a kick, lift the foot high for a snare. Blue line = lightest landing that counts, orange line = where a landing becomes a kick; "last lift" is how fast the leg rotated before landing. Everything here is stored on the board, so once it's tuned you can close this page and just play. Bluetooth MIDI is always on: pair the board in GarageBand (Settings › Advanced › Bluetooth MIDI) to use the phone's drum sounds with the phone locked.</p>
 <p class="err" id="err" hidden></p>
 <button class="big" id="go" type="button">Enable sound on this phone</button>
 
@@ -156,10 +159,10 @@
   const cv = $('scope'), g2 = cv.getContext('2d');
   function draw() {
     const w = cv.width, h = cv.height, thr = +$('thr').value, sthr = +$('sthr').value, mode = +(cfg.snare || 0);
-    const scale = (mode === 1 || mode === 2) ? Math.max(sthr * 1.5, 1.5) : Math.max(thr * 3, 1.5);
+    const kthr = +$('kthr').value; const scale = (mode === 1 || mode === 2) ? Math.max(sthr * 1.5, 1.5) : mode === 4 ? Math.max(kthr * 1.5, 1.5) : Math.max(thr * 3, 1.5);
     g2.clearRect(0, 0, w, h); const y = v => h - Math.min(1, v / scale) * h;
     g2.lineWidth = 2; g2.setLineDash([8, 8]);
-    const lines = mode === 1 ? [[thr, colors.snare], [sthr, colors.kick]] : mode === 2 ? [[thr, colors.kick], [sthr, colors.snare]] : [[thr, colors.kick]];
+    const lines = mode === 1 ? [[thr, colors.snare], [sthr, colors.kick]] : mode === 2 ? [[thr, colors.kick], [sthr, colors.snare]] : mode === 4 ? [[thr, colors.hat], [kthr, colors.kick]] : [[thr, colors.kick]];
     for (const [v, c] of lines) { g2.strokeStyle = c; g2.beginPath(); g2.moveTo(0, y(v)); g2.lineTo(w, y(v)); g2.stroke(); }
     g2.setLineDash([]); g2.strokeStyle = '#f2efe6'; g2.lineWidth = 3; g2.beginPath();
     for (let i = 0; i < trace.length; i++) { const v = trace[(ti + i) % trace.length], x = (i / (trace.length - 1)) * w; i ? g2.lineTo(x, y(v)) : g2.moveTo(x, y(v)); }
@@ -173,7 +176,7 @@
   }
 
   // ---------- Settings UI ----------
-  const fmt = { thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => (+v).toFixed(2) + ' m/s', lthr: v => v + ' °/s', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
+  const fmt = { thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => (+v).toFixed(2) + ' m/s', lthr: v => v + ' °/s', kthr: v => (+v).toFixed(2) + ' g', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
   function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function applyCfg(c) {
     cfg = c;

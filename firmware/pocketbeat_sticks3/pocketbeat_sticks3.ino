@@ -21,16 +21,17 @@
 
 // ---------------- Settings (persisted) ----------------
 struct Cfg {
-  float thr = 2.0f;      // tap threshold, g (linear accel magnitude)
-  float sthr = 5.0f;     // hard stomp threshold, g
+  float thr = 1.5f;      // lightest landing that counts, g (linear accel magnitude)
+  float sthr = 5.0f;     // hard stomp threshold, g (stomp modes)
+  float kthr = 3.5f;     // kick threshold in bounce/stomp/lift mode; lighter landings are hats
   float swthr = 0.35f;   // swing speed threshold, m/s
   int gap = 120;         // ms between hits
-  int snare = 0;         // 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare, 3 high lift (gyro)
+  int snare = 4;         // 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare, 3 high lift, 4 bounce=hat/stomp=kick/lift=snare
   float lthr = 250.0f;   // lift threshold, deg/s (peak rotation rate before the landing)
   int kit = 0;           // 0 acoustic, 1 electro
   int out = 0;           // 0 board speaker, 1 phone, 2 both
   int quant = 2;         // 0 off, 2 eighths, 4 sixteenths
-  int hat = 2;           // 0 off, 1 quarters, 2 eighths
+  int hat = 0;           // 0 off, 1 quarters, 2 eighths (auto hats; off by default since bounces play hats)
   int vol = 200;         // speaker volume 0-255
   float rx = 0, ry = 0, rz = 0; bool cal = false;  // "right" direction in sensor frame
 } cfg;
@@ -164,6 +165,13 @@ float gyroMag = 0, liftMax = 0;   // deg/s; liftMax = fastest rotation since the
 uint32_t lastT = 0;
 
 void fireStomp(float p, float now) {
+  if (cfg.snare == 4) {   // bounce = hat, stomp = kick, lift = snare
+    float lift = liftMax; liftMax = 0;
+    if (lift >= cfg.lthr) onHit(SNARE, constrain(0.7f + 0.3f * (lift / (2 * cfg.lthr)), 0, 1), p, -1, now, lift);
+    else if (p >= cfg.kthr) onHit(KICK, constrain(0.6f + 0.4f * (p / (cfg.kthr * 2)), 0, 1), p, -1, now, lift);
+    else hit(HAT, constrain(0.5f + 0.5f * (p / cfg.kthr), 0, 1), p, -1, lift);   // live hat, doesn't drive the clock
+    return;
+  }
   if (cfg.snare == 3) {   // high lift: judge by how fast the leg rotated on the way in
     float lift = liftMax; liftMax = 0;
     Kind k = lift >= cfg.lthr ? SNARE : KICK;
@@ -171,7 +179,7 @@ void fireStomp(float p, float now) {
     return;
   }
   liftMax = 0;
-  bool hardMode = cfg.snare != 0 && cfg.snare != 3, isHard = hardMode && p >= cfg.sthr;
+  bool hardMode = cfg.snare == 1 || cfg.snare == 2, isHard = hardMode && p >= cfg.sthr;
   Kind hardKind = cfg.snare == 1 ? KICK : SNARE, softKind = cfg.snare == 1 ? SNARE : KICK;
   if (isHard) onHit(hardKind, constrain(0.7f + 0.3f * (p / (cfg.sthr * 2)), 0, 1), p, -1, now);
   else onHit(hardMode ? softKind : KICK, constrain(0.6f + 0.4f * (p / (hardMode ? cfg.sthr : cfg.thr * 2.5f)), 0, 1), p, -1, now);
@@ -228,8 +236,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[320];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"sthr\":%.2f,\"swthr\":%.2f,\"lthr\":%.0f,\"gap\":%d,\"snare\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d}}",
-           cfg.thr, cfg.sthr, cfg.swthr, cfg.lthr, cfg.gap, cfg.snare, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0);
+  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"sthr\":%.2f,\"swthr\":%.2f,\"lthr\":%.0f,\"kthr\":%.2f,\"gap\":%d,\"snare\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d}}",
+           cfg.thr, cfg.sthr, cfg.swthr, cfg.lthr, cfg.kthr, cfg.gap, cfg.snare, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -251,6 +259,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "sthr", &f); if (f) cfg.sthr = v;
   v = jsonNum(s, "swthr", &f); if (f) cfg.swthr = v;
   v = jsonNum(s, "lthr", &f); if (f) cfg.lthr = v;
+  v = jsonNum(s, "kthr", &f); if (f) cfg.kthr = v;
   v = jsonNum(s, "gap", &f); if (f) cfg.gap = (int)v;
   v = jsonNum(s, "snare", &f); if (f) cfg.snare = (int)v;
   v = jsonNum(s, "kit", &f); if (f) cfg.kit = constrain((int)v, 0, 1);
@@ -289,7 +298,7 @@ void drawScreen() {
   d.setTextSize(1); d.setTextColor(TFT_DARKGREY);
   d.setCursor(4, 60); d.printf("BLE %s  WiFi %d", bleConnected ? "on" : "--", WiFi.softAPgetStationNum());
   d.setCursor(4, 72); d.printf("batt %d%%", M5.Power.getBatteryLevel());
-  d.setCursor(4, 84); d.print(cfg.snare == 0 ? (cfg.cal ? "snare: swing R" : "snare: SET RIGHT") : cfg.snare == 1 ? "tap=sn stomp=kk" : cfg.snare == 2 ? "tap=kk stomp=sn" : "snare: high lift");
+  d.setCursor(4, 84); d.print(cfg.snare == 0 ? (cfg.cal ? "snare: swing R" : "snare: SET RIGHT") : cfg.snare == 1 ? "tap=sn stomp=kk" : cfg.snare == 2 ? "tap=kk stomp=sn" : cfg.snare == 3 ? "snare: high lift" : "bounce/stomp/lift");
   d.endWrite();
 }
 
