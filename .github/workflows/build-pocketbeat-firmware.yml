@@ -1,0 +1,37 @@
+name: Build PocketBeat firmware
+
+on:
+  push:
+    paths: ['firmware/**', '.github/workflows/build-pocketbeat-firmware.yml']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: arduino/setup-arduino-cli@v2
+      - name: Install ESP32 core and libraries
+        run: |
+          arduino-cli config init --overwrite
+          arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
+          arduino-cli core update-index
+          arduino-cli core install esp32:esp32@3.1.1
+          arduino-cli lib install "M5Unified" "ESP Async WebServer" "Async TCP" "BLE-MIDI" "NimBLE-Arduino@1.4.3" "MIDI Library"
+      - name: Compile
+        run: |
+          arduino-cli compile \
+            --fqbn "esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,CDCOnBoot=cdc" \
+            --build-property "compiler.cpp.extra_flags=-DBLEMIDI_ESP32_NIMBLE" \
+            --output-dir build \
+            firmware/pocketbeat_sticks3
+          ls -la build
+      - name: Package
+        run: |
+          mkdir -p out
+          cp build/pocketbeat_sticks3.ino.merged.bin out/pocketbeat_sticks3.bin
+          cp firmware/README.md out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pocketbeat_sticks3-firmware
+          path: out

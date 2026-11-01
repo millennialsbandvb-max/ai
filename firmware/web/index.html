@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>PocketBeat Board</title>
+<style>
+  :root {
+    --bg: #0e0f12; --panel: #181a20; --fg: #f2efe6; --muted: #8b8f9c;
+    --kick: #ff6a3d; --snare: #ffd166; --hat: #7bdff2; --line: #2a2d36; --ok: #7bf2a8;
+    --font-display: "Avenir Next Condensed", "Helvetica Neue", Arial Narrow, sans-serif;
+    --font-body: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--fg); font-family: var(--font-body);
+    padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px) max(16px, env(safe-area-inset-left, 0px));
+    display: flex; flex-direction: column; gap: 12px; -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent; overflow-y: auto; }
+  header { display: flex; align-items: baseline; justify-content: space-between; padding-top: 10px; flex: none; }
+  h1 { font-family: var(--font-display); font-weight: 700; font-size: 28px; letter-spacing: .02em; margin: 0; }
+  .status { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .status.on { color: var(--ok); }
+  .meter { position: relative; background: var(--panel); border-radius: 18px; height: 150px; overflow: hidden; border: 1px solid var(--line); flex: none; }
+  .meter canvas { width: 100%; height: 100%; display: block; }
+  .meter .flash { position: absolute; inset: 0; opacity: 0; pointer-events: none; transition: opacity .25s ease-out; }
+  .meter .flash.on { opacity: .45; transition: none; }
+  .meter .label { position: absolute; left: 14px; top: 10px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; }
+  .meter .last { position: absolute; right: 14px; top: 8px; font-family: var(--font-display); font-size: 40px; font-weight: 700; letter-spacing: .04em; line-height: 1; }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; flex: none; }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+  .tile b { display: block; font-family: var(--font-display); font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+  .tile span { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin: 6px 0 0; font-weight: 600; flex: none; }
+  .seg { flex: none; display: flex; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .seg button { flex: 1; background: none; border: 0; color: var(--muted); padding: 10px 4px; font-size: 12px; line-height: 1.2; cursor: pointer; }
+  .seg button.on { background: var(--fg); color: var(--bg); font-weight: 600; }
+  .ctl { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 10px; flex: none; }
+  .ctl label { font-size: 13px; }
+  .ctl output { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .ctl input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--fg); }
+  .hint { font-size: 12px; color: var(--muted); line-height: 1.45; margin: 0; flex: none; }
+  .row { display: flex; gap: 10px; flex: none; }
+  .row button { flex: 1; background: var(--panel); color: var(--fg); border: 1px solid var(--line); border-radius: 12px; padding: 12px; font-size: 14px; cursor: pointer; }
+  .row button.arm { background: var(--snare); color: #2a1f00; border-color: var(--snare); }
+  .big { margin-top: 4px; margin-bottom: 10px; font-family: var(--font-display); font-size: 22px; font-weight: 700; letter-spacing: .04em;
+    background: var(--fg); color: var(--bg); border: 0; border-radius: 16px; padding: 16px; width: 100%; cursor: pointer; flex: none; }
+  .big.live { background: var(--kick); color: #1a0b05; }
+  .err { color: var(--snare); font-size: 13px; margin: 0; flex: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>PocketBeat</h1>
+  <div class="status" id="status">connecting…</div>
+</header>
+
+<div class="meter">
+  <canvas id="scope" width="800" height="300"></canvas>
+  <div class="flash" id="flash"></div>
+  <div class="label">impact · g (from the board)</div>
+  <div class="last" id="last">—</div>
+</div>
+
+<div class="tiles">
+  <div class="tile"><b id="bpm">—</b><span>bpm</span></div>
+  <div class="tile"><b id="mPeak">—</b><span>last stomp · g</span></div>
+  <div class="tile"><b id="batt">—</b><span>board battery</span></div>
+</div>
+
+<h2>Snare trigger</h2>
+<div class="seg" data-key="snare">
+  <button type="button" data-v="0">Swing right</button>
+  <button type="button" data-v="1">Tap = snare, stomp = kick</button>
+  <button type="button" data-v="2">Tap = kick, stomp = snare</button>
+</div>
+<div class="row"><button type="button" id="calBtn">Set right: tap, then swing right once</button></div>
+<div class="tile" style="flex:none"><b id="mSwing">—</b><span>last swing · m/s · right direction: <span id="calState">?</span></span></div>
+
+<h2>Drum kit</h2>
+<div class="seg" data-key="kit">
+  <button type="button" data-v="0">Acoustic</button>
+  <button type="button" data-v="1">Electro</button>
+</div>
+<h2>Sound comes out of</h2>
+<div class="seg" data-key="out">
+  <button type="button" data-v="0">Board speaker</button>
+  <button type="button" data-v="1">This phone</button>
+  <button type="button" data-v="2">Both</button>
+</div>
+<h2>Quantize</h2>
+<div class="seg" data-key="quant">
+  <button type="button" data-v="0">Off</button>
+  <button type="button" data-v="2">8ths</button>
+  <button type="button" data-v="4">16ths</button>
+</div>
+<h2>Hi-hat (automatic)</h2>
+<div class="seg" data-key="hat">
+  <button type="button" data-v="0">Off</button>
+  <button type="button" data-v="1">Quarters</button>
+  <button type="button" data-v="2">Eighths</button>
+</div>
+
+<div class="ctl"><label for="thr">Tap above</label><output id="thrOut"></output>
+  <input type="range" id="thr" data-key="thr" min="0.3" max="12" step="0.05" value="2.0"></div>
+<div class="ctl"><label for="sthr">Hard stomp above</label><output id="sthrOut"></output>
+  <input type="range" id="sthr" data-key="sthr" min="0.5" max="20" step="0.05" value="5"></div>
+<div class="ctl"><label for="swthr">Snare: swing speed above</label><output id="swthrOut"></output>
+  <input type="range" id="swthr" data-key="swthr" min="0.05" max="3" step="0.05" value="0.35"></div>
+<div class="ctl"><label for="gap">Minimum gap between hits</label><output id="gapOut"></output>
+  <input type="range" id="gap" data-key="gap" min="60" max="400" step="10" value="120"></div>
+<div class="ctl"><label for="vol">Board speaker volume</label><output id="volOut"></output>
+  <input type="range" id="vol" data-key="vol" min="0" max="255" step="1" value="200"></div>
+<div class="ctl"><label for="pvol">Phone volume</label><output id="pvolOut"></output>
+  <input type="range" id="pvol" min="0" max="100" step="1" value="85"></div>
+<p class="hint">Everything here is stored on the board, so once it's tuned you can close this page and just play. Bluetooth MIDI is always on: pair the board in GarageBand (Settings › Advanced › Bluetooth MIDI) to use the phone's drum sounds with the phone locked.</p>
+<p class="err" id="err" hidden></p>
+<button class="big" id="go" type="button">Enable sound on this phone</button>
+
+<script src="samples.js"></script>
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const colors = { kick: '#ff6a3d', snare: '#ffd166', hat: '#7bdff2' };
+  let cfg = {}, ws = null, phoneSound = false;
+
+  // ---------- Phone audio (optional) ----------
+  let ctx = null, master = null, kit = 0;
+  const kitNames = ['acoustic', 'electro'], buffers = {};
+  function b64ToBuf(b64) { const bin = atob(b64), u = new Uint8Array(bin.length); for (let i = 0; i < u.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; }
+  function ensureAudio() {
+    if (ctx) return;
+    ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+    master = ctx.createGain(); master.gain.value = $('pvol').value / 100; master.connect(ctx.destination);
+    for (const name of kitNames) { buffers[name] = {}; for (const [k, b64] of Object.entries(window.PB_KITS[name])) ctx.decodeAudioData(b64ToBuf(b64), b => buffers[name][k] = b, () => {}); }
+  }
+  function playPhone(kind, vel) {
+    if (!ctx) return; const b = buffers[kitNames[kit]] && buffers[kitNames[kit]][kind]; if (!b) return;
+    const s = ctx.createBufferSource(); s.buffer = b; const g = ctx.createGain(); g.gain.value = (kind === 'hat' ? 0.5 : 0.95) * (0.55 + 0.45 * vel);
+    s.connect(g).connect(master); s.start();
+  }
+  $('pvol').addEventListener('input', () => { $('pvolOut').textContent = $('pvol').value + '%'; if (master) master.gain.value = $('pvol').value / 100; });
+  $('pvolOut').textContent = $('pvol').value + '%';
+  $('go').addEventListener('click', () => { ensureAudio(); ctx.resume(); phoneSound = true; $('go').textContent = 'Phone sound on'; $('go').classList.add('live'); });
+
+  // ---------- Scope ----------
+  const trace = new Float32Array(240); let ti = 0;
+  const cv = $('scope'), g2 = cv.getContext('2d');
+  function draw() {
+    const w = cv.width, h = cv.height, thr = +$('thr').value, sthr = +$('sthr').value, mode = +(cfg.snare || 0);
+    const scale = mode ? Math.max(sthr * 1.5, 1.5) : Math.max(thr * 3, 1.5);
+    g2.clearRect(0, 0, w, h); const y = v => h - Math.min(1, v / scale) * h;
+    g2.lineWidth = 2; g2.setLineDash([8, 8]);
+    const lines = mode === 1 ? [[thr, colors.snare], [sthr, colors.kick]] : mode === 2 ? [[thr, colors.kick], [sthr, colors.snare]] : [[thr, colors.kick]];
+    for (const [v, c] of lines) { g2.strokeStyle = c; g2.beginPath(); g2.moveTo(0, y(v)); g2.lineTo(w, y(v)); g2.stroke(); }
+    g2.setLineDash([]); g2.strokeStyle = '#f2efe6'; g2.lineWidth = 3; g2.beginPath();
+    for (let i = 0; i < trace.length; i++) { const v = trace[(ti + i) % trace.length], x = (i / (trace.length - 1)) * w; i ? g2.lineTo(x, y(v)) : g2.moveTo(x, y(v)); }
+    g2.stroke(); requestAnimationFrame(draw);
+  }
+  draw();
+  function show(kind) {
+    $('last').textContent = kind.toUpperCase(); $('last').style.color = colors[kind];
+    $('flash').style.background = colors[kind]; $('flash').classList.add('on');
+    requestAnimationFrame(() => requestAnimationFrame(() => $('flash').classList.remove('on')));
+  }
+
+  // ---------- Settings UI ----------
+  const fmt = { thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => (+v).toFixed(2) + ' m/s', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
+  function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
+  function applyCfg(c) {
+    cfg = c;
+    for (const el of document.querySelectorAll('input[type=range][data-key]')) { if (c[el.dataset.key] !== undefined) { el.value = c[el.dataset.key]; $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); } }
+    for (const seg of document.querySelectorAll('.seg[data-key]')) { const v = String(c[seg.dataset.key]); for (const b of seg.children) b.classList.toggle('on', b.dataset.v === v); }
+    kit = +(c.kit || 0);
+    $('calState').textContent = c.cal ? 'set' : 'not set';
+  }
+  for (const el of document.querySelectorAll('input[type=range][data-key]')) {
+    el.addEventListener('input', () => { $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); });
+    el.addEventListener('change', () => { send({ set: { [el.dataset.key]: +el.value } }); });
+    $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value);
+  }
+  for (const seg of document.querySelectorAll('.seg[data-key]')) seg.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    for (const x of seg.children) x.classList.toggle('on', x === b);
+    cfg[seg.dataset.key] = +b.dataset.v; if (seg.dataset.key === 'kit') kit = +b.dataset.v;
+    send({ set: { [seg.dataset.key]: +b.dataset.v } });
+  });
+  $('calBtn').addEventListener('click', () => { send({ cal: 1 }); $('calBtn').classList.add('arm'); $('calBtn').textContent = 'Swing right now…'; $('calState').textContent = 'listening'; });
+
+  // ---------- WebSocket to the board ----------
+  function connect() {
+    ws = new WebSocket('ws://' + location.host + '/ws');
+    ws.onopen = () => { $('status').textContent = 'board connected'; $('status').classList.add('on'); send({ get: 1 }); };
+    ws.onclose = () => { $('status').textContent = 'reconnecting…'; $('status').classList.remove('on'); setTimeout(connect, 1000); };
+    ws.onmessage = ev => {
+      const m = JSON.parse(ev.data);
+      if (m.cfg) applyCfg(m.cfg);
+      if (m.m) { for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; } }
+      if (m.hit) {
+        show(m.hit); if (m.g !== undefined) $('mPeak').textContent = m.g.toFixed(2); if (m.sw !== undefined) $('mSwing').textContent = m.sw.toFixed(2);
+        const out = +(cfg.out || 0); if (phoneSound && (out === 1 || out === 2)) playPhone(m.hit, m.v || 1);
+      }
+      if (m.bpm !== undefined) $('bpm').textContent = m.bpm || '—';
+      if (m.batt !== undefined) $('batt').textContent = m.batt + '%';
+      if (m.cal !== undefined) { $('calBtn').classList.remove('arm'); $('calBtn').textContent = 'Set right: tap, then swing right once'; $('calState').textContent = m.cal ? 'set' : 'no swing seen'; }
+    };
+  }
+  connect();
+})();
+</script>
+</body>
+</html>
