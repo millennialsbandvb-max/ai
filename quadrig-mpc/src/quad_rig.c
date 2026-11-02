@@ -1,13 +1,15 @@
-/* Quad Rig: four effect slots and a NAM amp in one plugin for MPC OS (VST2, stereo), like a small pedalboard.
+/* Quad Rig: six effect slots and a NAM amp in one plugin for MPC OS (VST2, stereo), like a small pedalboard.
  * Each slot is one of Duo FX's algorithms or one of Ambient Lab's machines (or Off), with its eight knobs, Mix,
  * presets, Bypass (its tail rings out) and Hold (Ambient Lab's freeze). The amp is NAM MPC (models, cab IR, EQ)
- * and sits wherever Amp Position puts it: first, after FX 1, 2 or 3, or last.
- * It doesn't copy their code: it hosts them. Inside are four Duo FX engines (slot A only), four Ambient Lab engines
+ * and sits wherever Amp Position puts it: first, after FX 1..5, or last. The RIG and AMP pages take a colour after
+ * the amp model's maker (amp_look: words in the model's and its folder's names, AMP_WORDS).
+ * It doesn't copy their code: it hosts them. Inside are six Duo FX engines (slot A only), six Ambient Lab engines
  * and one NAM MPC engine, built from their own sources (their VSTPluginMain renamed: duo_entry, amb_entry,
  * nam_entry); only a slot's chosen engine runs. Parameters are passed through, and the engines' own reports
  * (knob values after a preset or algorithm change) come back through our host callback and on to MPC.
  * State: a chunk with our parameters and NAM's own chunk (its model and IR paths).
- * MIDI (any channel): CC 81-84 bypass FX 1-4 (64+ = bypassed), CC 85 the amp, CC 64 Hold on every slot. */
+ * MIDI (any channel): CC 81-84 bypass FX 1-4 (64+ = bypassed), CC 85 the amp, CC 86-87 FX 5-6, CC 64 Hold on every slot.
+ * State: "QRIG1 <n>"; a four-slot chunk (before Nov 2026) is read too (its slots 5-6 Off, its amp position mapped). */
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -29,7 +31,8 @@ int amb_pick(AEffect *, int, int, int, char *, int);
 int nam_pick(AEffect *, int, int, int, char *, int);
 int duo_look(AEffect *), amb_look(AEffect *);   /* the colour of their pedal (tools/pedal_looks.h) */
 
-#define NS 4
+#define NS 6
+#define NS_OLD 4   /* (the four-slot Quad Rig's state chunks are still read) */
 /* the engines' own parameter numbers we use */
 enum { DUO_ALGO = 0, DUO_MIX = 2, DUO_K = 3, DUO_B_ALGO = 20, DUO_PRESET = 42, DUO_NALGO = 58 };   /* (Duo: 57 + Off) */
 enum { AMB_MACHINE = 0, AMB_MIX = 2, AMB_K = 3, AMB_HOLD = 11, AMB_PRESET = 12, AMB_NMACH = 11 };
@@ -42,8 +45,10 @@ enum { kAmpPos, kAmpBypass, kOutput, kSlot0 };
 enum { S_FX, S_OPEN, S_MIX, S_K, S_PRESET = S_K + 8, S_PREV, S_NEXT, S_BYPASS, S_HOLD, SP };
 #define SLOT(s, k) (kSlot0 + (s) * SP + (k))
 enum { kNam0 = kSlot0 + NS * SP, kNumSaved = kNam0 + NAM_N,   /* (the state chunk: these) */
-       kLook0 = kNumSaved, kNumParams = kLook0 + NS };          /* FX1..4 Look: read-only, each slot page's colour */
-static const char *const AMP_POS[] = {"Amp First", "After FX 1", "After FX 2", "After FX 3", "Amp Last"};
+       kLook0 = kNumSaved, kAmpLook = kLook0 + NS,               /* FX1..6 Look, Amp Look: read-only, the pages' colours */
+       kNumParams = kAmpLook + 1 };
+static const char *const AMP_POS[] = {"Amp First", "After FX 1", "After FX 2", "After FX 3", "After FX 4", "After FX 5", "Amp Last"};
+#define N_POS (NS + 1)
 
 typedef struct {
     AEffect fx;
@@ -53,6 +58,7 @@ typedef struct {
     AEffect *duo[NS], *amb[NS], *nam;
     int kind[NS];                  /* what each slot runs now: 0 Duo, 1 Ambient Lab, 2 Off */
     float byp_s[NS];
+    int amp_look_tick;
     volatile int update_display;
     volatile unsigned char automate[kNumParams];
     char *chunk;
@@ -147,7 +153,7 @@ static void setParameter(AEffect *e, int32_t i, float v) {
     if (i < 0 || i >= kNumParams || i >= kLook0) return;   /* (the looks are read-only) */
     v = clampf(v, 0, 1);
     if (i >= kNam0) { s->nam->setParameter(s->nam, i - kNam0, v); s->norm[i] = s->nam->getParameter(s->nam, i - kNam0); return; }
-    if (i == kAmpPos) { s->norm[i] = (float)option_of(v, 5) / 4; s->update_display = 1; return; }
+    if (i == kAmpPos) { s->norm[i] = (float)option_of(v, N_POS) / (N_POS - 1); s->update_display = 1; return; }
     if (i == kAmpBypass) { s->norm[i] = v > 0.5f ? 1 : 0; s->update_display = 1; return; }
     if (i == kOutput) { s->norm[i] = v; return; }
     const int k = (i - kSlot0) / SP, w = (i - kSlot0) % SP;
@@ -196,8 +202,41 @@ static void fill_fx_names(void) {
     for (int p = 0; p < N_FX; p++) FX_PLACE[FX_AT[p]] = p;
 }
 
+/* the amp's colour, after its maker: the first word found in the model's name, else its folder's (lower case) */
+static const struct { const char *word; int look; } AMP_WORDS[] = {
+    {"fender", LK_SILVER}, {"twin", LK_SILVER}, {"deluxe", LK_SILVER}, {"bassman", LK_IVORY}, {"tweed", LK_IVORY},
+    {"princeton", LK_SILVER}, {"champ", LK_IVORY}, {"super reverb", LK_SILVER}, {"blackface", LK_SILVER},
+    {"marshall", LK_GOLD}, {"jcm", LK_GOLD}, {"plexi", LK_GOLD}, {"jtm", LK_GOLD}, {"jvm", LK_GOLD}, {"1959", LK_GOLD},
+    {"1987", LK_GOLD}, {"silver jubilee", LK_SILVER}, {"friedman", LK_GOLD}, {"be-100", LK_GOLD}, {"be100", LK_GOLD},
+    {"vox", LK_COPPER}, {"ac30", LK_COPPER}, {"ac15", LK_COPPER},
+    {"mesa", LK_BLACK}, {"boogie", LK_BLACK}, {"rectifier", LK_BLACK}, {"recto", LK_BLACK}, {"mark iv", LK_BLACK},
+    {"mark v", LK_BLACK}, {"orange", LK_ORANGE}, {"rockerverb", LK_ORANGE}, {"peavey", LK_RED}, {"5150", LK_RED},
+    {"6505", LK_RED}, {"evh", LK_RED}, {"engl", LK_RED}, {"bogner", LK_BLUE}, {"uberschall", LK_BLUE},
+    {"ecstasy", LK_BLUE}, {"soldano", LK_SILVER}, {"slo", LK_SILVER}, {"diezel", LK_GRAPHITE}, {"dumble", LK_PLUM},
+    {"ods", LK_PLUM}, {"two rock", LK_PLUM}, {"tworock", LK_PLUM}, {"matchless", LK_IVORY}, {"dr z", LK_TEAL},
+    {"bad cat", LK_TEAL}, {"hiwatt", LK_SILVER}, {"ampeg", LK_SKY}, {"svt", LK_SKY}, {"darkglass", LK_BLACK},
+    {"laney", LK_PERIWINKLE}, {"revv", LK_PURPLE}, {"kemper", LK_GRAPHITE}, {"roland", LK_GRAPHITE},
+    {"jazz chorus", LK_GRAPHITE}, {"jc-120", LK_GRAPHITE}, {"jc120", LK_GRAPHITE}, {"supro", LK_TURQUOISE},
+    {"magnatone", LK_MAGENTA}, {"silvertone", LK_SILVER}, {"gibson", LK_YELLOW}, {"dual rec", LK_BLACK},
+};
+static int amp_look_of(const char *name) {
+    char low[96];
+    size_t i = 0;
+    for (; name[i] && i < sizeof low - 1; i++) low[i] = (char)(name[i] >= 'A' && name[i] <= 'Z' ? name[i] - 'A' + 'a' : name[i]);
+    low[i] = 0;
+    for (size_t w = 0; w < sizeof AMP_WORDS / sizeof *AMP_WORDS; w++) if (strstr(low, AMP_WORDS[w].word)) return AMP_WORDS[w].look;
+    return -1;
+}
+static int amp_look(Plugin *s) {   /* (NAM's model and folder names: its params 6 and 15) */
+    char t[96] = {0};
+    s->nam->dispatcher(s->nam, effGetParamDisplay, 6, 0, t, 0);
+    int l = amp_look_of(t);
+    if (l < 0) { memset(t, 0, sizeof t); s->nam->dispatcher(s->nam, effGetParamDisplay, 15, 0, t, 0); l = amp_look_of(t); }
+    return l < 0 ? LK_RED : l;   /* (unknown: the page's own red) */
+}
 static int slot_look(Plugin *s, int k) { return s->kind[k] == 0 ? duo_look(s->duo[k]) : s->kind[k] == 1 ? amb_look(s->amb[k]) : LK_GRAPHITE; }
 static void param_name(Plugin *s, int i, char *t) {
+    if (i == kAmpLook) { snprintf(t, 32, "Amp Look"); return; }
     if (i >= kLook0) { snprintf(t, 32, "FX%d Look", i - kLook0 + 1); return; }
     if (i >= kNam0) { s->nam->dispatcher(s->nam, effGetParamName, i - kNam0, 0, t, 0); return; }
     if (i < kSlot0) { static const char *const N[] = {"Amp Position", "Amp Bypass", "Output"}; snprintf(t, 32, "%s", N[i]); return; }
@@ -213,9 +252,10 @@ static void param_name(Plugin *s, int i, char *t) {
     snprintf(t, 32, "FX%d %s", k + 1, W[w]);
 }
 static void param_display(Plugin *s, int i, char *t) {
+    if (i == kAmpLook) { snprintf(t, 32, "%s", PEDAL_LOOKS[option_of(s->norm[i], N_LOOKS)].name); return; }
     if (i >= kLook0) { snprintf(t, 32, "%s", PEDAL_LOOKS[slot_look(s, i - kLook0)].name); return; }
     if (i >= kNam0) { s->nam->dispatcher(s->nam, effGetParamDisplay, i - kNam0, 0, t, 0); return; }
-    if (i == kAmpPos) { snprintf(t, 32, "%s", AMP_POS[option_of(s->norm[i], 5)]); return; }
+    if (i == kAmpPos) { snprintf(t, 32, "%s", AMP_POS[option_of(s->norm[i], N_POS)]); return; }
     if (i == kAmpBypass) { snprintf(t, 32, "%s", s->norm[i] > 0.5f ? "Bypassed" : "On"); return; }
     if (i == kOutput) { snprintf(t, 32, "%+.1f dB", -24 + 36 * s->norm[i]); return; }
     const int k = (i - kSlot0) / SP, w = (i - kSlot0) % SP;
@@ -247,13 +287,24 @@ static int get_chunk(Plugin *s, void **out) {
 }
 static void set_chunk(Plugin *s, const char *c, size_t n) {
     int np = 0, used = 0;
-    if (n < 8 || sscanf(c, "QRIG1 %d\n%n", &np, &used) != 1 || np != kNumSaved) return;
+    enum { kOldSaved = kSlot0 + NS_OLD * SP + NAM_N };
+    if (n < 8 || sscanf(c, "QRIG1 %d\n%n", &np, &used) != 1 || (np != kNumSaved && np != kOldSaved)) return;
     float v[kNumSaved];
     size_t o = (size_t)used;
-    for (int i = 0; i < kNumSaved; i++) {
+    for (int i = 0; i < np; i++) {
         int u = 0;
-        if (o >= n || sscanf(c + o, "%f\n%n", &v[i], &u) != 1) return;
+        float x;
+        if (o >= n || sscanf(c + o, "%f\n%n", &x, &u) != 1) return;
         o += (size_t)u;
+        if (np == kNumSaved) v[i] = x;
+        else if (i < kSlot0 + NS_OLD * SP) v[i] = x;
+        else v[i + (NS - NS_OLD) * SP] = x;   /* (its amp values, after our extra slots) */
+    }
+    if (np == kOldSaved) {   /* four slots: 5-6 as a new one starts them (Off), the amp position mapped */
+        for (int i = kSlot0 + NS_OLD * SP; i < kNam0; i++) v[i] = s->norm[i];
+        for (int k = NS_OLD; k < NS; k++) v[SLOT(k, S_FX)] = fx_norm(FX_OFF);
+        const int op = option_of(v[kAmpPos], NS_OLD + 1);
+        v[kAmpPos] = (float)(op == NS_OLD ? NS : op) / (float)(N_POS - 1);
     }
     /* each slot's effect first (it loads that effect's defaults), then everything else over it */
     for (int k = 0; k < NS; k++) setParameter(&s->fx, SLOT(k, S_FX), v[SLOT(k, S_FX)]);
@@ -282,12 +333,17 @@ static void process(AEffect *e, float **in, float **out, int32_t n) {
         const float lv = (float)slot_look(s, k) / (float)(N_LOOKS - 1);
         if (s->norm[kLook0 + k] != lv) { s->norm[kLook0 + k] = lv; s->automate[kLook0 + k] = 1; }
     }
+    if (++s->amp_look_tick >= 64) {   /* the amp's colour: its model's name, now and then (a model loads in the background) */
+        s->amp_look_tick = 0;
+        const float lv = (float)amp_look(s) / (float)(N_LOOKS - 1);
+        if (s->norm[kAmpLook] != lv) { s->norm[kAmpLook] = lv; s->automate[kAmpLook] = 1; }
+    }
     if (s->master) {
         for (int i = 0; i < kNumParams; i++)
             if (s->automate[i]) { s->automate[i] = 0; s->master(e, audioMasterAutomate, i, 0, NULL, s->norm[i]); s->update_display = 1; }
         if (s->update_display) { s->update_display = 0; s->master(e, audioMasterUpdateDisplay, 0, 0, NULL, 0); }
     }
-    const int pos = option_of(s->norm[kAmpPos], 5), amp_on = s->norm[kAmpBypass] < 0.5f;
+    const int pos = option_of(s->norm[kAmpPos], N_POS), amp_on = s->norm[kAmpBypass] < 0.5f;
     const float og = powf(10, (-24 + 36 * s->norm[kOutput]) / 20);
     for (int off = 0; off < n; off += BLK) {
         const int m = n - off < BLK ? n - off : BLK;
@@ -373,6 +429,7 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
             int i = -1;
             if (cc >= 81 && cc <= 84) i = SLOT(cc - 81, S_BYPASS);
             else if (cc == 85) i = kAmpBypass;
+            else if (cc >= 86 && cc <= 87) i = SLOT(cc - 86 + 4, S_BYPASS);
             if (i >= 0) { s->norm[i] = (float)hi; s->automate[i] = 1; }
             if (cc == 64)
                 for (int sl = 0; sl < NS; sl++) if (s->kind[sl] == 1) { setParameter(&s->fx, SLOT(sl, S_HOLD), (float)hi); s->automate[SLOT(sl, S_HOLD)] = 1; }
@@ -408,10 +465,10 @@ static int quad_pick(AEffect *e, int list, int op, int i, char *out, int max) {
 #define KN(f) "f" #f "_k1", "f" #f "_k2", "f" #f "_k3", "f" #f "_k4", "f" #f "_k5", "f" #f "_k6", "f" #f "_k7", "f" #f "_k8"
 #define KT(f) "FX " #f " Knob 1", "FX " #f " Knob 2", "FX " #f " Knob 3", "FX " #f " Knob 4", "FX " #f " Knob 5", "FX " #f " Knob 6", \
               "FX " #f " Knob 7", "FX " #f " Knob 8"
-static const char *const LIST_KEYS[] = {"f1_preset", "f2_preset", "f3_preset", "f4_preset", "amp_folder", "amp_model", "amp_ir_folder", "amp_ir",
-                                        KN(1), KN(2), KN(3), KN(4)};
-static const char *const LIST_TITLES[] = {"FX 1 Presets", "FX 2 Presets", "FX 3 Presets", "FX 4 Presets", "Model Folders", "Models",
-                                          "IR Folders", "IRs", KT(1), KT(2), KT(3), KT(4)};
+static const char *const LIST_KEYS[] = {"f1_preset", "f2_preset", "f3_preset", "f4_preset", "f5_preset", "f6_preset", "amp_folder",
+                                        "amp_model", "amp_ir_folder", "amp_ir", KN(1), KN(2), KN(3), KN(4), KN(5), KN(6)};
+static const char *const LIST_TITLES[] = {"FX 1 Presets", "FX 2 Presets", "FX 3 Presets", "FX 4 Presets", "FX 5 Presets", "FX 6 Presets",
+                                          "Model Folders", "Models", "IR Folders", "IRs", KT(1), KT(2), KT(3), KT(4), KT(5), KT(6)};
 static const PickLists LISTS = {8 + NS * 8, LIST_KEYS, LIST_TITLES, quad_pick, 1};   /* (1: MIDI Ch) */
 
 static AEffect *make(audioMasterCallback master) {
@@ -434,7 +491,7 @@ static AEffect *make(audioMasterCallback master) {
     s->nam = nam_entry(engine_host);
     if (!s->nam) { close_all(s); return NULL; }
     /* a starting board: drive, chorus, amp, delay, reverb */
-    static const char *const START[NS] = {"DrivPdls", "Chorus", "Tape Echo", "Hall"};
+    static const char *const START[NS] = {"DrivPdls", "Chorus", "Tape Echo", "Hall", "Off", "Off"};
     for (int k = 0; k < NS; k++) {
         int fx = FX_OFF;
         for (int f = 0; f < N_FX; f++) if (!strcmp(FX_NAMES[f], START[k])) fx = f;
@@ -442,7 +499,7 @@ static AEffect *make(audioMasterCallback master) {
         s->kind[k] = -1;
         choose_fx(s, k, fx);
     }
-    s->norm[kAmpPos] = 2.0f / 4;   /* after FX 2 */
+    s->norm[kAmpPos] = 2.0f / (N_POS - 1);   /* after FX 2 */
     s->norm[kOutput] = 24.0f / 36;
     for (int i = 0; i < NAM_N; i++) s->norm[kNam0 + i] = s->nam->getParameter(s->nam, i);
     memset((void *)s->automate, 0, sizeof s->automate);
@@ -475,7 +532,7 @@ int main(int argc, char **argv) {
     fill_fx_names();
     printf("{\n  \"name\": \"0Quad Rig\",\n  \"params\": [\n");
     printf("    {\"key\": \"amp_pos\", \"name\": \"Amp Position\", \"options\": [");
-    for (int k = 0; k < 5; k++) printf("%s\"%s\"", k ? ", " : "", AMP_POS[k]);
+    for (int k = 0; k < N_POS; k++) printf("%s\"%s\"", k ? ", " : "", AMP_POS[k]);
     printf("], \"default\": 2},\n");
     printf("    {\"key\": \"amp_bypass\", \"name\": \"Amp Bypass\", \"options\": [\"On\", \"Bypassed\"]},\n");
     printf("    {\"key\": \"output\", \"name\": \"Output\", \"min\": -24, \"max\": 12, \"default\": 0, \"unit\": \"dB\"},\n");
@@ -527,6 +584,9 @@ int main(int argc, char **argv) {
         for (int l = 0; l < N_LOOKS; l++) printf("%s\"%s\"", l ? ", " : "", PEDAL_LOOKS[l].name);
         printf("]}");
     }
+    printf(",\n    {\"key\": \"amp_look\", \"name\": \"Amp Look\", \"options\": [");
+    for (int l = 0; l < N_LOOKS; l++) printf("%s\"%s\"", l ? ", " : "", PEDAL_LOOKS[l].name);
+    printf("]}");
     pl_params_json(&LISTS, stdout);
     printf("\n  ]\n}\n");
     return count == NAM_N ? 0 : 1;

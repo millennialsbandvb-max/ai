@@ -76,11 +76,15 @@ int main(int argc, char **argv) {
         const int f = lists[l];
         settings(argc, argv);
         name(f, t);
-        tap(f);   /* the first tap selects (the wheel's), the second opens */
+        char sn[64];   /* the field: "<title> Sel" (a first tap selects it for the wheel, the second opens the list) */
+        snprintf(sn, sizeof sn, "%.*s Sel", (int)strlen(t) - 5, t);
+        const int fs = param(sn);
+        if (fs < 0) continue;
+        tap(fs);
         disp(f, u);
         if (!strcmp(u, "Closed")) { printf("  %s: shut (nothing to list now)\n", t); continue; }
         CHECK(!strcmp(u, "Selected"), "%s: a first tap shows %s", t, u);
-        tap(f);
+        tap(fs);
         disp(f, u);
         CHECK(!strcmp(u, "Open"), "%s: a second tap didn't open it (%s)", t, u);
         for (int o = 0; o < nl; o++) if (o != l) { char v[64]; disp(lists[o], v); CHECK(strcmp(v, "Open"), "%s open beside %s", v, t); }
@@ -110,7 +114,7 @@ int main(int argc, char **argv) {
         disp(f, u);
         CHECK(!strcmp(u, "Selected"), "%s didn't close on a pick (%s)", t, u);
         for (int w = 0; w < 50; w++) { run(4); usleep(50000); }   /* (a model loads in the background) */
-        tap(f);
+        tap(fs);
         int marked = -1;
         for (int r = 0; r < 24; r++) { disp(row1 + r, u); if (!strncmp(u, "> ", 2)) marked = r; }
         disp(row1 + pick, u);

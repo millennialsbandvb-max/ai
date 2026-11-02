@@ -27,7 +27,7 @@ patch('''                if w.get("get"):
 ''', '''                if w.get("get"):
                     need.append(w["get"])
                 if k + "__list" in index:
-                    need += PICK_KEYS
+                    need += PICK_KEYS + ([k + "__sel"] if k + "__sel" in index else [])
 ''')
 
 # the field: a tap toggles the list open (no knob menu); the panel goes on top like a popup's
@@ -41,13 +41,16 @@ patch('''                key = "shStepText_%s%dx%d" % ("dot_" if dot else "", w[
 ''', '''                li = index.get(w["key"] + "__list")
                 if li is not None:
                     fw = w["w"] - 2 * h - 6
-                    key = "shStepList_%s%dx%d" % ("dot_" if dot else "", fw, h)
-                    # (a tap also gives the data wheel to the list: turning it steps through the entries, list open)
-                    defs.setdefault(key, _local(key, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch"),
-                                                      _action("Mouse Down", "Q-Link")],
-                                                [_focus(fw, h), _value_label(8, 0, fw - 16, h, 26.0, DISPLAY_INK if dot else ACCENT,
-                                                                             handle="Text")]))
-                    kids.append(_placed(key, name, li, x0 + h + 3, y0, fw, h, extra={"Text": gi}))
+                    # the field is built like the < > arrows (device-proven with the wheel): a button over its own
+                    # background, on the list's "<key>__sel" parameter, and a touch gives it the data wheel (Q-Link; one
+                    # Mouse Down action only: with two, the wheel never came). picklist.h: first tap selects (the wheel
+                    # steps), the next opens the list.
+                    fimg = "sh_field_%d_%s.png" % (t, w["key"])
+                    key = "shStepSel_%d_%s" % (t, w["key"])
+                    defs.setdefault(key, _local(key, [_action("Enter Pressed", "Toggle Switch"), _action("Mouse Down", "Q-Link")],
+                                                [_focus(fw, h), _button(fimg, fimg, 1, 1, fw, h),
+                                                 _value_label(8, 0, fw - 16, h, 26.0, DISPLAY_INK if dot else ACCENT, handle="Text")]))
+                    kids.append(_placed(key, name, index[w["key"] + "__sel"], x0 + h + 3, y0, fw, h, extra={"Text": gi}))
                     on_top += pick_panel(t, w, li)
                 else:
                     key = "shStepText_%s%dx%d" % ("dot_" if dot else "", w["w"] - 2 * h - 6, h)
@@ -64,7 +67,7 @@ patch('''    radii, sliders, looks = set(), set(), {}''', '''    defs_made = set
 
     def pick_panel(t, w, li):
         """The full-page list of a stepper with a "<key>__list" parameter (tools/page_lists.py)."""
-        shown = "IndexedEnabling/1/3/Parameter %d" % li   # (tools/picklist.h: open rests at 0.5, the middle of three)
+        shown = "IndexedEnabling/1/2/Parameter %d" % li
         bar_y, bar_h, m = Y_OFF + 12, 60, 16
         cols, rows, gap = 3, 8, 6
         top = bar_y + bar_h + 12
@@ -128,8 +131,7 @@ patch('''                kids.append(_placed(key, name, i, w["cx"] - cw // 2, w[
                                     extra={"List": li} if li is not None else None))
                 if li is not None:
                     vkey = "shKnobValueList_%d" % cw
-                    defs.setdefault(vkey, _local(vkey, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch"),
-                                                        _action("Mouse Down", "Q-Link")],
+                    defs.setdefault(vkey, _local(vkey, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch")],
                                                  [clear_label(_value_label(0, 0, cw, 26, 22.0, INK_DIM, handle="Text"))]))
                     kids.append(_placed(vkey, name + " list", li, w["cx"] - cw // 2, w["cy"] - s // 2 + value_y, cw, 26,
                                         focus="No", extra={"Text": i}))
@@ -232,6 +234,13 @@ patch('''                    defs.setdefault(akey, _local(akey, [_action("Enter 
                                                  [_button(aimg, aimg, 1, 1, aw, ah)]))
                     side_key = w.get(side, w["key"] + "_" + side)
                     kids.append(_placed(akey, "%s %s" % (name, side), index[side_key], ax, ay, aw, ah))''')
+
+# a list stepper's field: its background cropped as its button's picture (as the arrows' are)
+patch('''                script.append("crop|%s|%d|%d|%d|%d" % (art(img), ax, ay, aw, ah))''', '''                script.append("crop|%s|%d|%d|%d|%d" % (art(img), ax, ay, aw, ah))
+            if w["key"] + "__sel" in index:
+                fh = w["h"]
+                script.append("crop|%s|%d|%d|%d|%d" % (art("sh_field_%d_%s" % (t, w["key"])), w["cx"] - w["w"] // 2 + fh + 3,
+                                                       w["cy"] - w["h"] // 2, w["w"] - 2 * fh - 6, fh))''')
 
 
 open(path, "w").write(s)

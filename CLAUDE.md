@@ -45,7 +45,7 @@ Tools needed: arm-linux-gnueabihf-gcc/g++, cmake, ninja, qemu-arm, python3 + PIL
 | `trichorus-mpc/` | **Tri Chorus**: a three-voice bucket-brigade chorus in the spirit of the classic tri-chorus (our own DSP, `src/tri_chorus.c`; no Eventide name/art): voices 120 degrees apart panned L/C/R, slow LFO + ensemble wobble, Chorus/Vibrato, pitch-shifted Shimmer layer; page in `page/`; `test/tri_test.c` | ours |
 | `vocal-mpc/` | **Vocal plugins** (our own DSP; shared `src/vocal_core.h`: param table + params.json, biquads, FDN reverb, YIN tracker, scales/chords, held MIDI, TD-PSOLA voice): **VoxLive 3X** (`voxlive.c`, VoiceLive-3-Extreme-like: 4 voices, Scale / MIDI Chord / MIDI Notes, lead tune, double, humanize, gender, 21 styles), **HedRush Harmony** (`rush_harmony.c`, HeadRush-style 2-voice key/scale harmonizer), **Vocal Rack** (`vocal_rack.c`: gate, EQ, de-ess, comp, tune, FX, double, delay, reverb, 17 presets); pages in `page/<voxlive|rush|rack>/`; `test/vocal_test.c` | ours |
 | `ambient-mpc/` | **Ambient Lab** (our own DSP, `src/ambient.c`, using `vocal-mpc/src/vocal_core.h`): 11 machines after ambient pedals (Mikrocosm granular looper with 44 effects, Moodd MK2 wet channel + micro-looper, Partikle granular delay with 8 modes, Tensr tape stretch, NiteSky sequenced-filter shimmer, Cloudbrst swell/ensemble reverb, Polym00n cascading delays, Hedr4 3-voice pitched delay in key, Aftrneath delay swarm, Rainbow Mchn warbling shifter, Data Korrupt subharmonic synth); 8 knobs per machine (`MACHINES[]`, names live via effGetParamName), Hold (freeze; MIDI CC 64), 15 presets per machine (165); `test/ambient_test.c` | ours |
-| `quadrig-mpc/` | **Quad Rig** (`src/quad_rig.c`): four effect slots (each any Duo FX algorithm or Ambient Lab machine, or Off) + a NAM MPC amp at a movable position; it hosts the real engines (duo_fx.c, ambient.c, nam_mpc.cpp compiled with VSTPluginMain renamed duo_entry / amb_entry / nam_entry) and passes parameters through; page RIG / FX 1-4 / AMP; `test/quad_test.c` | ours |
+| `quadrig-mpc/` | **Quad Rig** (`src/quad_rig.c`): six effect slots (since Nov 2026; was four) (each any Duo FX algorithm or Ambient Lab machine, or Off) + a NAM MPC amp at a movable position; it hosts the real engines (duo_fx.c, ambient.c, nam_mpc.cpp compiled with VSTPluginMain renamed duo_entry / amb_entry / nam_entry) and passes parameters through; page RIG / FX 1-6 / AMP; `test/quad_test.c` | ours |
 | `eq-mpc/` | **EQs** (our own DSP, on `vocal-mpc/src/vocal_core.h`): **31 Smashly** (the user's name for it; files/folder key still GQ31: `graphic_eq.c`, page `gq31`; rack-graphic style, the classic light green-grey face: 31 ISO 1/3-octave constant-Q bands, Range +/-12 / +/-6, 18 dB/oct High-Pass / Low-Pass, Level, EQ, Flat; page of 31 `narrow=1` sliders) and **X-Para EQ** (`para_eq.c`, console channel EQ like the X32's: Low Cut + 4 bands of Type LCut/LShv/PEQ/VEQ/HShv/HCut, Freq, Gain +/-15, Q 0.3-10); and **Fairchyld 670** (`fair_comp.c`, a 660/670-style vari-mu compressor laid out like the X32's "fair" one: Input, Threshold 0-10, Time 1-6 (the original's constants, 5 and 6 program dependent), Bias (knee/ratio), Output, Mix, Mode Linked/Dual/Lat-Vert, a feedback detector, tube colour; read-only GR drives the page's VU needle); pages in `page/<gq31|xpara|fair>/`; `test/eq_test.c` measures the EQs' responses, `test/comp_test.c` the compressor | ours |
 | `browser-mpc/` | **MPC Browser** plugin: its page's lower area is painted `OVERLAY_MARKER`; the browser shows there on the MPC's own screen (see `mpc-remote/overlay.h`) | ours |
 | `tools/` | `build_firmware.sh`, `build_pages.sh` (shared page style: 1.35x text), `vst_test.c` (generic plugin test), `picklist.h` + `page_lists.py` + `pick_test.c` (full-page lists for steppers) | |
@@ -234,6 +234,13 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   ours + effect names asked from the engines + nam-mpc/params.json's entries as amp_* (gen-params checks NAM's
   order). Effect popup: 69 entries need cols=5 and a 240 px field (the list's column width is the field's).
   Adding a Duo algorithm or Ambient machine: update DUO_NALGO / AMB_NMACH (and the test's 68 / 69).
+  Six slots (Nov 2026, the user's ask; NS 6): 6 Duo + 6 Ambient engines (~90 MB a Quad), Amp Position First /
+  After FX 1-5 / Last, CC 86-87 bypass FX 5-6, RIG page two rows of three slots. set_chunk also reads the four-slot
+  chunk (NS_OLD: its amp values moved after the new slots, slots 5-6 Off, amp position mapped). Amp colour: a
+  read-only amp_look (after the FX looks) from words in NAM's model / folder names (AMP_WORDS: Fender silver, Marshall
+  gold, Vox copper, Mesa black, ...; unknown: red), rechecked every 64 blocks; RIG and AMP tabs have
+  `looks key=amp_look`. png_shrink.py now keeps identical pictures once (the six popups' option images: 1,440 files
+  gone, the Quad page 19 -> 14 MB on disk; mind the ~39.6 MB bundle limit).
   A-Z (Oct 2026, the user's ask; old projects may come back on other effects, accepted): Duo's algorithm choice
   and Quad's effect choice list A-Z with Off first. The choice's value is a place in that order (Duo ALGO_AT /
   ALGO_PLACE, algo_norm(); Quad FX_AT / FX_PLACE, fx_norm(), sorted from FX_NAMES); ALGOS[], presets.h and Quad's
@@ -275,8 +282,14 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   Select first (the user's ask): a first tap on the field only selects (flag rests at PL_SEL 0.2, place 0: shut;
   the wheel then steps through the entries with the list shut); a second tap within 8 s of the last touch / turn
   (the toggle from 0.2 goes to 1) opens it; a tap on the open field (toggle to 0) or a pick / Close shuts it and
-  leaves it selected. Display: Closed / Selected / Open. On the device (Nov 2026): "kinda works, well enough" (the
-  user is fine with it; leave it unless they ask).
+  leaves it selected. On the device: "kinda works", then the user found the wheel only worked after tapping < or >,
+  not the name, and the wheel in the open list misbehaved. So (Nov 2026) the field is built like the arrows: a
+  button over its own cropped background (sh_field_<tab>_<key>.png) on a "<title> Sel" parameter (picklist.h appends
+  one per list after everything else; momentary, rest 0.45, arrow-like: pl_arrow), with Enter Toggle + a single
+  Mouse Down Q-Link action (two Mouse Down actions on one component: the second, Q-Link, never ran). First tap
+  selects (the wheel steps the entries, list shut), a second within 8 s opens, a tap on the open list shuts it; no
+  wheel in the open list (removed). The "<title> List" flag is back to Closed / Open (ours; IndexedEnabling/1/2).
+  Knob value-text fields still toggle the List flag directly (the knob itself takes the wheel).
 - **Pedal look** (Oct 2026, the user's pick): our pages (not Airwindows/Dragonfly: PEDAL_LOOK=0 in their build.sh)
   are drawn by the kit's browser renderer (html_art.py) with `tools/pedal_look.css`: an enclosure in the page's
   colour (theme_plate_hi / theme_plate_lo, a hammertone filter on the base background), recessed frames, metal knob
