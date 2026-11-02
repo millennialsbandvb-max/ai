@@ -275,7 +275,8 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   Select first (the user's ask): a first tap on the field only selects (flag rests at PL_SEL 0.2, place 0: shut;
   the wheel then steps through the entries with the list shut); a second tap within 8 s of the last touch / turn
   (the toggle from 0.2 goes to 1) opens it; a tap on the open field (toggle to 0) or a pick / Close shuts it and
-  leaves it selected. Display: Closed / Selected / Open. Device-untested.
+  leaves it selected. Display: Closed / Selected / Open. On the device (Nov 2026): "kinda works, well enough" (the
+  user is fine with it; leave it unless they ask).
 - **Pedal look** (Oct 2026, the user's pick): our pages (not Airwindows/Dragonfly: PEDAL_LOOK=0 in their build.sh)
   are drawn by the kit's browser renderer (html_art.py) with `tools/pedal_look.css`: an enclosure in the page's
   colour (theme_plate_hi / theme_plate_lo, a hammertone filter on the base background), recessed frames, metal knob
