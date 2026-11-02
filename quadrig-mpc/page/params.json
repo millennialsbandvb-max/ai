@@ -1,5 +1,5 @@
 {
-  "name": "0Quad Rig",
+  "name": "0dd Rig",
   "params": [
     {"key": "amp_pos", "name": "Amp Position", "options": ["Amp First", "After FX 1", "After FX 2", "After FX 3", "After FX 4", "After FX 5", "Amp Last"], "default": 2},
     {"key": "amp_bypass", "name": "Amp Bypass", "options": ["On", "Bypassed"]},

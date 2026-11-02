@@ -3,7 +3,7 @@
 # /usr/lib/nam-mpc/entries/*.xml (NAM MPC, the Dragonfly reverbs, ...). If MPC.settings is missing any of them:
 # stop MPC, back the settings up, add the missing entries (all at once, so MPC restarts only once) and start MPC
 # again. An entry already there is left alone unless its maker (manufacturer=, the folder MPC lists it under) or its
-# name (name=, what MPC shows; e.g. Quad Rig became 0Quad Rig to list first) has changed, when it's replaced; an
+# name (name=, what MPC shows; e.g. Quad Rig became 0Quad Rig to list first, then 0dd Rig) has changed, when it's replaced; an
 # entry for one of ours whose file isn't in the firmware any more (Dragonfly and Airwindows were taken out) is removed; nothing else is touched, and any problem leaves the settings as they were.
 # Log: /tmp/nam-mpc-boot.log
 DIR=/usr/lib/nam-mpc
