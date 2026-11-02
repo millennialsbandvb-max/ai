@@ -35,7 +35,7 @@
     {"key": "rev_mix", "name": "Reverb Mix", "min": 0, "max": 100, "default": 15, "unit": "%"},
     {"key": "rev_tone", "name": "Reverb Tone", "min": 0, "max": 100, "default": 60, "unit": "%"},
     {"key": "output", "name": "Output", "min": -24, "max": 12, "default": 0, "unit": "dB"},
-    {"key": "preset__list", "name": "Presets List", "options": ["Closed", "Open", "Open "]},
+    {"key": "preset__list", "name": "Presets List", "options": ["Closed", "Open"]},
     {"key": "pick_1", "name": "List 1", "options": ["Off", "On"], "display": "string"},
     {"key": "pick_2", "name": "List 2", "options": ["Off", "On"], "display": "string"},
     {"key": "pick_3", "name": "List 3", "options": ["Off", "On"], "display": "string"},
@@ -63,6 +63,7 @@
     {"key": "pick_prev", "name": "List <", "options": ["Off", "On"], "momentary": true},
     {"key": "pick_next", "name": "List >", "options": ["Off", "On"], "momentary": true},
     {"key": "pick_close", "name": "List Close", "options": ["Off", "On"], "momentary": true},
-    {"key": "pick_title", "name": "List Title", "options": ["Off", "On"], "display": "string"}
+    {"key": "pick_title", "name": "List Title", "options": ["Off", "On"], "display": "string"},
+    {"key": "preset__sel", "name": "Presets Sel", "options": ["Off", "On"], "momentary": true}
   ]
 }
