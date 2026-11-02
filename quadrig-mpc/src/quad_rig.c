@@ -318,6 +318,7 @@ static void set_chunk(Plugin *s, const char *c, size_t n) {
     if (o < n && sscanf(c + o, "NAM %ld\n%n", &nn, &u) == 1 && nn > 0 && o + (size_t)u + (size_t)nn <= n)
         s->nam->dispatcher(s->nam, effSetChunk, 0, (intptr_t)nn, (void *)(c + o + (size_t)u), 0);
     for (int i = kNam0; i < kNumSaved; i++) s->norm[i] = s->nam->getParameter(s->nam, i - kNam0);
+    s->norm[kAmpLook] = (float)amp_look(s) / (float)(N_LOOKS - 1);
     s->update_display = 1;
 }
 
@@ -502,6 +503,7 @@ static AEffect *make(audioMasterCallback master) {
     s->norm[kAmpPos] = 2.0f / (N_POS - 1);   /* after FX 2 */
     s->norm[kOutput] = 24.0f / 36;
     for (int i = 0; i < NAM_N; i++) s->norm[kNam0 + i] = s->nam->getParameter(s->nam, i);
+    s->norm[kAmpLook] = (float)amp_look(s) / (float)(N_LOOKS - 1);
     memset((void *)s->automate, 0, sizeof s->automate);
     AEffect *e = &s->fx;
     e->magic = VST_MAGIC;
