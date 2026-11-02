@@ -274,6 +274,13 @@
         "On"
       ],
       "momentary": true
+    },
+    {
+      "key": "amp_presence",
+      "name": "Presence",
+      "min": 0,
+      "max": 10,
+      "default": 5
     }
 ,
     {"key": "f1_look", "name": "FX1 Look", "options": ["Graphite", "Green", "Gold", "Black", "Silver", "Red", "Blue", "Orange", "Ivory", "Periwinkle", "Yellow", "Plum", "Delay", "Reverb", "Mod", "Pitch", "Drive", "Grain", "Teal", "Purple", "Sky", "Turquoise", "Magenta", "Copper"]},
@@ -283,6 +290,9 @@
     {"key": "f5_look", "name": "FX5 Look", "options": ["Graphite", "Green", "Gold", "Black", "Silver", "Red", "Blue", "Orange", "Ivory", "Periwinkle", "Yellow", "Plum", "Delay", "Reverb", "Mod", "Pitch", "Drive", "Grain", "Teal", "Purple", "Sky", "Turquoise", "Magenta", "Copper"]},
     {"key": "f6_look", "name": "FX6 Look", "options": ["Graphite", "Green", "Gold", "Black", "Silver", "Red", "Blue", "Orange", "Ivory", "Periwinkle", "Yellow", "Plum", "Delay", "Reverb", "Mod", "Pitch", "Drive", "Grain", "Teal", "Purple", "Sky", "Turquoise", "Magenta", "Copper"]},
     {"key": "amp_look", "name": "Amp Look", "options": ["Graphite", "Green", "Gold", "Black", "Silver", "Red", "Blue", "Orange", "Ivory", "Periwinkle", "Yellow", "Plum", "Delay", "Reverb", "Mod", "Pitch", "Drive", "Grain", "Teal", "Purple", "Sky", "Turquoise", "Magenta", "Copper"]},
+    {"key": "rig", "name": "Rig", "min": 0, "max": 1, "display": "string", "type": "stepper"},
+    {"key": "rig_prev", "name": "Rig <", "options": ["Off", "On"], "momentary": true},
+    {"key": "rig_next", "name": "Rig >", "options": ["Off", "On"], "momentary": true},
     {"key": "f1_preset__list", "name": "FX 1 Presets List", "options": ["Closed", "Open"]},
     {"key": "f2_preset__list", "name": "FX 2 Presets List", "options": ["Closed", "Open"]},
     {"key": "f3_preset__list", "name": "FX 3 Presets List", "options": ["Closed", "Open"]},
@@ -339,6 +349,9 @@
     {"key": "f6_k4__list", "name": "FX 6 Knob 4 List", "options": ["Closed", "Open"]},
     {"key": "f6_k5__list", "name": "FX 6 Knob 5 List", "options": ["Closed", "Open"]},
     {"key": "f6_k6__list", "name": "FX 6 Knob 6 List", "options": ["Closed", "Open"]},
+    {"key": "f6_k7__list", "name": "FX 6 Knob 7 List", "options": ["Closed", "Open"]},
+    {"key": "f6_k8__list", "name": "FX 6 Knob 8 List", "options": ["Closed", "Open"]},
+    {"key": "rig__list", "name": "Rigs List", "options": ["Closed", "Open"]},
     {"key": "midi_ch__list", "name": "MIDI Ch List", "options": ["Closed", "Open"]},
     {"key": "pick_1", "name": "List 1", "options": ["Off", "On"], "display": "string"},
     {"key": "pick_2", "name": "List 2", "options": ["Off", "On"], "display": "string"},
@@ -427,6 +440,9 @@
     {"key": "f6_k4__sel", "name": "FX 6 Knob 4 Sel", "options": ["Off", "On"], "momentary": true},
     {"key": "f6_k5__sel", "name": "FX 6 Knob 5 Sel", "options": ["Off", "On"], "momentary": true},
     {"key": "f6_k6__sel", "name": "FX 6 Knob 6 Sel", "options": ["Off", "On"], "momentary": true},
+    {"key": "f6_k7__sel", "name": "FX 6 Knob 7 Sel", "options": ["Off", "On"], "momentary": true},
+    {"key": "f6_k8__sel", "name": "FX 6 Knob 8 Sel", "options": ["Off", "On"], "momentary": true},
+    {"key": "rig__sel", "name": "Rigs Sel", "options": ["Off", "On"], "momentary": true},
     {"key": "midi_ch__sel", "name": "MIDI Ch Sel", "options": ["Off", "On"], "momentary": true}
   ]
 }
