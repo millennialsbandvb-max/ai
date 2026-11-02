@@ -64,7 +64,9 @@ typedef struct {
     unsigned char *rest;         /* an arrow to report back at rest */
     float *alast;                /* per arrow (plugin's, then ours): the value the host last sent */
     unsigned char *rsent;        /* rest reported to the host since (it may or may not have taken it) */
-    int wpos, wlist;             /* the wheel's place in an open list (the plugin may take a moment to show it) */
+    int wpos, wlist, wstale;     /* the wheel's place in a list, what the plugin showed before this run of turns and
+                                  * our recent picks (it may take seconds to show a pick: NAM loads a folder's model) */
+    int wpicks[16], wnp, whead;
     int sel;                     /* the list selected by a first tap (-1: none), and when it was last touched */
     double seltime;
     double wtime;
@@ -169,11 +171,18 @@ static void pl_wheel(PickWrap *w, int j, int d) {
     const int n = pl_fn_of(w, j, PL_COUNT, 0, NULL, 0);
     if (n <= 0) return;
     const double now = pl_now();
-    int cur = w->wlist == j && now - w->wtime < 1.5 ? w->wpos : pl_fn_of(w, j, PL_CURRENT, 0, NULL, 0);
-    cur = cur < 0 ? (d > 0 ? -1 : 0) : cur;
+    const int shown = pl_fn_of(w, j, PL_CURRENT, 0, NULL, 0);
+    /* our own place while the plugin still shows what it showed when we picked (or already shows our pick): only a
+     * change from elsewhere (the arrows, a list pick) or a long pause starts from what it shows */
+    int ours = w->wlist == j && now - w->wtime < 30 && shown == w->wstale;
+    for (int k = 0; k < w->wnp && !ours; k++) ours = w->wlist == j && now - w->wtime < 30 && shown == w->wpicks[k];
+    if (!ours) { w->wlist = j; w->wstale = shown; w->wnp = w->whead = 0; w->wpos = shown; }   /* (a new run of turns) */
+    int cur = w->wpos < 0 ? (d > 0 ? -1 : 0) : w->wpos;
     const int nx = ((cur + d) % n + n) % n;
     pl_fn_of(w, j, PL_CHOOSE, nx, NULL, 0);
-    w->wlist = j; w->wpos = nx; w->wtime = now;
+    w->wpos = nx; w->wtime = now;
+    w->wpicks[w->whead++ & 15] = nx;
+    if (w->wnp < 16) w->wnp++;
     w->page = nx / PL_ROWS;
     pl_rows_changed(w);
 }

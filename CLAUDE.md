@@ -291,6 +291,10 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   selects (the wheel steps the entries, list shut), a second within 8 s opens, a tap on the open list shuts it; no
   wheel in the open list (removed). The "<title> List" flag is back to Closed / Open (ours; IndexedEnabling/1/2).
   Knob value-text fields still toggle the List flag directly (the knob itself takes the wheel).
+  "It stops on certain folders and won't move" (the other way still worked): pl_wheel asked the plugin where it
+  was, and NAM shows a folder pick only after loading its model (seconds), so the next click picked the same folder
+  again. pl_wheel now keeps its own place for a run of turns while the plugin shows what it showed before the run
+  or one of our recent picks (wstale, wpicks; 30 s); test: a stand-in plugin that shows picks late.
 - **Pedal look** (Oct 2026, the user's pick): our pages (not Airwindows/Dragonfly: PEDAL_LOOK=0 in their build.sh)
   are drawn by the kit's browser renderer (html_art.py) with `tools/pedal_look.css`: an enclosure in the page's
   colour (theme_plate_hi / theme_plate_lo, a hammertone filter on the base background), recessed frames, metal knob
