@@ -8,7 +8,8 @@
  * nam_entry); only a slot's chosen engine runs. Parameters are passed through, and the engines' own reports
  * (knob values after a preset or algorithm change) come back through our host callback and on to MPC.
  * State: a chunk with our parameters and NAM's own chunk (its model and IR paths).
- * MIDI (any channel): CC 81-84 bypass FX 1-4 (64+ = bypassed), CC 85 the amp, CC 86-87 FX 5-6, CC 64 Hold on every slot.
+ * MIDI (any channel): CC 81-84 bypass FX 1-4 (64+ = bypassed), CC 85 the amp, CC 86-87 FX 5-6, CC 64 Hold on every slot,
+ * Program Change n: rig preset n + 1 (rigs.h: whole boards, the Rig stepper).
  * State: "QRIG1 <n>"; a four-slot chunk (before Nov 2026) is read too (its slots 5-6 Off, its amp position mapped). */
 #include <math.h>
 #include <stdint.h>
@@ -20,6 +21,7 @@
 #include "vst2.h"
 #include "../../tools/picklist.h"
 #include "../../tools/pedal_looks.h"
+#include "rigs.h"
 
 enum { audioMasterVersion = 1 };
 
@@ -39,14 +41,15 @@ enum { AMB_MACHINE = 0, AMB_MIX = 2, AMB_K = 3, AMB_HOLD = 11, AMB_PRESET = 12, 
 #define N_DUO (DUO_NALGO - 1)                  /* Duo's algorithms without its Off (Duo's choice lists Off first: place = fx + 1) */
 #define N_FX (N_DUO + AMB_NMACH + 1)           /* our list: Duo's, Ambient Lab's, Off */
 #define FX_OFF (N_FX - 1)
-#define NAM_N 21
+#define NAM_N 22   /* (21 before Presence, Nov 2026: such chunks are still read) */
 
 enum { kAmpPos, kAmpBypass, kOutput, kSlot0 };
 enum { S_FX, S_OPEN, S_MIX, S_K, S_PRESET = S_K + 8, S_PREV, S_NEXT, S_BYPASS, S_HOLD, SP };
 #define SLOT(s, k) (kSlot0 + (s) * SP + (k))
 enum { kNam0 = kSlot0 + NS * SP, kNumSaved = kNam0 + NAM_N,   /* (the state chunk: these) */
        kLook0 = kNumSaved, kAmpLook = kLook0 + NS,               /* FX1..6 Look, Amp Look: read-only, the pages' colours */
-       kNumParams = kAmpLook + 1 };
+       kRig, kRigPrev, kRigNext,                                 /* the rig presets (rigs.h): not in the state chunk */
+       kNumParams };
 static const char *const AMP_POS[] = {"Amp First", "After FX 1", "After FX 2", "After FX 3", "After FX 4", "After FX 5", "Amp Last"};
 #define N_POS (NS + 1)
 
@@ -59,6 +62,7 @@ typedef struct {
     int kind[NS];                  /* what each slot runs now: 0 Duo, 1 Ambient Lab, 2 Off */
     float byp_s[NS];
     int amp_look_tick;
+    int rig;                       /* the rig preset last loaded (-1: none) */
     volatile int update_display;
     volatile unsigned char automate[kNumParams];
     char *chunk;
@@ -148,10 +152,13 @@ static void choose_fx(Plugin *s, int k, int fx) {   /* point the slot at an engi
     s->update_display = 1;
 }
 
+static void rig_param(Plugin *s, int w, float v);
+static void load_rig(Plugin *s, int r);
 static void setParameter(AEffect *e, int32_t i, float v) {
     Plugin *s = (Plugin *)e->object;
-    if (i < 0 || i >= kNumParams || i >= kLook0) return;   /* (the looks are read-only) */
+    if (i < 0 || i >= kNumParams || (i >= kLook0 && i < kRig)) return;   /* (the looks are read-only) */
     v = clampf(v, 0, 1);
+    if (i >= kRig) { rig_param(s, i - kRig, v); return; }
     if (i >= kNam0) { s->nam->setParameter(s->nam, i - kNam0, v); s->norm[i] = s->nam->getParameter(s->nam, i - kNam0); return; }
     if (i == kAmpPos) { s->norm[i] = (float)option_of(v, N_POS) / (N_POS - 1); s->update_display = 1; return; }
     if (i == kAmpBypass) { s->norm[i] = v > 0.5f ? 1 : 0; s->update_display = 1; return; }
@@ -236,6 +243,7 @@ static int amp_look(Plugin *s) {   /* (NAM's model and folder names: its params 
 }
 static int slot_look(Plugin *s, int k) { return s->kind[k] == 0 ? duo_look(s->duo[k]) : s->kind[k] == 1 ? amb_look(s->amb[k]) : LK_GRAPHITE; }
 static void param_name(Plugin *s, int i, char *t) {
+    if (i >= kRig) { snprintf(t, 32, "%s", i == kRig ? "Rig" : i == kRigPrev ? "Rig <" : "Rig >"); return; }
     if (i == kAmpLook) { snprintf(t, 32, "Amp Look"); return; }
     if (i >= kLook0) { snprintf(t, 32, "FX%d Look", i - kLook0 + 1); return; }
     if (i >= kNam0) { s->nam->dispatcher(s->nam, effGetParamName, i - kNam0, 0, t, 0); return; }
@@ -252,6 +260,8 @@ static void param_name(Plugin *s, int i, char *t) {
     snprintf(t, 32, "FX%d %s", k + 1, W[w]);
 }
 static void param_display(Plugin *s, int i, char *t) {
+    if (i == kRig) { snprintf(t, 32, "%s", s->rig >= 0 ? RIGS[s->rig].name : "-"); return; }
+    if (i > kRig) { snprintf(t, 32, "%s", i == kRigPrev ? "<" : ">"); return; }
     if (i == kAmpLook) { snprintf(t, 32, "%s", PEDAL_LOOKS[option_of(s->norm[i], N_LOOKS)].name); return; }
     if (i >= kLook0) { snprintf(t, 32, "%s", PEDAL_LOOKS[slot_look(s, i - kLook0)].name); return; }
     if (i >= kNam0) { s->nam->dispatcher(s->nam, effGetParamDisplay, i - kNam0, 0, t, 0); return; }
@@ -287,17 +297,18 @@ static int get_chunk(Plugin *s, void **out) {
 }
 static void set_chunk(Plugin *s, const char *c, size_t n) {
     int np = 0, used = 0;
-    enum { kOldSaved = kSlot0 + NS_OLD * SP + NAM_N };
-    if (n < 8 || sscanf(c, "QRIG1 %d\n%n", &np, &used) != 1 || (np != kNumSaved && np != kOldSaved)) return;
+    /* now, six slots before Presence (NAM 21), four slots (NAM 21): the NAM values themselves come from NAM's chunk */
+    enum { kSix21 = kSlot0 + NS * SP + 21, kOldSaved = kSlot0 + NS_OLD * SP + 21 };
+    if (n < 8 || sscanf(c, "QRIG1 %d\n%n", &np, &used) != 1 || (np != kNumSaved && np != kSix21 && np != kOldSaved)) return;
     float v[kNumSaved];
+    memcpy(v, s->norm, sizeof v);
     size_t o = (size_t)used;
     for (int i = 0; i < np; i++) {
         int u = 0;
         float x;
         if (o >= n || sscanf(c + o, "%f\n%n", &x, &u) != 1) return;
         o += (size_t)u;
-        if (np == kNumSaved) v[i] = x;
-        else if (i < kSlot0 + NS_OLD * SP) v[i] = x;
+        if (np != kOldSaved || i < kSlot0 + NS_OLD * SP) v[i] = x;
         else v[i + (NS - NS_OLD) * SP] = x;   /* (its amp values, after our extra slots) */
     }
     if (np == kOldSaved) {   /* four slots: 5-6 as a new one starts them (Off), the amp position mapped */
@@ -425,7 +436,9 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
         typedef struct { int32_t numEvents; intptr_t reserved; Ev *events[2]; } Evs;
         const Evs *ev = (const Evs *)p;
         for (int k = 0; ev && k < ev->numEvents; k++) {
-            if (!ev->events[k] || ev->events[k]->type != 1 || (ev->events[k]->midiData[0] & 0xf0) != 0xb0) continue;
+            if (!ev->events[k] || ev->events[k]->type != 1) continue;
+            if ((ev->events[k]->midiData[0] & 0xf0) == 0xc0) { load_rig(s, ev->events[k]->midiData[1]); continue; }   /* Program Change n: rig n + 1 */
+            if ((ev->events[k]->midiData[0] & 0xf0) != 0xb0) continue;
             const int cc = ev->events[k]->midiData[1], hi = ev->events[k]->midiData[2] >= 64;
             int i = -1;
             if (cc >= 81 && cc <= 84) i = SLOT(cc - 81, S_BYPASS);
@@ -445,8 +458,18 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
 
 /* the full-page lists (tools/picklist.h): each slot's presets (its engine's), the amp's folders, models, IR folders
  * and IRs (NAM's), then each slot's eight knobs (lists 8..39: a choice knob lists its choices, as its engine says) */
+#define RIG_LIST (NS + 4 + NS * 8)
 static int quad_pick(AEffect *e, int list, int op, int i, char *out, int max) {
     Plugin *s = (Plugin *)e->object;
+    if (list == RIG_LIST) {   /* the rig presets */
+        if (op == PL_COUNT) return N_RIGS;
+        if (op == PL_CURRENT) return s->rig;
+        if (op == PL_HEADING) return 0;
+        if (i < 0 || i >= N_RIGS) return 0;
+        if (op == PL_NAME) snprintf(out, (size_t)max, "%s", RIGS[i].name);
+        else if (op == PL_CHOOSE) load_rig(s, i);
+        return 0;
+    }
     if (list >= NS + 4) {
         const int k = (list - NS - 4) / 8, w = (list - NS - 4) % 8, r = s->kind[k] == 0 ? duo_pick(s->duo[k], 3 + w, op, i, out, max)
                       : s->kind[k] == 1 ? amb_pick(s->amb[k], 1 + w, op, i, out, max) : op == PL_HEADING ? 0 : -1;
@@ -467,10 +490,76 @@ static int quad_pick(AEffect *e, int list, int op, int i, char *out, int max) {
 #define KT(f) "FX " #f " Knob 1", "FX " #f " Knob 2", "FX " #f " Knob 3", "FX " #f " Knob 4", "FX " #f " Knob 5", "FX " #f " Knob 6", \
               "FX " #f " Knob 7", "FX " #f " Knob 8"
 static const char *const LIST_KEYS[] = {"f1_preset", "f2_preset", "f3_preset", "f4_preset", "f5_preset", "f6_preset", "amp_folder",
-                                        "amp_model", "amp_ir_folder", "amp_ir", KN(1), KN(2), KN(3), KN(4), KN(5), KN(6)};
+                                        "amp_model", "amp_ir_folder", "amp_ir", KN(1), KN(2), KN(3), KN(4), KN(5), KN(6), "rig"};
 static const char *const LIST_TITLES[] = {"FX 1 Presets", "FX 2 Presets", "FX 3 Presets", "FX 4 Presets", "FX 5 Presets", "FX 6 Presets",
-                                          "Model Folders", "Models", "IR Folders", "IRs", KT(1), KT(2), KT(3), KT(4), KT(5), KT(6)};
-static const PickLists LISTS = {8 + NS * 8, LIST_KEYS, LIST_TITLES, quad_pick, 1};   /* (1: MIDI Ch) */
+                                          "Model Folders", "Models", "IR Folders", "IRs", KT(1), KT(2), KT(3), KT(4), KT(5), KT(6), "Rigs"};
+static const PickLists LISTS = {RIG_LIST + 1, LIST_KEYS, LIST_TITLES, quad_pick, 1};   /* (1: MIDI Ch) */
+
+/* ---- rig presets (rigs.h) --------------------------------------------------------------------------------------- */
+static int alnum(char c) { return (c >= '0' && c <= '9') || ((c | 32) >= 'a' && (c | 32) <= 'z'); }
+static int same_name(const char *a, const char *b) {   /* letters and digits only, any case ("Aint" = "Ain’t") */
+    for (;;) {
+        while (*a && !alnum(*a)) a++;
+        while (*b && !alnum(*b)) b++;
+        if (!*a || !*b) return !*a && !*b;
+        if ((*a | 32) != (*b | 32)) return 0;
+        a++; b++;
+    }
+}
+static int fx_named(const char *n) { for (int f = 0; f < N_FX; f++) if (same_name(FX_NAMES[f], n)) return f; return -1; }
+static int preset_named(Plugin *s, int k, const char *n) {   /* in the slot's own preset list (its effect's) */
+    char t[64];
+    const int c = quad_pick(&s->fx, k, PL_COUNT, 0, t, sizeof t);
+    for (int i = 0; i < c; i++) { t[0] = 0; quad_pick(&s->fx, k, PL_NAME, i, t, sizeof t); if (same_name(t, n)) return i; }
+    return -1;
+}
+static void load_rig(Plugin *s, int r) {
+    if (r < 0 || r >= N_RIGS) return;
+    const Rig *g = &RIGS[r];
+    for (int k = 0; k < NS; k++) {
+        const RigSlot *rs = &g->s[k];
+        const int fx = fx_named(rs->fx);
+        setParameter(&s->fx, SLOT(k, S_FX), fx_norm(fx < 0 ? FX_OFF : fx));
+        const int p = rs->preset && fx >= 0 ? preset_named(s, k, rs->preset) : -1;
+        char t[64] = {0};
+        if (p >= 0) quad_pick(&s->fx, k, PL_CHOOSE, p, t, sizeof t);
+        else if (fx >= 0 && s->kind[k] < 2) choose_fx(s, k, fx);   /* (its defaults) */
+        if (rs->mix >= 0) setParameter(&s->fx, SLOT(k, S_MIX), rs->mix);
+        for (int i = 0; i < 8; i++) if (rs->k[i] >= 0) setParameter(&s->fx, SLOT(k, S_K + i), rs->k[i]);
+        setParameter(&s->fx, SLOT(k, S_BYPASS), 0);
+        if (s->kind[k] == 1) setParameter(&s->fx, SLOT(k, S_HOLD), 0);
+        AEffect *en = engine(s, k);   /* (what the engine holds now: the preset's knobs with ours over them) */
+        if (en) for (int w = S_MIX; w <= S_PRESET; w++) s->norm[SLOT(k, w)] = en->getParameter(en, engine_param(s, k, w));
+    }
+    s->norm[kAmpPos] = (float)g->amp_pos / (float)(N_POS - 1);
+    s->norm[kAmpBypass] = 0;
+    s->norm[kOutput] = clampf((g->output + 24) / 36, 0, 1);
+    const float nam[6] = {(g->input + 24) / 48, (g->gate + 100) / 80, g->bass / 10, g->mid / 10, g->treble / 10, g->presence / 10};
+    static const int NAM_AT[6] = {0, 1, 2, 3, 4, 21};   /* NAM's Input, Gate, Bass, Middle, Treble, Presence */
+    for (int i = 0; i < 6; i++) setParameter(&s->fx, kNam0 + NAM_AT[i], clampf(nam[i], 0, 1));
+    for (int i = 0; i < kNumSaved; i++) {
+        const int w = i >= kSlot0 && i < kNam0 ? (i - kSlot0) % SP : -1;
+        if (w != S_PREV && w != S_NEXT) s->automate[i] = 1;   /* (MPC shows the whole board anew) */
+    }
+    s->rig = r;
+    s->norm[kRig] = (float)r / (float)(N_RIGS - 1);
+    s->automate[kRig] = 1;
+    s->update_display = 1;
+}
+/* Rig: a pick (an exact value: a project restoring only shows its name) or a Q-Link nudge (loads the next / previous);
+ * Rig < and >: momentary buttons */
+static void rig_param(Plugin *s, int w, float v) {
+    if (w) {
+        if (v > 0.5f) load_rig(s, s->rig < 0 ? (w == 1 ? N_RIGS - 1 : 0) : (s->rig + (w == 1 ? -1 : 1) + N_RIGS) % N_RIGS);
+        s->norm[kRig + w] = 0;
+        return;
+    }
+    const float pos = v * (float)(N_RIGS - 1), cur = s->rig >= 0 ? (float)s->rig : s->norm[kRig] * (float)(N_RIGS - 1);
+    if (fabsf(pos - roundf(pos)) > 0.001f && fabsf(pos - cur) < 1) { load_rig(s, ((int)lrintf(cur) + (pos > cur ? 1 : -1) + N_RIGS) % N_RIGS); return; }
+    s->rig = (int)lrintf(pos);
+    s->norm[kRig] = v;
+    s->update_display = 1;
+}
 
 static AEffect *make(audioMasterCallback master) {
     fill_fx_names();
@@ -482,6 +571,7 @@ static AEffect *make(audioMasterCallback master) {
     all_plugins[slot] = s;
     s->master = master;
     s->fs = 44100;
+    s->rig = -1;
     for (int k = 0; k < NS; k++) {
         s->duo[k] = duo_entry(engine_host);
         s->amb[k] = amb_entry(engine_host);
@@ -528,7 +618,7 @@ __attribute__((visibility("default"))) AEffect *VSTPluginMain(audioMasterCallbac
  *   (built with the engines, and nam_entry from the real NAM MPC or the stub below) */
 static const char *const NAM_KEYS[NAM_N] = {"input", "gate", "bass", "middle", "treble", "output", "model", "model_prev",
     "model_next", "cab", "ir", "ir_prev", "ir_next", "normalize", "size", "folder", "folder_prev", "folder_next",
-    "ir_folder", "ir_folder_prev", "ir_folder_next"};
+    "ir_folder", "ir_folder_prev", "ir_folder_next", "presence"};
 int main(int argc, char **argv) {
     /* NAM's own params.json supplies the amp's entries (argv[1]); ours go around them */
     fill_fx_names();
@@ -589,6 +679,9 @@ int main(int argc, char **argv) {
     printf(",\n    {\"key\": \"amp_look\", \"name\": \"Amp Look\", \"options\": [");
     for (int l = 0; l < N_LOOKS; l++) printf("%s\"%s\"", l ? ", " : "", PEDAL_LOOKS[l].name);
     printf("]}");
+    printf(",\n    {\"key\": \"rig\", \"name\": \"Rig\", \"min\": 0, \"max\": 1, \"display\": \"string\", \"type\": \"stepper\"}");
+    printf(",\n    {\"key\": \"rig_prev\", \"name\": \"Rig <\", \"options\": [\"Off\", \"On\"], \"momentary\": true}");
+    printf(",\n    {\"key\": \"rig_next\", \"name\": \"Rig >\", \"options\": [\"Off\", \"On\"], \"momentary\": true}");
     pl_params_json(&LISTS, stdout);
     printf("\n  ]\n}\n");
     return count == NAM_N ? 0 : 1;

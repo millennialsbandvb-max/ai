@@ -2,7 +2,7 @@
  *
  * Signal chain (mono in, the left input; the result goes to both outputs):
  *   input gain -> [NAM model, resampled to the model's rate when needed] -> loudness normalize -> noise gate
- *   -> bass/middle/treble -> DC block -> cab IR -> output gain
+ *   -> bass/middle/treble/presence -> DC block -> cab IR -> output gain
  *
  * Models (.nam) are read from <base>/Models and cab IRs (.wav) from <base>/IRs, where <base> is the NAM folder next
  * to the plugin (/sdcard/vst/NAM), /sdcard/NAM, or a NAM folder at the top of any mounted drive (/media/<drive>/NAM:
@@ -61,7 +61,7 @@ static constexpr double kTargetLoudnessDb = -18.0;
 enum {
     kInput, kGate, kBass, kMiddle, kTreble, kOutput, kModel, kModelPrev, kModelNext,
     kCab, kIr, kIrPrev, kIrNext, kNormalize, kSize, kFolder, kFolderPrev, kFolderNext,
-    kIrFolder, kIrFolderPrev, kIrFolderNext, kNumParams
+    kIrFolder, kIrFolderPrev, kIrFolderNext, kPresence, kNumParams
 };   // new parameters go at the end: saved projects and MPC's Q-Link assignments refer to them by index
 struct ParamInfo { const char *key, *name, *unit; float min, max, def; };
 static const ParamInfo PARAMS[kNumParams] = {
@@ -86,6 +86,7 @@ static const ParamInfo PARAMS[kNumParams] = {
     {"ir_folder", "IR Folder", "", 0, 1, 0},
     {"ir_folder_prev", "IR Folder <", "", 0, 1, 0},
     {"ir_folder_next", "IR Folder >", "", 0, 1, 0},
+    {"presence", "Presence", "", 0, 10, 5},
 };
 
 static float clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
@@ -259,8 +260,8 @@ struct Plugin {
     // audio thread
     Handover<Model> model;
     Handover<Cab> cab;
-    Biquad bass, mid, treble;
-    float tone_set[3] = {-1, -1, -1};
+    Biquad bass, mid, treble, presence;
+    float tone_set[4] = {-1, -1, -1, -1};
     double tone_rate = 0;
     float in_gain = 1, out_gain = 1, gate_gain = 0, gate_power = 0, dc_x = 0, dc_y = 0;
     int gate_hold = 0;
@@ -562,19 +563,20 @@ void Plugin::process_chunk(const float *in, float *l, float *r, int n) {
     }
 
     // tone stack: +-10 dB per band, 0 dB at 5
-    const float tv[3] = {value(kBass), value(kMiddle), value(kTreble)};
-    if (tv[0] != tone_set[0] || tv[1] != tone_set[1] || tv[2] != tone_set[2] || sr != tone_rate) {
+    const float tv[4] = {value(kBass), value(kMiddle), value(kTreble), value(kPresence)};
+    if (tv[0] != tone_set[0] || tv[1] != tone_set[1] || tv[2] != tone_set[2] || tv[3] != tone_set[3] || sr != tone_rate) {
         bass.set(Biquad::LowShelf, sr, 150, 0.707, (tv[0] - 5) * 2);
         mid.set(Biquad::Peak, sr, 650, 0.7, (tv[1] - 5) * 2);
         treble.set(Biquad::HighShelf, sr, 2500, 0.707, (tv[2] - 5) * 2);
-        std::copy(tv, tv + 3, tone_set);
+        presence.set(Biquad::Peak, sr, 4500, 0.9, (tv[3] - 5) * 1.6);   // presence: the 4-5 kHz bite, +-8 dB
+        std::copy(tv, tv + 4, tone_set);
         tone_rate = sr;
     }
-    const bool flat = tv[0] == 5 && tv[1] == 5 && tv[2] == 5;
+    const bool flat = tv[0] == 5 && tv[1] == 5 && tv[2] == 5 && tv[3] == 5;
     Cab *c = norm[kCab].load() > 0.5f ? cab.live.load(std::memory_order_relaxed) : nullptr;
     for (int i = 0; i < n; i++) {
         float v = y[i];
-        if (!flat) v = treble.run(mid.run(bass.run(v)));
+        if (!flat) v = presence.run(treble.run(mid.run(bass.run(v))));
         const float dc = v - dc_x + 0.9995f * dc_y;   // ~3.5 Hz DC blocker
         dc_x = v;
         dc_y = dc;
@@ -582,7 +584,7 @@ void Plugin::process_chunk(const float *in, float *l, float *r, int n) {
         out_gain += smooth * (t_out - out_gain);
         v *= out_gain;
         if (!is_finite_bits(v) || v > 64.0f || v < -64.0f) {   // a non-number (would silence MPC's whole mix) or blown up
-            v = 0; dc_x = dc_y = 0; bass.clear(); mid.clear(); treble.clear();
+            v = 0; dc_x = dc_y = 0; bass.clear(); mid.clear(); treble.clear(); presence.clear();
             if (c) c->clear();
         }
         v = v > 4.0f ? 4.0f : v < -4.0f ? -4.0f : v;   // +12 dB ceiling: nothing absurd reaches MPC's mixer

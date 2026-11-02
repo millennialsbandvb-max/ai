@@ -18,7 +18,7 @@
 
 enum { kInput, kGate, kBass, kMiddle, kTreble, kOutput, kModel, kModelPrev, kModelNext, kCab, kIr, kIrPrev, kIrNext,
        kNormalize, kSize, kFolder, kFolderPrev, kFolderNext,
-       kIrFolder, kIrFolderPrev, kIrFolderNext, kNumParams };
+       kIrFolder, kIrFolderPrev, kIrFolderNext, kPresence, kNumParams };
 
 static int failures = 0, automates = 0, updates = 0;
 #define CHECK(c, ...) do { if (c) std::printf("  ok    " __VA_ARGS__); else { std::printf("  FAIL  " __VA_ARGS__); failures++; } std::printf("\n"); } while (0)

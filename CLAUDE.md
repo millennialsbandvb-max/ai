@@ -341,6 +341,15 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
 - `pkill -f <pattern>` kills your own shell when the pattern appears in the command line: use `pgrep -x` + `kill`.
 - Hidden `._` files (macOS) on the card must be skipped (NAM used to error on them).
 - NAM's Size knob is capped at 49%: slimmable A2 models switch to full size at 50%.
+- **NAM Presence** (Nov 2026, the user's ask): param 21 (kPresence, at the end), a 4.5 kHz peak +-8 dB after Treble;
+  AMP page knobs re-spaced to seven. 0dd Rig's NAM_N is 22 (amp_presence); its set_chunk still reads six-slot
+  chunks with 21 NAM values and four-slot ones (NAM's own values come from NAM's key=value chunk either way).
+- **0dd Rig rig presets** (Nov 2026, the user's ask: "20ish, some real rigs some crazy rigs"): `quadrig-mpc/src/rigs.h`,
+  22 whole boards (six slots by effect + preset name, compared by letters/digits; mix and knob overrides; amp position,
+  NAM Input/Gate/Bass/Middle/Treble/Presence, Output; the amp model stays the user's). A Rig stepper (params after
+  amp_look: rig, rig_prev, rig_next; not in the state chunk) on the RIG page where the amp folder stepper was (the
+  folder is on AMP), with a full-page list "Rigs" (the last list); exact value = name only (a restore), a nudge or
+  arrow loads; MIDI Program Change n = rig n+1. quad_test loads every rig and checks names; new rigs go at the end.
 - MPC drives: `/sdcard` is an internal SD card; the user's cards mount as `/media/<label>`.
 - Debugging only on the device needs a firmware round trip: write reports to every drive (see `mpc-remote/probe/`).
 - Blocked in this environment: publishing the image via Git LFS, running third-party tools cloned from the

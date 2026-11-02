@@ -3,16 +3,18 @@
  * Every effect in every slot plays finite; the starting board with its amp plays; all four slots Off and the amp
  * bypassed is the input itself; a bypassed slot lets the dry through; knob names and values come from the slot's
  * engine (Duo FX and Ambient Lab); a preset step changes the knobs; the state chunk brings everything back; the
- * amp moves; CPU. */
+ * amp moves; every rig preset loads what rigs.h says and plays; a chunk from before Presence loads; CPU. */
 #include <dlfcn.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <ctype.h>
 #include <unistd.h>
 
 #include "../../nam-mpc/src/vst2.h"
+#include "../src/rigs.h"
 
 #define FS 48000
 #define N 128
@@ -171,6 +173,65 @@ int main(int argc, char **argv) {
     for (long i = FS / 2; i < FS; i++) err = fmax(err, fabs(bufl[i] - inb[i]));
     printf("  amp on, model \"%s\": difference from the input %.3f\n", model, err);
     if (getenv("NAM_MPC_DIR")) CHECK(err > 0.01, "the amp's model doesn't change the sound");
+
+    /* the rig presets: Rig > steps through them all; each slot shows the rig's effect and preset, and it plays */
+    {
+        const int rig = param(e, "Rig"), next = param(e, "Rig >"), pres = param(e, "Presence");
+        int bad = 0;
+        for (int r = 0; r < N_RIGS; r++) {
+            e->setParameter(e, next, 1);
+            e->setParameter(e, next, 0);
+            disp(e, rig, t);
+            if (strcmp(t, RIGS[r].name)) { printf("  rig %d shows \"%s\", not \"%s\"\n", r + 1, t, RIGS[r].name); bad++; }
+            for (int k = 0; k < 6; k++) {
+                char f[64], pr[64];
+                disp(e, fx1 + 16 * k, f);
+                disp(e, fx1 + 16 * k + 11, pr);
+                const char *want = RIGS[r].s[k].preset;
+                int ok = !strcmp(f, RIGS[r].s[k].fx);
+                if (want) {   /* (letters and digits alike: rigs.h writes Ain't with a plain quote or none) */
+                    char a2[64] = {0}, b2[64] = {0};
+                    for (int i = 0, j = 0; pr[i] && j < 63; i++) if (isalnum((unsigned char)pr[i])) a2[j++] = (char)tolower((unsigned char)pr[i]);
+                    for (int i = 0, j = 0; want[i] && j < 63; i++) if (isalnum((unsigned char)want[i])) b2[j++] = (char)tolower((unsigned char)want[i]);
+                    ok = ok && *a2 && !strncmp(a2, b2, strlen(a2));   /* (the display may cut a long name) */
+                }
+                if (!ok) { printf("  rig \"%s\" slot %d: %s / %s, wanted %s / %s\n", RIGS[r].name, k + 1, f, pr, RIGS[r].s[k].fx, want ? want : "-"); bad++; }
+            }
+            disp(e, pres, t);
+            const int fine = render(e, 1.5f, &peak);
+            printf("  rig %2d %-18s presence %s, peak %.2f\n", r + 1, RIGS[r].name, t, peak);
+            if (!fine || peak > 4.01f) { printf("  rig \"%s\" plays badly\n", RIGS[r].name); bad++; }
+        }
+        CHECK(!bad, "a rig preset doesn't load as written");
+        e->setParameter(e, rig, 2.0f / (N_RIGS - 1));   /* an exact value (a project restoring) shows the name only */
+        disp(e, rig, t);
+        char f1[64];
+        disp(e, fx1, f1);
+        CHECK(!strcmp(t, RIGS[2].name) && !strcmp(f1, RIGS[N_RIGS - 1].s[0].fx), "a restored Rig value changed the board");
+    }
+    /* a chunk from before Presence (NAM's 21 parameters) */
+    {
+        set_text(e, fx1, "Hall");
+        void *ck = NULL;
+        const intptr_t cn = e->dispatcher(e, effGetChunk, 0, 0, &ck, 0);
+        int np = 0, used = 0;
+        sscanf((const char *)ck, "QRIG1 %d\n%n", &np, &used);
+        char *old = malloc((size_t)cn + 64), *q = old;
+        const char *src = (const char *)ck + used;
+        q += sprintf(q, "QRIG1 %d\n", np - 1);
+        for (int i = 0; i < np; i++) { const char *nl = strchr(src, '\n') + 1; if (i < np - 1) { memcpy(q, src, (size_t)(nl - src)); q += nl - src; } src = nl; }
+        const size_t rest = (size_t)cn - (size_t)(src - (const char *)ck);
+        memcpy(q, src, rest); q += rest;
+        AEffect *e3 = make();
+        e3->dispatcher(e3, effSetChunk, 0, q - old, old, 0);
+        char a3[64];
+        disp(e3, fx1, a3);
+        disp(e, fx1, t);
+        CHECK(!strcmp(a3, t), "a chunk from before Presence doesn't load");
+        printf("  chunk before Presence: FX1 %s\n", a3);
+        e3->dispatcher(e3, effClose, 0, 0, NULL, 0);
+        free(old);
+    }
 
     /* CPU: the starting board (drive, chorus, amp, delay, reverb) */
     AEffect *c = make();

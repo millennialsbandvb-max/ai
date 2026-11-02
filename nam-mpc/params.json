@@ -175,6 +175,13 @@
         "On"
       ],
       "momentary": true
+    },
+    {
+      "key": "presence",
+      "name": "Presence",
+      "min": 0,
+      "max": 10,
+      "default": 5
     }
   ]
 }
