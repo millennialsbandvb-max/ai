@@ -41,7 +41,7 @@ struct Cfg {
   float kthr = 1.8f;     // kick threshold in bounce/stomp/lift mode; lighter landings are hats
   float swthr = 200.0f;  // swing threshold: rotation along the learned swing (deg/s) = snare
   int gap = 120;         // ms between hits
-  int snare = 6;         // mode: 6 = stomp kick / swing snare, 2 = tap kick / stomp snare, 1 = tap snare / stomp kick. 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare, 3 high lift, 4 bounce=hat/stomp=kick/lift=snare
+  int snare = 8;         // mode: 8 = heel kick / toe snare (default), 7 = toe kick / heel snare, 6 = stomp kick / swing snare, 2 = tap kick / stomp snare, 1 = tap snare / stomp kick. 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare, 3 high lift, 4 bounce=hat/stomp=kick/lift=snare
   float lthr = 35.0f;    // lift threshold, degrees of rotation since the foot last went still
   int kit = 0;           // 0 acoustic, 1 electro
   int out = 0;           // 0 board speaker, 1 phone, 2 both
@@ -52,7 +52,7 @@ struct Cfg {
   float kx = 0, ky = 0, kz = 0; bool kcal = false; // learned kick direction (Direction mode)
   float sx = 0, sy = 0, sz = 0; bool scal = false; // learned snare direction (Direction mode)
   char ssid[33] = ""; char pass[65] = "";          // home Wi-Fi for GitHub updates
-  float lf[6] = {0}; float rf[6] = {0};            // learned left/right leg signatures (Leg mode)
+  float lf[6] = {0}; float rf[6] = {0};            // learned toe (lf) / heel (rf) signatures: rotation just before impact
   bool lcal = false, rcal = false;
   int legSwap = 0;                                 // 0: left = kick, right = snare; 1: swapped
   int sigVer = 0;                                  // 2 = leg signatures use the pre-stomp tilt
@@ -68,10 +68,11 @@ void loadCfg() {
   prefs.begin("pb", true);
   size_t n = prefs.getBytesLength("cfg");
   if (n > 0 && n <= sizeof(cfg)) prefs.getBytes("cfg", &cfg, n);   // older builds stored fewer fields; new ones keep defaults
-  if (cfg.sigVer != 3) {   // settings from before the shoe-mode revamp: thresholds and calibration meant other things
+  if (cfg.sigVer < 3) {    // settings from before the shoe-mode revamp: thresholds and calibration meant other things
     Cfg d; cfg.thr = d.thr; cfg.sthr = 3.5f; cfg.swthr = d.swthr; cfg.gap = d.gap; cfg.cal = false; cfg.snare = 6; cfg.sigVer = 3;
   }
-  if (cfg.snare != 1 && cfg.snare != 2 && cfg.snare != 6) cfg.snare = 6;
+  if (cfg.sigVer < 4) { cfg.lcal = false; cfg.rcal = false; cfg.sigVer = 4; cfg.snare = 8; cfg.thr = 1.2f; }   // lf/rf now hold toe/heel signatures; start in heel/toe mode
+  if (cfg.snare != 1 && cfg.snare != 2 && cfg.snare != 6 && cfg.snare != 7 && cfg.snare != 8) cfg.snare = 8;
   prefs.end();
 }
 
@@ -132,6 +133,21 @@ float gx = 0, gy = 0, gz = 0;        // gravity estimate (g units)
 float peak = 0; uint32_t peakT = 0, lastStompT = 0;
 uint32_t lastSwingT = 0; bool inSwing = false; float swingPeak = 0;
 float meterBuf[12]; int nMeter = 0; uint32_t lastMeterSend = 0;
+// gyro history, to read how the foot was rotating just before an impact
+const int GH = 64; float gH[GH][3]; uint32_t gHT[GH]; int gHi = 0;
+uint32_t onsetT = 0;                       // when the current impact started
+int learnTH = 0, learnN = 0; float learnSum[3];   // learning toe (1) / heel (2)
+
+// Average rotation (deg/s, 3-D) from 90 ms to 10 ms before the impact started.
+static void preImpactRotation(uint32_t t0, float* out) {
+  out[0] = out[1] = out[2] = 0; int n = 0;
+  for (int i = 0; i < GH; i++) {
+    int32_t age = (int32_t)(t0 - gHT[i]);
+    if (age < 10 || age > 90) continue;
+    out[0] += gH[i][0]; out[1] += gH[i][1]; out[2] += gH[i][2]; n++;
+  }
+  if (n) { out[0] /= n; out[1] /= n; out[2] /= n; }
+}
 uint32_t lastT = 0;
 // swing calibration: capture up to 3 swings, average their direction
 bool calibrating = false; uint32_t calEnd = 0; int calCount = 0; bool calInSwing = false;
@@ -152,6 +168,27 @@ void finishSwingCal() {
 }
 
 void fireStomp(float p, float now) {
+  if (cfg.snare == 7 || cfg.snare == 8) {   // toe vs heel, from the foot's rotation just before the impact
+    float r[3]; preImpactRotation(onsetT, r);
+    float rm = sqrtf(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]);
+    if (learnTH) {
+      if (rm > 1) { learnSum[0] += r[0] / rm; learnSum[1] += r[1] / rm; learnSum[2] += r[2] / rm; learnN++; }
+      char b[80]; snprintf(b, sizeof b, "{\"learn\":\"%s %d/3 (%.0f deg/s)\"}", learnTH == 1 ? "toe" : "heel", learnN, rm); ws.textAll(b);
+      if (learnN >= 3) {
+        float* dst = learnTH == 1 ? cfg.lf : cfg.rf;
+        dst[0] = learnSum[0]; dst[1] = learnSum[1]; dst[2] = learnSum[2];
+        if (learnTH == 1) cfg.lcal = true; else cfg.rcal = true;
+        learnTH = 0; saveCfg(); sendCfg(nullptr);
+      }
+      return;
+    }
+    auto sim = [&](const float* v) { float d = r[0] * v[0] + r[1] * v[1] + r[2] * v[2], m = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) * rm; return m > 0 ? d / m : 0.0f; };
+    float st = cfg.lcal ? sim(cfg.lf) : 0, sh = cfg.rcal ? sim(cfg.rf) : 0;
+    bool toe = st >= sh;
+    Kind k = (toe == (cfg.snare == 7)) ? KICK : SNARE;
+    onHit(k, constrain(0.6f + 0.4f * (p / (cfg.thr * 2.5f)), 0, 1), p, -1, now, fabsf(st - sh) * 100);
+    return;
+  }
   if (cfg.snare == 6) { onHit(KICK, constrain(0.6f + 0.4f * (p / (cfg.thr * 2.5f)), 0, 1), p, -1, now); return; }
   // tap/stomp modes: the stomp line decides; mode 2 = tap kick / stomp snare, mode 1 = the reverse
   bool stomp = p >= cfg.sthr;
@@ -166,6 +203,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   float lx = ax - gx, ly = ay - gy, lz = az - gz;               // linear accel, g
   float mag = sqrtf(lx * lx + ly * ly + lz * lz);
   float wm = sqrtf(wx * wx + wy * wy + wz * wz);               // rotation speed, deg/s
+  gH[gHi][0] = wx; gH[gHi][1] = wy; gH[gHi][2] = wz; gHT[gHi] = now; gHi = (gHi + 1) % GH;
   if (nMeter < 12) meterBuf[nMeter++] = mag;
 
   if (calibrating) {
@@ -206,16 +244,16 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   if (mag > cfg.thr) {
     if (now - lastStompT > (uint32_t)cfg.gap && now - lastSwingT > 250) {
       if (mag > peak) { peak = mag; if (!peakT) peakT = now; }
-      if (now - peakT > 35) { float p = peak; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
+      if (now - peakT > 35) { float p = peak; onsetT = peakT; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
     }
-  } else if (peakT) { float p = peak; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
+  } else if (peakT) { float p = peak; onsetT = peakT; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
 }
 
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[400];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -232,6 +270,8 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   bool f;
   if (strstr(s, "\"get\"")) { sendCfg(client); return; }
   if (strstr(s, "\"cal\"")) { startSwingCal(); return; }
+  if (strstr(s, "\"learnToe\"")) { learnTH = 1; learnN = 0; learnSum[0] = learnSum[1] = learnSum[2] = 0; ws.textAll("{\"learn\":\"toe 0/3\"}"); return; }
+  if (strstr(s, "\"learnHeel\"")) { learnTH = 2; learnN = 0; learnSum[0] = learnSum[1] = learnSum[2] = 0; ws.textAll("{\"learn\":\"heel 0/3\"}"); return; }
   if (strstr(s, "\"flipSwing\"")) { cfg.rx = -cfg.rx; cfg.ry = -cfg.ry; cfg.rz = -cfg.rz; saveCfg(); ws.textAll("{\"learn\":\"flipped ✓\"}"); return; }
   if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }
   if (const char* q = strstr(s, "\"ssid\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.ssid) - 1); memcpy(cfg.ssid, q, n); cfg.ssid[n] = 0; } }
@@ -243,7 +283,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "lthr", &f); if (f) cfg.lthr = v;
   v = jsonNum(s, "kthr", &f); if (f) cfg.kthr = v;
   v = jsonNum(s, "gap", &f); if (f) cfg.gap = (int)v;
-  v = jsonNum(s, "snare", &f); if (f && (v == 1 || v == 2 || v == 6)) cfg.snare = (int)v;
+  v = jsonNum(s, "snare", &f); if (f && (v == 1 || v == 2 || v == 6 || v == 7 || v == 8)) cfg.snare = (int)v;
   v = jsonNum(s, "kit", &f); if (f) cfg.kit = constrain((int)v, 0, 1);
   v = jsonNum(s, "out", &f); if (f) cfg.out = (int)v;
   v = jsonNum(s, "quant", &f); if (f) cfg.quant = (int)v;
@@ -340,7 +380,7 @@ void drawScreen() {
   d.setTextSize(1); d.setTextColor(TFT_DARKGREY);
   d.setCursor(4, 60); d.printf("BLE %s  WiFi %d", bleConnected ? "on" : "--", WiFi.softAPgetStationNum());
   d.setCursor(4, 72); d.printf("batt %d%%  v%s", M5.Power.getBatteryLevel(), FW_VERSION);
-  d.setCursor(4, 84); d.print(calibrating ? "swing foot 3x..." : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A");
+  d.setCursor(4, 84); d.print(calibrating ? "swing foot 3x..." : cfg.snare == 7 ? (cfg.lcal && cfg.rcal ? "toe=kick heel=snare" : "SET TOE/HEEL") : cfg.snare == 8 ? (cfg.lcal && cfg.rcal ? "heel=kick toe=snare" : "SET TOE/HEEL") : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A");
   d.endWrite();
 }
 
@@ -380,7 +420,7 @@ void loop() {
   // Button A: calibrate the "right" direction. Hold 2 s: factory reset.
   if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else if (!resetHeld && cfg.snare == 6) startSwingCal(); resetHeld = false; }
   if (M5.BtnA.pressedFor(2000) && !resetHeld) {   // reset settings, keep Wi-Fi
-    resetHeld = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.sigVer = 3; cfg = d; saveCfg(); sendCfg(nullptr);
+    resetHeld = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.sigVer = 4; cfg = d; saveCfg(); sendCfg(nullptr);
   }
 
   float ax, ay, az;
