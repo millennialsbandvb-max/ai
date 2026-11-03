@@ -132,6 +132,12 @@
 <div class="ctl"><label for="pvol">Phone volume</label><output id="pvolOut"></output>
   <input type="range" id="pvol" min="0" max="100" step="1" value="85"></div>
 <p class="hint">Default mode: stomp = kick, lift the foot high = snare (gyro), hi-hat automatic from your tempo. Light bounces of the leg (above the blue line, below the orange kick line) make no sound but set the tempo, so bounce to keep time and the hats follow. "Last lift" is how fast the leg rotated before landing. Direction mode (board resting on your lap): tap "Set kick" then do your kick move once, tap "Set snare" then do your snare move once. From then on each jolt above the orange line is matched to whichever of the two directions it's closest to (the log's angle column shows the match strength, 0-100); lighter jolts are tempo taps. Everything here is stored on the board, so once it's tuned you can close this page and just play. Bluetooth MIDI is always on: pair the board in GarageBand (Settings › Advanced › Bluetooth MIDI) to use the phone's drum sounds with the phone locked.</p>
+<h2>Firmware · installed: <span id="ver">?</span></h2>
+<div class="ctl"><label for="ssid">Home Wi-Fi name</label><output></output><input type="text" id="ssid" placeholder="your Wi-Fi network" style="grid-column:1/-1;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px"></div>
+<div class="ctl"><label for="pass">Home Wi-Fi password</label><output></output><input type="password" id="pass" placeholder="password" style="grid-column:1/-1;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px"></div>
+<div class="row"><button type="button" id="saveWifi">Save Wi-Fi</button><button type="button" id="otaBtn">Check for update</button></div>
+<div class="row"><input type="file" id="fwFile" accept=".bin" style="display:none"><button type="button" id="pickFw">Upload a .app.bin from this phone</button></div>
+<p class="hint" id="otaMsg">Check for update joins your home Wi-Fi, fetches the newest build from GitHub and installs it (about a minute; the board restarts). Keep this phone on the PocketBeat network meanwhile.</p>
 <p class="err" id="err" hidden></p>
 <button class="big" id="go" type="button">Enable sound on this phone</button>
 
@@ -194,6 +200,8 @@
     $('calState').textContent = c.cal ? 'set' : 'not set';
     $('dirState').textContent = (c.kcal ? 'kick ✓' : 'kick –') + '   ' + (c.scal ? 'snare ✓' : 'snare –');
     $('learnKick').classList.remove('arm'); $('learnSnare').classList.remove('arm');
+    if (c.ver) $('ver').textContent = c.ver;
+    if (c.ssid !== undefined && document.activeElement !== $('ssid')) $('ssid').value = c.ssid;
   }
   for (const el of document.querySelectorAll('input[type=range][data-key]')) {
     el.addEventListener('input', () => { $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); });
@@ -208,6 +216,16 @@
   });
   $('learnKick').addEventListener('click', () => { send({ learnKick: 1 }); $('learnKick').classList.add('arm'); });
   $('learnSnare').addEventListener('click', () => { send({ learnSnare: 1 }); $('learnSnare').classList.add('arm'); });
+  $('saveWifi').addEventListener('click', () => { send({ set: { ssid: $('ssid').value, pass: $('pass').value } }); $('otaMsg').textContent = 'Wi-Fi saved on the board.'; });
+  $('otaBtn').addEventListener('click', () => { send({ ota: 1 }); $('otaMsg').textContent = 'Starting…'; });
+  $('pickFw').addEventListener('click', () => $('fwFile').click());
+  $('fwFile').addEventListener('change', async () => {
+    const f = $('fwFile').files[0]; if (!f) return;
+    $('otaMsg').textContent = 'Uploading ' + f.name + '…';
+    const fd = new FormData(); fd.append('fw', f, f.name);
+    try { const r = await fetch('/update', { method: 'POST', body: fd }); $('otaMsg').textContent = (await r.text()) === 'ok' ? 'Installed. Board is restarting…' : 'Upload failed.'; }
+    catch (e) { $('otaMsg').textContent = 'Upload ended (board may be restarting).'; }
+  });
   $('calBtn').addEventListener('click', () => { send({ cal: 1 }); $('calBtn').classList.add('arm'); $('calBtn').textContent = 'Swing right now…'; $('calState').textContent = 'listening'; });
 
   // ---------- WebSocket to the board ----------
@@ -227,6 +245,7 @@
       }
       if (m.bpm !== undefined) $('bpm').textContent = m.bpm || '—';
       if (m.batt !== undefined) $('batt').textContent = m.batt + '%';
+      if (m.ota) $('otaMsg').textContent = m.ota;
       if (m.cal !== undefined) { $('calBtn').classList.remove('arm'); $('calBtn').textContent = 'Set right: tap, then swing right once'; $('calState').textContent = m.cal ? 'set' : 'no swing seen'; }
     };
   }

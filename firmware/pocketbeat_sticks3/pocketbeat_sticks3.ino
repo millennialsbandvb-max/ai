@@ -13,6 +13,9 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <Preferences.h>
+#include <Update.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <BLEMIDI_Transport.h>
 #include <hardware/BLEMIDI_ESP32_NimBLE.h>
 #if ARDUINO_USB_MODE == 0   // USB-OTG (TinyUSB) build: native USB MIDI
@@ -26,6 +29,10 @@ USBMIDI usbMidi;
 #endif
 #include "web_assets.h"
 #include "pb_types.h"
+
+#include "version.h"
+static const char* OTA_URL = "https://raw.githubusercontent.com/millennialsbandvb-max/ai/main/firmware/bin/pocketbeat_sticks3.app.bin";
+static const char* OTA_VER_URL = "https://raw.githubusercontent.com/millennialsbandvb-max/ai/main/firmware/bin/version.txt";
 
 // ---------------- Settings (persisted) ----------------
 struct Cfg {
@@ -44,6 +51,7 @@ struct Cfg {
   float rx = 0, ry = 0, rz = 0; bool cal = false;  // "right" direction in sensor frame
   float kx = 0, ky = 0, kz = 0; bool kcal = false; // learned kick direction (Direction mode)
   float sx = 0, sy = 0, sz = 0; bool scal = false; // learned snare direction (Direction mode)
+  char ssid[33] = ""; char pass[65] = "";          // home Wi-Fi for GitHub updates
 } cfg;
 Preferences prefs;
 
@@ -277,9 +285,9 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
-  char b[384];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.2f,\"lthr\":%.0f,\"kthr\":%.3f,\"gap\":%d,\"snare\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"kcal\":%d,\"scal\":%d}}",
-           cfg.thr, cfg.sthr, cfg.swthr, cfg.lthr, cfg.kthr, cfg.gap, cfg.snare, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.kcal ? 1 : 0, cfg.scal ? 1 : 0);
+  char b[512];
+  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.2f,\"lthr\":%.0f,\"kthr\":%.3f,\"gap\":%d,\"snare\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"kcal\":%d,\"scal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.thr, cfg.sthr, cfg.swthr, cfg.lthr, cfg.kthr, cfg.gap, cfg.snare, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.kcal ? 1 : 0, cfg.scal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -297,6 +305,9 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   if (strstr(s, "\"get\"")) { sendCfg(client); return; }
   if (strstr(s, "\"cal\"")) { calibrating = true; calBest = 0; calEnd = millis() + 2500; return; }
   if (strstr(s, "\"learnKick\"")) { learnDir = 1; return; }
+  if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }
+  if (const char* q = strstr(s, "\"ssid\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.ssid) - 1); memcpy(cfg.ssid, q, n); cfg.ssid[n] = 0; } }
+  if (const char* q = strstr(s, "\"pass\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.pass) - 1); memcpy(cfg.pass, q, n); cfg.pass[n] = 0; } }
   if (strstr(s, "\"learnSnare\"")) { learnDir = 2; return; }
   float v;
   v = jsonNum(s, "thr", &f); if (f) cfg.thr = v;
@@ -312,6 +323,52 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "hat", &f); if (f) cfg.hat = (int)v;
   v = jsonNum(s, "vol", &f); if (f) { cfg.vol = constrain((int)v, 0, 255); M5.Speaker.setVolume(cfg.vol); }
   saveCfg();
+}
+
+// ---------------- OTA ----------------
+volatile int otaRequest = 0;   // 1 = check+update from GitHub (run from loop, not from the websocket task)
+void otaStatus(const char* msg) { char b[160]; snprintf(b, sizeof b, "{\"ota\":\"%s\"}", msg); ws.textAll(b); }
+bool joinHomeWifi() {
+  if (!cfg.ssid[0]) { otaStatus("No home Wi-Fi set. Enter it below first."); return false; }
+  WiFi.mode(WIFI_AP_STA);
+  WiFi.begin(cfg.ssid, cfg.pass);
+  uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) { delay(200); M5.update(); }
+  if (WiFi.status() != WL_CONNECTED) { otaStatus("Could not join home Wi-Fi (check name/password)."); return false; }
+  return true;
+}
+void doOtaFromGithub() {
+  otaStatus("Joining home Wi-Fi…");
+  if (!joinHomeWifi()) return;
+  WiFiClientSecure client; client.setInsecure();   // GitHub over TLS without a bundled root cert
+  HTTPClient http;
+  otaStatus("Checking latest version…");
+  http.begin(client, OTA_VER_URL); int code = http.GET();
+  String remote = code == 200 ? http.getString() : ""; remote.trim(); http.end();
+  if (code != 200) { otaStatus("Could not reach GitHub."); return; }
+  if (remote == FW_VERSION) { char b[96]; snprintf(b, sizeof b, "Already up to date (%s).", FW_VERSION); otaStatus(b); return; }
+  otaStatus("Downloading update…");
+  http.begin(client, OTA_URL); code = http.GET();
+  if (code != 200) { otaStatus("Download failed."); http.end(); return; }
+  int len = http.getSize();
+  if (!Update.begin(len > 0 ? len : UPDATE_SIZE_UNKNOWN)) { otaStatus("Not enough space for update."); http.end(); return; }
+  WiFiClient* stream = http.getStreamPtr();
+  uint8_t buf[2048]; size_t done = 0; uint32_t lastMsg = 0;
+  while (http.connected() && (len < 0 || done < (size_t)len)) {
+    size_t n = stream->available(); if (!n) { delay(1); continue; }
+    n = stream->readBytes(buf, min(n, sizeof buf));
+    if (Update.write(buf, n) != n) { otaStatus("Write failed."); Update.abort(); http.end(); return; }
+    done += n;
+    if (millis() - lastMsg > 500) { char b[64]; snprintf(b, sizeof b, "Installing… %d%%", len > 0 ? (int)(done * 100 / len) : 0); otaStatus(b); lastMsg = millis(); }
+  }
+  http.end();
+  if (Update.end(true)) { otaStatus("Update installed. Restarting…"); delay(800); ESP.restart(); }
+  else otaStatus("Update failed to finish.");
+}
+void handleUpload(AsyncWebServerRequest* r, const String& filename, size_t index, uint8_t* data, size_t len, bool final) {
+  if (index == 0) { if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { otaStatus("Could not start upload."); return; } otaStatus("Receiving file…"); }
+  if (Update.isRunning() && len) Update.write(data, len);
+  if (final) { if (Update.end(true)) { otaStatus("Upload installed. Restarting…"); } else otaStatus("Upload failed (is it the .app.bin?)."); }
 }
 
 void setupWeb() {
@@ -331,6 +388,10 @@ void setupWeb() {
     res->addHeader("Content-Encoding", "gzip"); res->addHeader("Cache-Control", "max-age=86400"); r->send(res);
 #endif
   });
+  server.on("/update", HTTP_POST, [](AsyncWebServerRequest* r) {
+    bool ok = !Update.hasError(); r->send(200, "text/plain", ok ? "ok" : "fail");
+    if (ok) { delay(500); ESP.restart(); }
+  }, handleUpload);
   server.onNotFound([](AsyncWebServerRequest* r) { r->redirect("/"); });  // captive-portal style
   server.begin();
 }
@@ -345,7 +406,7 @@ void drawScreen() {
   d.setCursor(4, 30); d.setTextColor(TFT_ORANGE); d.print(lastKind);
   d.setTextSize(1); d.setTextColor(TFT_DARKGREY);
   d.setCursor(4, 60); d.printf("BLE %s  WiFi %d", bleConnected ? "on" : "--", WiFi.softAPgetStationNum());
-  d.setCursor(4, 72); d.printf("batt %d%%", M5.Power.getBatteryLevel());
+  d.setCursor(4, 72); d.printf("batt %d%%  v%s", M5.Power.getBatteryLevel(), FW_VERSION);
   d.setCursor(4, 84); d.print(cfg.snare == 0 ? (cfg.cal ? "snare: swing R" : "snare: SET RIGHT") : cfg.snare == 1 ? "tap=sn stomp=kk" : cfg.snare == 2 ? "tap=kk stomp=sn" : cfg.snare == 3 ? "snare: high lift" : cfg.snare == 4 ? "bounce/stomp/lift" : (cfg.kcal && cfg.scal ? "direction mode" : "direction: SET K/S"));
   d.endWrite();
 }
@@ -384,6 +445,7 @@ void loop() {
   float wx = 0, wy = 0, wz = 0;
   if (M5.Imu.update() && M5.Imu.getAccel(&ax, &ay, &az)) { M5.Imu.getGyro(&wx, &wy, &wz); processMotion(ax, ay, az, wx, wy, wz, now); }
 
+  if (otaRequest) { otaRequest = 0; doOtaFromGithub(); WiFi.mode(WIFI_AP); }
   if (pending.on && now >= pending.at) { pending.on = false; hit(pending.k, pending.vel, pending.g, pending.sw, pending.lift); }
   clockTick(now);
 

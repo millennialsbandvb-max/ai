@@ -23,6 +23,7 @@ jobs:
           arduino-cli lib install "M5Unified" "ESP Async WebServer" "Async TCP" "BLE-MIDI" "NimBLE-Arduino@1.4.3" "MIDI Library"
       - name: Compile
         run: |
+          echo "#define FW_VERSION \"${GITHUB_SHA::7}\"" > firmware/pocketbeat_sticks3/version.h
           arduino-cli compile \
             --fqbn "esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,USBMode=default,CDCOnBoot=cdc" \
             --build-property "compiler.cpp.extra_flags=-DBLEMIDI_ESP32_NIMBLE" \
@@ -58,6 +59,7 @@ jobs:
           cp out/pocketbeat_sticks3.bin firmware/bin/pocketbeat_sticks3.bin
           cp out/pocketbeat_sticks3.app.bin firmware/bin/pocketbeat_sticks3.app.bin
           cp out/pocketbeat_sticks3_lite.app.bin firmware/bin/pocketbeat_sticks3_lite.app.bin
+          echo "${GITHUB_SHA::7}" > firmware/bin/version.txt
           git add firmware/bin/
           git diff --cached --quiet || git commit -m "Built firmware $(git rev-parse --short HEAD)"
           git push origin HEAD:main
