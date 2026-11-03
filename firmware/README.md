@@ -27,6 +27,7 @@ Only `pocketbeat_sticks3.app.bin` works inside Launcher. The plain `pocketbeat_s
 - **Set right (once):** press the front button **A**, then within 2.5 s swing your leg out to the right. The screen changes from "SET RIGHT" to "snare: swing R". Saved on the board.
 - **Hi-hat** starts after 3 even hits and runs until you stop for a full bar.
 - **Hold A for 2 s** = reset all settings.
+- **Screen** turns off after 30 s without a button press to save battery; press any button to wake it (that press does nothing else).
 
 ## Sound
 

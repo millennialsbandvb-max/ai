@@ -398,7 +398,14 @@ void setupWeb() {
 }
 
 // ---------------- Display ----------------
-uint32_t lastDraw = 0;
+uint32_t lastDraw = 0, lastButtonMs = 0; bool screenOn = true;
+const uint32_t SCREEN_TIMEOUT_MS = 30000; bool wakeOnly = false;
+void screenSet(bool on) {
+  if (on == screenOn) return;
+  screenOn = on;
+  if (on) { M5.Display.wakeup(); M5.Display.setBrightness(96); }
+  else { M5.Display.setBrightness(0); M5.Display.sleep(); }
+}
 void drawScreen() {
   auto& d = M5.Display;
   d.startWrite(); d.fillScreen(TFT_BLACK);
@@ -418,7 +425,8 @@ void setup() {
   c.internal_spk = true;
 #endif
   M5.begin(c);
-  M5.Display.setRotation(1);
+  M5.Display.setRotation(1); M5.Display.setBrightness(96);
+  lastButtonMs = millis();
   loadCfg();
   M5.Speaker.setVolume(cfg.vol);
   M5.Imu.init();
@@ -438,8 +446,14 @@ void loop() {
   MIDI.read();
   uint32_t now = millis();
 
+  // Screen: off after 30 s without a button press; the next press only wakes it.
+  if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) {
+    lastButtonMs = now;
+    if (!screenOn) { screenSet(true); drawScreen(); wakeOnly = true; }
+  }
+  if (screenOn && now - lastButtonMs > SCREEN_TIMEOUT_MS) screenSet(false);
   // Button A: calibrate the "right" direction. Hold 2 s: factory reset.
-  if (M5.BtnA.wasReleased()) { calibrating = true; calBest = 0; calEnd = now + 2500; }
+  if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else { calibrating = true; calBest = 0; calEnd = now + 2500; } }
   if (M5.BtnA.pressedFor(2000)) { cfg = Cfg(); saveCfg(); sendCfg(nullptr); }
 
   float ax, ay, az;
@@ -458,7 +472,7 @@ void loop() {
   } else if (nMeter >= 12) nMeter = 0;
 
   if (now - lastDraw > 500) {
-    lastDraw = now; drawScreen();
+    lastDraw = now; if (screenOn) drawScreen();
     if (ws.count()) { char b[32]; snprintf(b, sizeof b, "{\"batt\":%d}", M5.Power.getBatteryLevel()); ws.textAll(b); }
     ws.cleanupClients();
   }
