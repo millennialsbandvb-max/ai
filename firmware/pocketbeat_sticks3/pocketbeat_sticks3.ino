@@ -62,9 +62,9 @@ AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 bool bleConnected = false;
 
-const char* kindName[] = { "kick", "snare", "hat" };
+const char* kindName[] = { "kick", "snare", "hat", "tap" };
 const char* lastKind = "";
-const uint8_t midiNote[] = { 36, 38, 42 };   // GM drums: kick, snare, closed hat
+const uint8_t midiNote[] = { 36, 38, 42, 0 };   // GM drums: kick, snare, closed hat (tap: none)
 
 void playBoard(Kind k, float vel) {
 #ifdef PB_LITE
@@ -166,6 +166,7 @@ void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
     if (!clockOn) startClock(now); else nudgeHats(now);
   }
   if (ws.count()) { char b[32]; snprintf(b, sizeof b, "{\"bpm\":%d}", beatMs ? (int)roundf(60000.0f / beatMs) : 0); ws.textAll(b); }
+  if (k == TAP) { if (ws.count()) { char b[64]; snprintf(b, sizeof b, "{\"hit\":\"tap\",\"v\":0,\"g\":%.2f,\"lift\":%.0f}", g, lift); ws.textAll(b); } return; }
   if (when > now + 1) { pending = { true, when, k, vel, g, sw, lift }; }
   else hit(k, vel, g, sw, lift);
 }
@@ -185,13 +186,14 @@ void fireStomp(float p, float now) {
     float lift = liftAngle; liftAngle = 0; liftMax = 0;
     if (lift >= cfg.lthr) onHit(SNARE, constrain(0.7f + 0.3f * (lift / (2 * cfg.lthr)), 0, 1), p, -1, now, lift);
     else if (p >= cfg.kthr) onHit(KICK, constrain(0.6f + 0.4f * (p / (cfg.kthr * 2)), 0, 1), p, -1, now, lift);
-    else hit(HAT, constrain(0.5f + 0.5f * (p / cfg.kthr), 0, 1), p, -1, lift);   // live hat, doesn't drive the clock
+    else { hit(HAT, constrain(0.5f + 0.5f * (p / cfg.kthr), 0, 1), p, -1, lift); onHit(TAP, 0, p, -1, now, lift); }  // live hat + tempo tap
     return;
   }
-  if (cfg.snare == 3) {   // high lift: judge by how far the foot rotated on the way in (degrees)
+  if (cfg.snare == 3) {   // stomp = kick, lift = snare; a light bounce (below the kick line) is a silent tempo tap
     float lift = liftAngle; liftAngle = 0; liftMax = 0;
-    Kind k = lift >= cfg.lthr ? SNARE : KICK;
-    onHit(k, constrain(0.6f + 0.4f * (p / (cfg.thr * 2.5f)), 0, 1), p, -1, now, lift);
+    if (lift >= cfg.lthr) onHit(SNARE, constrain(0.7f + 0.3f * (lift / (2 * cfg.lthr)), 0, 1), p, -1, now, lift);
+    else if (p >= cfg.kthr) onHit(KICK, constrain(0.6f + 0.4f * (p / (cfg.kthr * 2)), 0, 1), p, -1, now, lift);
+    else onHit(TAP, 0, p, -1, now, lift);
     return;
   }
   liftMax = 0; liftAngle = 0;

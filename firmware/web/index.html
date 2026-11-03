@@ -114,7 +114,7 @@
 
 <div class="ctl"><label for="thr">Lightest landing that counts</label><output id="thrOut"></output>
   <input type="range" id="thr" data-key="thr" min="0.05" max="1.5" step="0.005" value="0.8"></div>
-<div class="ctl"><label for="kthr">Kick: stomp above (lighter = hi-hat)</label><output id="kthrOut"></output>
+<div class="ctl"><label for="kthr">Kick: stomp above (lighter = bounce, keeps tempo)</label><output id="kthrOut"></output>
   <input type="range" id="kthr" data-key="kthr" min="0.1" max="3" step="0.005" value="1.8"></div>
 <div class="ctl"><label for="sthr">Hard stomp above</label><output id="sthrOut"></output>
   <input type="range" id="sthr" data-key="sthr" min="0.1" max="3" step="0.005" value="2.5"></div>
@@ -128,7 +128,7 @@
   <input type="range" id="vol" data-key="vol" min="0" max="255" step="1" value="200"></div>
 <div class="ctl"><label for="pvol">Phone volume</label><output id="pvolOut"></output>
   <input type="range" id="pvol" min="0" max="100" step="1" value="85"></div>
-<p class="hint">Default mode: stomp = kick, lift the foot high = snare (gyro), hi-hat automatic from your tempo. "Last lift" is how fast the leg rotated before landing. Everything here is stored on the board, so once it's tuned you can close this page and just play. Bluetooth MIDI is always on: pair the board in GarageBand (Settings › Advanced › Bluetooth MIDI) to use the phone's drum sounds with the phone locked.</p>
+<p class="hint">Default mode: stomp = kick, lift the foot high = snare (gyro), hi-hat automatic from your tempo. Light bounces of the leg (above the blue line, below the orange kick line) make no sound but set the tempo, so bounce to keep time and the hats follow. "Last lift" is how fast the leg rotated before landing. Everything here is stored on the board, so once it's tuned you can close this page and just play. Bluetooth MIDI is always on: pair the board in GarageBand (Settings › Advanced › Bluetooth MIDI) to use the phone's drum sounds with the phone locked.</p>
 <p class="err" id="err" hidden></p>
 <button class="big" id="go" type="button">Enable sound on this phone</button>
 
@@ -164,10 +164,10 @@
   const cv = $('scope'), g2 = cv.getContext('2d');
   function draw() {
     const w = cv.width, h = cv.height, thr = +$('thr').value, sthr = +$('sthr').value, mode = +(cfg.snare || 0);
-    const kthr = +$('kthr').value; const scale = (mode === 1 || mode === 2) ? Math.max(sthr * 1.5, 1.5) : mode === 4 ? Math.max(kthr * 1.5, 1.5) : Math.max(thr * 3, 1.5);
+    const kthr = +$('kthr').value; const scale = (mode === 1 || mode === 2) ? Math.max(sthr * 1.5, 1.5) : (mode === 3 || mode === 4) ? Math.max(kthr * 1.5, 1.5) : Math.max(thr * 3, 1.5);
     g2.clearRect(0, 0, w, h); const y = v => h - Math.min(1, v / scale) * h;
     g2.lineWidth = 2; g2.setLineDash([8, 8]);
-    const lines = mode === 1 ? [[thr, colors.snare], [sthr, colors.kick]] : mode === 2 ? [[thr, colors.kick], [sthr, colors.snare]] : mode === 4 ? [[thr, colors.hat], [kthr, colors.kick]] : [[thr, colors.kick]];
+    const lines = mode === 1 ? [[thr, colors.snare], [sthr, colors.kick]] : mode === 2 ? [[thr, colors.kick], [sthr, colors.snare]] : (mode === 3 || mode === 4) ? [[thr, colors.hat], [kthr, colors.kick]] : [[thr, colors.kick]];
     for (const [v, c] of lines) { g2.strokeStyle = c; g2.beginPath(); g2.moveTo(0, y(v)); g2.lineTo(w, y(v)); g2.stroke(); }
     g2.setLineDash([]); g2.strokeStyle = '#f2efe6'; g2.lineWidth = 3; g2.beginPath();
     for (let i = 0; i < trace.length; i++) { const v = trace[(ti + i) % trace.length], x = (i / (trace.length - 1)) * w; i ? g2.lineTo(x, y(v)) : g2.moveTo(x, y(v)); }
@@ -214,6 +214,7 @@
       if (m.m) { for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; } }
       if (m.hit) {
         show(m.hit);
+        if (m.hit === 'tap') { logRows.unshift('tap   ' + m.g.toFixed(2) + ' g  angle ' + String(Math.round(m.lift)).padStart(3) + '°  (tempo only)'); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); return; }
         if (m.hit !== 'hat' || m.g !== undefined) { logRows.unshift((m.hit + '     ').slice(0, 5) + ' ' + (m.g !== undefined ? m.g.toFixed(2) + ' g' : '      ') + (m.lift !== undefined ? '  angle ' + String(Math.round(m.lift)).padStart(3) + '°' : '') + (m.sw !== undefined ? '  swing ' + m.sw.toFixed(2) : '')); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); } if (m.g !== undefined) $('mPeak').textContent = m.g.toFixed(2); if (m.sw !== undefined) $('mSwing').textContent = m.sw.toFixed(2); if (m.lift !== undefined) $('mLift').textContent = Math.round(m.lift);
         const out = +(cfg.out || 0); if (phoneSound && (out === 1 || out === 2)) playPhone(m.hit, m.v || 1);
       }

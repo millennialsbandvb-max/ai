@@ -45,7 +45,7 @@
   .tile span { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
   .beats { display: flex; gap: 6px; margin-top: 6px; }
   .beats i { flex: 1; height: 10px; border-radius: 5px; background: var(--line); }
-  .beats i.k { background: var(--kick); } .beats i.s { background: var(--snare); }
+  .beats i.k { background: var(--kick); } .beats i.s { background: var(--snare); } .beats i.h { background: var(--hat); }
   .seg { flex: none; display: flex; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
   .seg button { flex: 1; background: none; border: 0; color: var(--muted); padding: 10px 4px; font-size: 12px; line-height: 1.2; cursor: pointer; }
   .seg button.on { background: var(--fg); color: var(--bg); font-weight: 600; }
@@ -126,8 +126,8 @@
   <label for="thr">Lightest landing that counts</label><output id="thrOut"></output>
   <input type="range" id="thr" min="0.05" max="1.5" step="0.005" value="0.4">
 </div>
-<div class="ctl" id="gyroCtl" hidden>
-  <label for="kthr">Kick: stomp above (lighter = hi-hat)</label><output id="kthrOut"></output>
+<div class="ctl" id="gyroCtl">
+  <label for="kthr">Kick: stomp above (lighter = bounce, keeps tempo)</label><output id="kthrOut"></output>
   <input type="range" id="kthr" min="0.1" max="3" step="0.005" value="0.9">
 </div>
 <div class="ctl" id="swingCtl" hidden>
@@ -150,7 +150,7 @@
   <label for="vol">Volume</label><output id="volOut"></output>
   <input type="range" id="vol" min="0" max="100" step="1" value="85">
 </div>
-<p class="hint">Default mode: stomp = kick, lift the foot high = snare (the gyro measures how many degrees the leg rotated before landing), hi-hat automatic from your tempo. The orange line is the lightest landing that counts. Pocket / Sock just sets starting thresholds (impacts read several times harder in a sock); fine-tune with the sliders. Stomp = kick. Snare is either a swing out to the right, or in the stomp modes, a light tap and a hard stomp are told apart by the two lines on the meter (pick which one is the kick). High lift uses the gyroscope: it measures how fast your leg rotated before landing; a high lift spins much faster than a tap. Once, with the phone in your pocket: tap "Set right", then do one clear swing to the right; the app remembers that direction (saved on this phone). After that, any swing that way faster than the slider's speed is a snare, and the stomp detector ignores the swing so you don't get a kick at the same time. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each hit is nudged onto the nearest grid line.</p>
+<p class="hint">Default mode: stomp = kick, lift the foot high = snare (the gyro measures how many degrees the leg rotated before landing), hi-hat automatic from your tempo. Light bounces of the leg (above the blue line, below the orange kick line) make no sound but set the tempo, so bounce to keep time and the hats follow. Pocket / Sock just sets starting thresholds (impacts read several times harder in a sock); fine-tune with the sliders. Stomp = kick. Snare is either a swing out to the right, or in the stomp modes, a light tap and a hard stomp are told apart by the two lines on the meter (pick which one is the kick). High lift uses the gyroscope: it measures how fast your leg rotated before landing; a high lift spins much faster than a tap. Once, with the phone in your pocket: tap "Set right", then do one clear swing to the right; the app remembers that direction (saved on this phone). After that, any swing that way faster than the slider's speed is a snare, and the stomp detector ignores the swing so you don't get a kick at the same time. After two stomps the app locks a clock to your tempo: the hi-hat runs on that clock, and with quantize on, each hit is nudged onto the nearest grid line.</p>
 <p class="err" id="err" hidden></p>
 <p class="hint" id="diag"></p>
 <button class="big" id="go" type="button">Start</button>
@@ -281,7 +281,7 @@
 
   function onStomp(kind, vel) {
     const now = ctx.currentTime;
-    stomps++; $('nKick').textContent = stomps;
+    if (kind !== 'tap') { stomps++; $('nKick').textContent = stomps; }
     if (lastStompT) {
       let dt = now - lastStompT;
       if (!beatSec) {
@@ -320,10 +320,11 @@
       if (!clockOn) startClock(now); else nudgeHats(now);
     }
     $('bpm').textContent = beatSec ? Math.round(60 / beatSec) : '—';
+    if (kind === 'tap') return;   // bounce: tempo only, no sound
     play[kind](when, vel); flashAt(kind, when);
     const beatIdx = (stomps - 1) % 4;
     for (let i = 0; i < 4; i++) $('b' + i).className = '';
-    $('b' + beatIdx).className = kind === 'snare' ? 's' : 'k';
+    $('b' + beatIdx).className = kind === 'snare' ? 's' : kind === 'tap' ? 'h' : 'k';
   }
   // ---------- Motion detection ----------
   let lastHit = 0, peak = 0, peakT = 0, gx = 0, gy = 0, gz = 0;
@@ -401,10 +402,10 @@
     const p = peak, sthr = +$('sthr').value; peak = 0; peakT = 0; lastHit = now;
     $('mPeak').textContent = p.toFixed(3);
     if (snareMode === 'lift') {
-      const lift = liftMax, ang = liftAngle; liftMax = 0; liftAngle = 0; $('mLift').textContent = Math.round(ang);
-      const kind = ang >= +$('lthr').value ? 'snare' : 'kick';
+      const lift = liftMax, ang = liftAngle, kthr = +$('kthr').value; liftMax = 0; liftAngle = 0; $('mLift').textContent = Math.round(ang);
+      const kind = ang >= +$('lthr').value ? 'snare' : p >= kthr ? 'kick' : 'tap';
       logHit(kind, p, ang, lift);
-      onStomp(kind, Math.min(1, 0.6 + 0.4 * (p / 2)));
+      onStomp(kind, kind === 'tap' ? 0 : Math.min(1, 0.6 + 0.4 * (p / (kthr * 2))));
       return;
     }
     if (snareMode === 'gyro') {
@@ -414,7 +415,7 @@
       const kind = ang >= +$('lthr').value ? 'snare' : p >= kthr ? 'kick' : 'hat'; logHit(kind, p, ang, lift);
       if (kind === 'snare') onStomp('snare', Math.min(1, 0.7 + 0.3 * (ang / (2 * +$('lthr').value))));
       else if (kind === 'kick') onStomp('kick', Math.min(1, 0.6 + 0.4 * (p / (kthr * 2))));
-      else { if (ctx) { play.hat(ctx.currentTime, Math.min(1, 0.5 + 0.5 * (p / kthr))); show('hat'); } }
+      else { if (ctx) { play.hat(ctx.currentTime, Math.min(1, 0.5 + 0.5 * (p / kthr))); show('hat'); } onStomp('tap', 0); }
       return;
     }
     liftMax = 0;
@@ -440,11 +441,11 @@
   // ---------- Scope ----------
   const cv = $('scope'), g2 = cv.getContext('2d');
   function draw() {
-    const w = cv.width, h = cv.height, thr = +$('thr').value, sthr = +$('sthr').value, scale = (snareMode === 'hard' || snareMode === 'hardkick') ? Math.max(sthr * 1.5, 1.5) : snareMode === 'gyro' ? Math.max(+$('kthr').value * 1.5, 1.5) : Math.max(thr * 3, 1.5);
+    const w = cv.width, h = cv.height, thr = +$('thr').value, sthr = +$('sthr').value, scale = (snareMode === 'hard' || snareMode === 'hardkick') ? Math.max(sthr * 1.5, 1.5) : (snareMode === 'gyro' || snareMode === 'lift') ? Math.max(+$('kthr').value * 1.5, 1.5) : Math.max(thr * 3, 1.5);
     g2.clearRect(0, 0, w, h);
     const y = v => h - Math.min(1, v / scale) * h;
     g2.lineWidth = 2; g2.setLineDash([8, 8]);
-    for (const [v, c] of snareMode === 'hard' ? [[thr, colors.kick], [sthr, colors.snare]] : snareMode === 'hardkick' ? [[thr, colors.snare], [sthr, colors.kick]] : snareMode === 'gyro' ? [[thr, colors.hat], [+$('kthr').value, colors.kick]] : [[thr, colors.kick]]) {
+    for (const [v, c] of snareMode === 'hard' ? [[thr, colors.kick], [sthr, colors.snare]] : snareMode === 'hardkick' ? [[thr, colors.snare], [sthr, colors.kick]] : (snareMode === 'gyro' || snareMode === 'lift') ? [[thr, colors.hat], [+$('kthr').value, colors.kick]] : [[thr, colors.kick]]) {
       g2.strokeStyle = c; g2.beginPath(); g2.moveTo(0, y(v)); g2.lineTo(w, y(v)); g2.stroke();
     }
     g2.setLineDash([]); g2.strokeStyle = '#f2efe6'; g2.lineWidth = 3; g2.beginPath();
@@ -476,7 +477,7 @@
   seg('hatSeg', 'hat', v => { hatMode = +v; if (clockOn && beatSec) { nextHat = lastHatSched + hatSub(); } });
   seg('qSeg', 'q', v => quant = +v);
   seg('kitSeg', 'kit', v => { kit = v; if (ctx) loadKit(v); });
-  seg('snSeg', 'sn', v => { snareMode = v; $('swingCtl').hidden = v !== 'swing'; $('gyroCtl').hidden = v !== 'gyro'; $('liftCtl').hidden = !(v === 'lift' || v === 'gyro'); $('hardCtl').hidden = !(v === 'hard' || v === 'hardkick'); });
+  seg('snSeg', 'sn', v => { snareMode = v; $('swingCtl').hidden = v !== 'swing'; $('gyroCtl').hidden = !(v === 'gyro' || v === 'lift'); $('liftCtl').hidden = !(v === 'lift' || v === 'gyro'); $('hardCtl').hidden = !(v === 'hard' || v === 'hardkick'); });
   seg('placeSeg', 'place', v => { const p = presets[v]; setRange('thr', p.thr); setRange('sthr', p.sthr); setRange('kthr', p.kthr); setRange('gap', p.gap); });
 
   let running = false, wakeLock = null;
