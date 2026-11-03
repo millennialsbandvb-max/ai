@@ -55,6 +55,7 @@ struct Cfg {
   float lf[6] = {0}; float rf[6] = {0};            // learned left/right leg signatures (Leg mode)
   bool lcal = false, rcal = false;
   int legSwap = 0;                                 // 0: left = kick, right = snare; 1: swapped
+  int sigVer = 0;                                  // 2 = leg signatures use the pre-stomp tilt
 } cfg;
 Preferences prefs;
 
@@ -68,6 +69,7 @@ void loadCfg() {
   size_t n = prefs.getBytesLength("cfg");
   if (n > 0 && n <= sizeof(cfg)) prefs.getBytes("cfg", &cfg, n);   // older builds stored fewer fields; new ones keep defaults
   if (cfg.snare != 1 && cfg.snare != 2 && cfg.snare != 5) cfg.snare = 2;   // retired modes -> tap/stomp
+  if (cfg.sigVer != 2) { cfg.lcal = false; cfg.rcal = false; }              // old leg signatures don't fit the new measurement
   prefs.end();
 }
 
@@ -109,10 +111,10 @@ void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
   playBoard(k, vel);
   sendMidi(k, vel);
   if (ws.count()) {
-    char buf[128];
-    if (sw >= 0) snprintf(buf, sizeof buf, "{\"hit\":\"%s\",\"v\":%.2f,\"sw\":%.2f}", kindName[k], vel, sw);
-    else if (lift >= 0) snprintf(buf, sizeof buf, "{\"hit\":\"%s\",\"v\":%.2f,\"g\":%.2f,\"lift\":%.0f}", kindName[k], vel, g, lift);
-    else snprintf(buf, sizeof buf, "{\"hit\":\"%s\",\"v\":%.2f,\"g\":%.2f}", kindName[k], vel, g);
+    char buf[160]; int n = snprintf(buf, sizeof buf, "{\"hit\":\"%s\",\"v\":%.2f,\"g\":%.2f", kindName[k], vel, g);
+    if (sw >= 0) n += snprintf(buf + n, sizeof buf - n, ",\"sw\":%.1f", sw);
+    if (lift >= 0) n += snprintf(buf + n, sizeof buf - n, ",\"lift\":%.0f", lift);
+    snprintf(buf + n, sizeof buf - n, "}");
     ws.textAll(buf);
   }
 }
@@ -201,6 +203,10 @@ float pkx = 0, pky = 0, pkz = 0;   // linear-accel vector at the impact peak (di
 int learnDir = 0;                  // 1 = learning left leg, 2 = learning right leg
 int learnCount = 0; float learnAcc[6];
 const int GN = 48; float gHist[GN][3]; uint32_t gHistT[GN]; int gHi = 0;
+// Tilt: rotation integrated over time (degrees), slowly drifting back to zero, so it shows
+// how far the board has tipped relative to where it was resting a moment ago.
+float tilt[3] = {0, 0, 0};
+const int TN = 120; float tHist[TN][3]; uint32_t tHistT[TN]; int tHi = 0;
 uint32_t lastT = 0;
 
 static float dirSim(float ax, float ay, float az, float bx, float by, float bz) {
@@ -211,28 +217,26 @@ void fireStomp(float p, float now) {
   if (cfg.snare == 5) {   // Leg mode: board across both thighs; tell the left foot from the right by how the board tips
     liftMax = 0; liftAngle = 0;
     if (p < cfg.sthr && !learnDir) { onHit(TAP, 0, p, -1, now, 0); return; }   // below the stomp line = silent tempo bounce
-    // Signature: jolt direction (accel at the peak) + tilt direction (strongest gyro reading near the impact).
-    float f[6];
-    float m = sqrtf(pkx * pkx + pky * pky + pkz * pkz); if (m < 1e-3f) m = 1;
-    f[0] = pkx / m; f[1] = pky / m; f[2] = pkz / m;
-    float bx = 0, by = 0, bz = 0, bm = 0;
-    for (int i = 0; i < GN; i++) {
-      if (now - gHistT[i] > 160) continue;
-      float gm = sqrtf(gHist[i][0] * gHist[i][0] + gHist[i][1] * gHist[i][1] + gHist[i][2] * gHist[i][2]);
-      if (gm > bm) { bm = gm; bx = gHist[i][0]; by = gHist[i][1]; bz = gHist[i][2]; }
+    // Signature: the biggest tilt of the board in the ~0.45 s before the impact, i.e. while
+    // that leg was lifting. Lifting the left leg tips the board one way, the right leg the other.
+    float f[6] = {0, 0, 0, 0, 0, 0}; float best = 0;
+    for (int i = 0; i < TN; i++) {
+      uint32_t age = now - tHistT[i];
+      if (age < 40 || age > 450) continue;   // skip the landing itself
+      float m2 = tHist[i][0] * tHist[i][0] + tHist[i][1] * tHist[i][1] + tHist[i][2] * tHist[i][2];
+      if (m2 > best) { best = m2; f[0] = tHist[i][0]; f[1] = tHist[i][1]; f[2] = tHist[i][2]; }
     }
-    // the tilt is the stronger left/right cue, so weight it double; ignore it if the board barely rotated
-    if (bm > 15) { f[3] = 2 * bx / bm; f[4] = 2 * by / bm; f[5] = 2 * bz / bm; } else { f[3] = f[4] = f[5] = 0; }
-
+    float tiltDeg = sqrtf(best);
     if (learnDir) {   // learning: average three stomps of that foot
       if (learnCount == 0) for (int i = 0; i < 6; i++) learnAcc[i] = 0;
       for (int i = 0; i < 6; i++) learnAcc[i] += f[i];
       learnCount++;
-      char b[64]; snprintf(b, sizeof b, "{\"learn\":\"%s %d/3\"}", learnDir == 1 ? "left" : "right", learnCount); ws.textAll(b);
+      char b[80]; snprintf(b, sizeof b, "{\"learn\":\"%s %d/3 (tilt %.0f deg)\"}", learnDir == 1 ? "left" : "right", learnCount, tiltDeg); ws.textAll(b);
       if (learnCount >= 3) {
         float* dst = learnDir == 1 ? cfg.lf : cfg.rf;
         for (int i = 0; i < 6; i++) dst[i] = learnAcc[i];
         if (learnDir == 1) cfg.lcal = true; else cfg.rcal = true;
+        cfg.sigVer = 2;
         learnDir = 0; learnCount = 0; saveCfg(); sendCfg(nullptr);
       }
       return;
@@ -242,7 +246,7 @@ void fireStomp(float p, float now) {
     bool left = sl >= sr;
     Kind k = (left ^ (cfg.legSwap != 0)) ? KICK : SNARE;
     float vel = constrain(0.6f + 0.4f * (p / (cfg.sthr * 2)), 0, 1);
-    onHit(k, vel, p, -1, now, fabsf(sl - sr) * 100);   // "lift" slot carries how clearly it matched (0-200)
+    onHit(k, vel, p, tiltDeg, now, fabsf(sl - sr) * 100);   // "sw" slot: tilt before the stomp (deg); "lift" slot: match clarity (0-200)
     return;
   }
   if (cfg.snare == 4) {   // bounce = hat, stomp = kick, lift = snare
@@ -270,6 +274,12 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   float dt = lastT ? min((uint32_t)50, now - lastT) / 1000.0f : 0; lastT = now;
   gyroMag = sqrtf(wx * wx + wy * wy + wz * wz);
   gHist[gHi][0] = wx; gHist[gHi][1] = wy; gHist[gHi][2] = wz; gHistT[gHi] = now; gHi = (gHi + 1) % GN;
+  {
+    float dtt = lastT ? min((uint32_t)50, now - lastT) / 1000.0f : 0;
+    float leak = 1.0f - 1.5f * dtt;   // ~0.7 s memory
+    tilt[0] = (tilt[0] + wx * dtt) * leak; tilt[1] = (tilt[1] + wy * dtt) * leak; tilt[2] = (tilt[2] + wz * dtt) * leak;
+    tHist[tHi][0] = tilt[0]; tHist[tHi][1] = tilt[1]; tHist[tHi][2] = tilt[2]; tHistT[tHi] = now; tHi = (tHi + 1) % TN;
+  }
   if (gyroMag > liftMax) liftMax = gyroMag; else liftMax *= (1.0f - 1.2f * dt);  // forgets a lift after ~1 s
   if (gyroMag > 20) { liftAngle += gyroMag * dt; stillMs = 0; } else { stillMs += dt * 1000; if (stillMs > 250) liftAngle = 0; }
   const float k = 0.05f; gx += k * (ax - gx); gy += k * (ay - gy); gz += k * (az - gz);
