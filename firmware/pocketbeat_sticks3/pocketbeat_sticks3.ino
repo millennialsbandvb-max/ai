@@ -15,6 +15,12 @@
 #include <Preferences.h>
 #include <BLEMIDI_Transport.h>
 #include <hardware/BLEMIDI_ESP32_NimBLE.h>
+#if ARDUINO_USB_MODE == 0   // USB-OTG (TinyUSB) build: native USB MIDI
+#include "USB.h"
+#include "USBMIDI.h"
+USBMIDI usbMidi;
+#define HAVE_USB_MIDI 1
+#endif
 #ifndef PB_LITE
 #include "samples.h"
 #endif
@@ -74,10 +80,12 @@ void playBoard(Kind k, float vel) {
 #endif
 }
 void sendMidi(Kind k, float vel) {
-  if (!bleConnected) return;
   uint8_t v = (uint8_t)constrain(60 + vel * 67, 1, 127);
-  MIDI.sendNoteOn(midiNote[k], v, 10);
-  MIDI.sendNoteOff(midiNote[k], 0, 10);
+  if (bleConnected) { MIDI.sendNoteOn(midiNote[k], v, 10); MIDI.sendNoteOff(midiNote[k], 0, 10); }
+#ifdef HAVE_USB_MIDI
+  usbMidi.noteOn(midiNote[k], v, 10);
+  usbMidi.noteOff(midiNote[k], 0, 10);
+#endif
 }
 void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
   if (k != HAT) lastKind = kindName[k];
@@ -95,13 +103,13 @@ void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
 // ---------------- Beat clock (port of the web version) ----------------
 // A clock starts after 3 evenly spaced hits. Hats free-run from the clock; each hit nudges
 // the phase a little. Tempo follows the median of recent good gaps, slowly.
-float intervals[6]; int nInt = 0; float rejected[3]; int nRej = 0;
+float intervals[4]; int nInt = 0; float rejected[3]; int nRej = 0;
 float beatMs = 0; uint32_t lastHitMs = 0; bool clockOn = false;
 float nextHat = 0, lastHatSched = 0, drift = 0; uint32_t hatIdx = 0;
 
 float median(float* a, int n) { float b[8]; memcpy(b, a, n * sizeof(float)); for (int i = 1; i < n; i++) for (int j = i; j > 0 && b[j - 1] > b[j]; j--) { float t = b[j]; b[j] = b[j - 1]; b[j - 1] = t; } return b[(n - 1) / 2]; }
 bool consistent(float* a, int n, float tol) { float m = median(a, n); for (int i = 0; i < n; i++) if (fabsf(a[i] - m) / m >= tol) return false; return true; }
-void pushInt(float v) { if (nInt < 6) intervals[nInt++] = v; else { memmove(intervals, intervals + 1, 5 * sizeof(float)); intervals[5] = v; } }
+void pushInt(float v) { if (nInt < 4) intervals[nInt++] = v; else { memmove(intervals, intervals + 1, 3 * sizeof(float)); intervals[3] = v; } }
 float hatSub() { return cfg.hat == 2 ? beatMs / 2 : beatMs; }
 void startClock(float now) { nextHat = now; lastHatSched = now; hatIdx = 0; drift = 0; clockOn = true; }
 void stopClock() { clockOn = false; nInt = 0; nRej = 0; lastHitMs = 0; beatMs = 0; ws.textAll("{\"bpm\":0}"); }
@@ -122,7 +130,7 @@ void nudgeHats(float now) {
   float sub = hatSub();
   float nearest = lastHatSched + roundf((now - lastHatSched) / sub) * sub;
   float err = now - nearest;
-  drift = constrain(0.5f * err, -0.15f * sub, 0.15f * sub);
+  drift = constrain(0.7f * err, -0.25f * sub, 0.25f * sub);
 }
 
 // Pending quantized hit (held back to the next grid line, at most 90 ms)
@@ -136,10 +144,11 @@ void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
     } else {
       float r = dt / beatMs;
       if (r > 1.7f && r < 2.3f) dt /= 2;
-      if (dt / beatMs > 0.8f && dt / beatMs < 1.25f) { pushInt(dt); nRej = 0; }
+      if (dt / beatMs > 0.7f && dt / beatMs < 1.4f) { pushInt(dt); nRej = 0; }
       else if (dt > 250 && dt < 2000) {
         if (nRej < 3) rejected[nRej++] = dt; else { rejected[0] = rejected[1]; rejected[1] = rejected[2]; rejected[2] = dt; }
-        if (nRej == 3 && consistent(rejected, 3, 0.2f)) { memcpy(intervals, rejected, 3 * sizeof(float)); nInt = 3; nRej = 0; beatMs = median(intervals, 3); }
+        // Two off-tempo hits that agree with each other = a deliberate tempo change: jump to it.
+        if (nRej >= 2 && consistent(rejected + nRej - 2, 2, 0.2f)) { intervals[0] = rejected[nRej - 2]; intervals[1] = rejected[nRej - 1]; nInt = 2; nRej = 0; beatMs = median(intervals, 2); }
       }
     }
   }
@@ -148,7 +157,7 @@ void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
   if (!beatMs) {
     if (nInt == 2 && consistent(intervals, 2, 0.2f)) { beatMs = median(intervals, 2); startClock(now); }
   } else {
-    beatMs += 0.25f * (median(intervals, nInt) - beatMs);
+    beatMs += 0.5f * (median(intervals, nInt) - beatMs);
     if (cfg.quant) {
       float gsub = beatMs / cfg.quant;
       float grid = lastHatSched + roundf((now - lastHatSched) / gsub) * gsub;
@@ -327,6 +336,10 @@ void setup() {
   BLEMIDI.setHandleConnected([]() { bleConnected = true; });
   BLEMIDI.setHandleDisconnected([]() { bleConnected = false; });
   MIDI.begin();
+#ifdef HAVE_USB_MIDI
+  USB.productName("PocketBeat"); USB.manufacturerName("PocketBeat");
+  usbMidi.begin(); USB.begin();
+#endif
   setupWeb();
   drawScreen();
 }

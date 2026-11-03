@@ -31,6 +31,7 @@ Only `pocketbeat_sticks3.app.bin` works inside Launcher. The plain `pocketbeat_s
 ## Sound
 
 - **Board speaker** (default): plays the sampled kit on its own. Small speaker — a practice monitor.
+- **USB MIDI:** plug the board into a PC/Mac (or an iPhone/iPad via a USB-C/camera adapter) and it appears as a MIDI input named "PocketBeat". Lowest latency.
 - **Bluetooth MIDI:** always on, advertises as "PocketBeat". In GarageBand: Settings (wrench) → Advanced → Bluetooth MIDI Devices → PocketBeat. Pick a drum kit track and play. Any BLE MIDI drum app works the same.
 - **Phone via the tuning page:** choose "This phone" or "Both" on the page and tap "Enable sound on this phone".
 

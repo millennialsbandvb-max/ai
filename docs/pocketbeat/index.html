@@ -267,7 +267,7 @@
     const sub = hatSub();
     const nearest = lastHatSched + Math.round((now - lastHatSched) / sub) * sub;
     const err = now - nearest;
-    drift = Math.max(-0.15 * sub, Math.min(0.15 * sub, 0.5 * err));
+    drift = Math.max(-0.25 * sub, Math.min(0.25 * sub, 0.7 * err));
   }
   function startClock(now) {
     anchor = now; nextHat = now; lastHatSched = now; hatIdx = 0; drift = 0; clockOn = true;
@@ -291,14 +291,14 @@
       } else {
         const r = dt / beatSec;
         if (r > 1.7 && r < 2.3) dt /= 2;           // skipped a beat: counts as two
-        if (dt / beatSec > 0.8 && dt / beatSec < 1.25) {
-          intervals.push(dt); if (intervals.length > 6) intervals.shift(); rejected = [];
+        if (dt / beatSec > 0.7 && dt / beatSec < 1.4) {
+          intervals.push(dt); if (intervals.length > 4) intervals.shift(); rejected = [];
         } else if (dt > 0.25 && dt < 2.0) {
           // Off-tempo hit. If several in a row agree with each other, the player has
           // changed tempo on purpose: re-learn from them.
           rejected.push(dt); if (rejected.length > 3) rejected.shift();
-          if (rejected.length === 3 && consistent(rejected, 0.2)) {
-            intervals = [...rejected]; rejected = []; beatSec = median(intervals);
+          if (rejected.length >= 2 && consistent(rejected.slice(-2), 0.2)) {
+            intervals = rejected.slice(-2); rejected = []; beatSec = median(intervals);
           }
         }
       }
@@ -311,7 +311,7 @@
     } else {
       // Tempo moves slowly toward the median of the last 6 good gaps.
       const newBeat = median(intervals);
-      beatSec += 0.25 * (newBeat - beatSec);
+      beatSec += 0.5 * (newBeat - beatSec);
       // Quantize: snap to the nearest grid line (8ths or 16ths of the beat), holding
       // an early hit back at most 90 ms.
       const g = quant ? beatSec / quant : beatSec;
