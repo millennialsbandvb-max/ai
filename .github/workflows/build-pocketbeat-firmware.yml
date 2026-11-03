@@ -50,13 +50,14 @@ jobs:
           path: out
       - name: Commit built firmware to firmware/bin
         run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git fetch origin main
+          git reset --hard origin/main
           mkdir -p firmware/bin
           cp out/pocketbeat_sticks3.bin firmware/bin/pocketbeat_sticks3.bin
           cp out/pocketbeat_sticks3.app.bin firmware/bin/pocketbeat_sticks3.app.bin
           cp out/pocketbeat_sticks3_lite.app.bin firmware/bin/pocketbeat_sticks3_lite.app.bin
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
           git add firmware/bin/
           git diff --cached --quiet || git commit -m "Built firmware $(git rev-parse --short HEAD)"
-          git pull --rebase origin main
           git push origin HEAD:main
