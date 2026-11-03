@@ -66,6 +66,8 @@ void loadCfg() {
   prefs.end();
 }
 
+volatile int otaRequest = 0;   // 1 = check+update from GitHub (run from loop, not from the websocket task)
+
 // ---------------- Outputs ----------------
 BLEMIDI_CREATE_INSTANCE("PocketBeat", MIDI);
 AsyncWebServer server(80);
@@ -326,7 +328,6 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
 }
 
 // ---------------- OTA ----------------
-volatile int otaRequest = 0;   // 1 = check+update from GitHub (run from loop, not from the websocket task)
 void otaStatus(const char* msg) { char b[160]; snprintf(b, sizeof b, "{\"ota\":\"%s\"}", msg); ws.textAll(b); }
 bool joinHomeWifi() {
   if (!cfg.ssid[0]) { otaStatus("No home Wi-Fi set. Enter it below first."); return false; }
