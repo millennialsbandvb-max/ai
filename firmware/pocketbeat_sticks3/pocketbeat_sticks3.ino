@@ -36,12 +36,12 @@ static const char* OTA_VER_URL = "https://raw.githubusercontent.com/millennialsb
 
 // ---------------- Settings (persisted) ----------------
 struct Cfg {
-  float thr = 0.8f;      // lightest landing that counts, g (linear accel magnitude)
-  float sthr = 2.5f;     // hard stomp threshold, g (stomp modes)
+  float thr = 1.8f;      // stomp threshold: impact above this (g) = kick, g (linear accel magnitude)
+  float sthr = 3.5f;     // stomp line in tap/stomp modes: harder than this (g) = stomp
   float kthr = 1.8f;     // kick threshold in bounce/stomp/lift mode; lighter landings are hats
-  float swthr = 0.35f;   // swing speed threshold, m/s
+  float swthr = 200.0f;  // swing threshold: rotation along the learned swing (deg/s) = snare
   int gap = 120;         // ms between hits
-  int snare = 2;         // 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare, 3 high lift, 4 bounce=hat/stomp=kick/lift=snare
+  int snare = 6;         // mode: 6 = stomp kick / swing snare, 2 = tap kick / stomp snare, 1 = tap snare / stomp kick. 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare, 3 high lift, 4 bounce=hat/stomp=kick/lift=snare
   float lthr = 35.0f;    // lift threshold, degrees of rotation since the foot last went still
   int kit = 0;           // 0 acoustic, 1 electro
   int out = 0;           // 0 board speaker, 1 phone, 2 both
@@ -68,8 +68,10 @@ void loadCfg() {
   prefs.begin("pb", true);
   size_t n = prefs.getBytesLength("cfg");
   if (n > 0 && n <= sizeof(cfg)) prefs.getBytes("cfg", &cfg, n);   // older builds stored fewer fields; new ones keep defaults
-  if (cfg.snare != 1 && cfg.snare != 2 && cfg.snare != 5) cfg.snare = 2;   // retired modes -> tap/stomp
-  if (cfg.sigVer != 2) { cfg.lcal = false; cfg.rcal = false; }              // old leg signatures don't fit the new measurement
+  if (cfg.sigVer != 3) {   // settings from before the shoe-mode revamp: thresholds and calibration meant other things
+    Cfg d; cfg.thr = d.thr; cfg.sthr = 3.5f; cfg.swthr = d.swthr; cfg.gap = d.gap; cfg.cal = false; cfg.snare = 6; cfg.sigVer = 3;
+  }
+  if (cfg.snare != 1 && cfg.snare != 2 && cfg.snare != 6) cfg.snare = 6;
   prefs.end();
 }
 
@@ -192,135 +194,77 @@ void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
 }
 
 // ---------------- Motion detection ----------------
+// Board taped to the top of the shoe.
+//  Kick  = a stomp: an impact spike in the accelerometer above cfg.thr.
+//  Snare = a swing: the shoe rotating along the learned swing direction (gyro) faster than cfg.swthr.
+//          Only that direction (and sign) counts, so the toe lift before a stomp and the swing back don't trigger it.
 float gx = 0, gy = 0, gz = 0;        // gravity estimate (g units)
 float peak = 0; uint32_t peakT = 0, lastStompT = 0;
-float vRight = 0; uint32_t lastSwingT = 0; bool inSwing = false; float swingPeak = 0;
-bool calibrating = false; uint32_t calEnd = 0; float calBest = 0, calX = 0, calY = 0, calZ = 0;
+uint32_t lastSwingT = 0; bool inSwing = false; float swingPeak = 0;
 float meterBuf[12]; int nMeter = 0; uint32_t lastMeterSend = 0;
-float gyroMag = 0, liftMax = 0;   // deg/s; liftMax = fastest rotation since the last landing, decays slowly
-float liftAngle = 0, stillMs = 0; // degrees rotated since the foot last went still
-float pkx = 0, pky = 0, pkz = 0;   // linear-accel vector at the impact peak (direction of the jolt)
-int learnDir = 0;                  // 1 = learning left leg, 2 = learning right leg
-int learnCount = 0; float learnAcc[6];
-const int GN = 48; float gHist[GN][3]; uint32_t gHistT[GN]; int gHi = 0;
-// Tilt: rotation integrated over time (degrees), slowly drifting back to zero, so it shows
-// how far the board has tipped relative to where it was resting a moment ago.
-float tilt[3] = {0, 0, 0};
-const int TN = 120; float tHist[TN][3]; uint32_t tHistT[TN]; int tHi = 0;
 uint32_t lastT = 0;
+// swing calibration: capture up to 3 swings, average their direction
+bool calibrating = false; uint32_t calEnd = 0; int calCount = 0; bool calInSwing = false;
+float calBest = 0, calBx = 0, calBy = 0, calBz = 0, calSx = 0, calSy = 0, calSz = 0;
 
-static float dirSim(float ax, float ay, float az, float bx, float by, float bz) {
-  float d = ax * bx + ay * by + az * bz, m = sqrtf(ax * ax + ay * ay + az * az) * sqrtf(bx * bx + by * by + bz * bz);
-  return m > 0 ? d / m : 0;
+void startSwingCal() {
+  calibrating = true; calEnd = millis() + 8000; calCount = 0; calInSwing = false;
+  calSx = calSy = calSz = 0; ws.textAll("{\"learn\":\"swing your foot 0/3\"}");
 }
+void finishSwingCal() {
+  calibrating = false;
+  float m = sqrtf(calSx * calSx + calSy * calSy + calSz * calSz);
+  if (calCount >= 1 && m > 0) {
+    cfg.rx = calSx / m; cfg.ry = calSy / m; cfg.rz = calSz / m; cfg.cal = true; saveCfg();
+    ws.textAll("{\"cal\":1}"); sendCfg(nullptr);
+  } else ws.textAll("{\"cal\":0}");
+}
+
 void fireStomp(float p, float now) {
-  if (cfg.snare == 5) {   // Leg mode: board across both thighs; tell the left foot from the right by how the board tips
-    liftMax = 0; liftAngle = 0;
-    if (p < cfg.sthr && !learnDir) { onHit(TAP, 0, p, -1, now, 0); return; }   // below the stomp line = silent tempo bounce
-    // Signature: the biggest tilt of the board in the ~0.45 s before the impact, i.e. while
-    // that leg was lifting. Lifting the left leg tips the board one way, the right leg the other.
-    float f[6] = {0, 0, 0, 0, 0, 0}; float best = 0;
-    for (int i = 0; i < TN; i++) {
-      uint32_t age = now - tHistT[i];
-      if (age < 40 || age > 450) continue;   // skip the landing itself
-      float m2 = tHist[i][0] * tHist[i][0] + tHist[i][1] * tHist[i][1] + tHist[i][2] * tHist[i][2];
-      if (m2 > best) { best = m2; f[0] = tHist[i][0]; f[1] = tHist[i][1]; f[2] = tHist[i][2]; }
-    }
-    float tiltDeg = sqrtf(best);
-    if (learnDir) {   // learning: average three stomps of that foot
-      if (learnCount == 0) for (int i = 0; i < 6; i++) learnAcc[i] = 0;
-      for (int i = 0; i < 6; i++) learnAcc[i] += f[i];
-      learnCount++;
-      char b[80]; snprintf(b, sizeof b, "{\"learn\":\"%s %d/3 (tilt %.0f deg)\"}", learnDir == 1 ? "left" : "right", learnCount, tiltDeg); ws.textAll(b);
-      if (learnCount >= 3) {
-        float* dst = learnDir == 1 ? cfg.lf : cfg.rf;
-        for (int i = 0; i < 6; i++) dst[i] = learnAcc[i];
-        if (learnDir == 1) cfg.lcal = true; else cfg.rcal = true;
-        cfg.sigVer = 2;
-        learnDir = 0; learnCount = 0; saveCfg(); sendCfg(nullptr);
-      }
-      return;
-    }
-    auto sim = [&](const float* r) { float d = 0, a2 = 0, b2 = 0; for (int i = 0; i < 6; i++) { d += f[i] * r[i]; a2 += f[i] * f[i]; b2 += r[i] * r[i]; } return (a2 > 0 && b2 > 0) ? d / sqrtf(a2 * b2) : -1.0f; };
-    float sl = cfg.lcal ? sim(cfg.lf) : -1, sr = cfg.rcal ? sim(cfg.rf) : -1;
-    bool left = sl >= sr;
-    Kind k = (left ^ (cfg.legSwap != 0)) ? KICK : SNARE;
-    float vel = constrain(0.6f + 0.4f * (p / (cfg.sthr * 2)), 0, 1);
-    onHit(k, vel, p, tiltDeg, now, fabsf(sl - sr) * 100);   // "sw" slot: tilt before the stomp (deg); "lift" slot: match clarity (0-200)
-    return;
-  }
-  if (cfg.snare == 4) {   // bounce = hat, stomp = kick, lift = snare
-    float lift = liftAngle; liftAngle = 0; liftMax = 0;
-    if (lift >= cfg.lthr) onHit(SNARE, constrain(0.7f + 0.3f * (lift / (2 * cfg.lthr)), 0, 1), p, -1, now, lift);
-    else if (p >= cfg.kthr) onHit(KICK, constrain(0.6f + 0.4f * (p / (cfg.kthr * 2)), 0, 1), p, -1, now, lift);
-    else { hit(HAT, constrain(0.5f + 0.5f * (p / cfg.kthr), 0, 1), p, -1, lift); onHit(TAP, 0, p, -1, now, lift); }  // live hat + tempo tap
-    return;
-  }
-  if (cfg.snare == 3) {   // stomp = kick, lift = snare; a light bounce (below the kick line) is a silent tempo tap
-    float lift = liftAngle; liftAngle = 0; liftMax = 0;
-    if (lift >= cfg.lthr) onHit(SNARE, constrain(0.7f + 0.3f * (lift / (2 * cfg.lthr)), 0, 1), p, -1, now, lift);
-    else if (p >= cfg.kthr) onHit(KICK, constrain(0.6f + 0.4f * (p / (cfg.kthr * 2)), 0, 1), p, -1, now, lift);
-    else onHit(TAP, 0, p, -1, now, lift);
-    return;
-  }
-  liftMax = 0; liftAngle = 0;
-  bool hardMode = cfg.snare == 1 || cfg.snare == 2, isHard = hardMode && p >= cfg.sthr;
-  Kind hardKind = cfg.snare == 1 ? KICK : SNARE, softKind = cfg.snare == 1 ? SNARE : KICK;
-  if (isHard) onHit(hardKind, constrain(0.7f + 0.3f * (p / (cfg.sthr * 2)), 0, 1), p, -1, now);
-  else onHit(hardMode ? softKind : KICK, constrain(0.6f + 0.4f * (p / (hardMode ? cfg.sthr : cfg.thr * 2.5f)), 0, 1), p, -1, now);
+  if (cfg.snare == 6) { onHit(KICK, constrain(0.6f + 0.4f * (p / (cfg.thr * 2.5f)), 0, 1), p, -1, now); return; }
+  // tap/stomp modes: the stomp line decides; mode 2 = tap kick / stomp snare, mode 1 = the reverse
+  bool stomp = p >= cfg.sthr;
+  Kind k = (stomp ^ (cfg.snare == 1)) ? SNARE : KICK;
+  float vel = stomp ? constrain(0.7f + 0.3f * (p / (cfg.sthr * 2)), 0, 1) : constrain(0.6f + 0.4f * (p / cfg.sthr), 0, 1);
+  onHit(k, vel, p, -1, now);
 }
 
 void processMotion(float ax, float ay, float az, float wx, float wy, float wz, uint32_t now) {  // accel in g (incl. gravity), gyro in deg/s
-  float dt = lastT ? min((uint32_t)50, now - lastT) / 1000.0f : 0; lastT = now;
-  gyroMag = sqrtf(wx * wx + wy * wy + wz * wz);
-  gHist[gHi][0] = wx; gHist[gHi][1] = wy; gHist[gHi][2] = wz; gHistT[gHi] = now; gHi = (gHi + 1) % GN;
-  {
-    float dtt = lastT ? min((uint32_t)50, now - lastT) / 1000.0f : 0;
-    float leak = 1.0f - 1.5f * dtt;   // ~0.7 s memory
-    tilt[0] = (tilt[0] + wx * dtt) * leak; tilt[1] = (tilt[1] + wy * dtt) * leak; tilt[2] = (tilt[2] + wz * dtt) * leak;
-    tHist[tHi][0] = tilt[0]; tHist[tHi][1] = tilt[1]; tHist[tHi][2] = tilt[2]; tHistT[tHi] = now; tHi = (tHi + 1) % TN;
-  }
-  if (gyroMag > liftMax) liftMax = gyroMag; else liftMax *= (1.0f - 1.2f * dt);  // forgets a lift after ~1 s
-  if (gyroMag > 20) { liftAngle += gyroMag * dt; stillMs = 0; } else { stillMs += dt * 1000; if (stillMs > 250) liftAngle = 0; }
+  lastT = now;
   const float k = 0.05f; gx += k * (ax - gx); gy += k * (ay - gy); gz += k * (az - gz);
   float lx = ax - gx, ly = ay - gy, lz = az - gz;               // linear accel, g
   float mag = sqrtf(lx * lx + ly * ly + lz * lz);
+  float wm = sqrtf(wx * wx + wy * wy + wz * wz);               // rotation speed, deg/s
   if (nMeter < 12) meterBuf[nMeter++] = mag;
 
-  // horizontal part
-  float gl = sqrtf(gx * gx + gy * gy + gz * gz); if (gl < 0.3f) gl = 1;
-  float ux = gx / gl, uy = gy / gl, uz = gz / gl;
-  float dot = lx * ux + ly * uy + lz * uz;
-  float hx = lx - dot * ux, hy = ly - dot * uy, hz = lz - dot * uz;
-
   if (calibrating) {
-    float hm = sqrtf(hx * hx + hy * hy + hz * hz);
-    if (hm > calBest) { calBest = hm; calX = hx; calY = hy; calZ = hz; }
-    if (now > calEnd) {
-      calibrating = false;
-      float m = sqrtf(calX * calX + calY * calY + calZ * calZ);
-      if (calBest > 0.15f && m > 0) { cfg.rx = calX / m; cfg.ry = calY / m; cfg.rz = calZ / m; cfg.cal = true; saveCfg(); ws.textAll("{\"cal\":1}"); }
-      else ws.textAll("{\"cal\":0}");
-      vRight = 0;
+    // a swing = rotation above 120 deg/s; remember its strongest direction, count it when it settles
+    if (wm > 120) { if (!calInSwing) { calInSwing = true; calBest = 0; } if (wm > calBest) { calBest = wm; calBx = wx; calBy = wy; calBz = wz; } }
+    else if (calInSwing && wm < 50) {
+      calInSwing = false; calCount++;
+      calSx += calBx / calBest; calSy += calBy / calBest; calSz += calBz / calBest;
+      char b[64]; snprintf(b, sizeof b, "{\"learn\":\"swing your foot %d/3\"}", calCount); ws.textAll(b);
+      if (calCount >= 3) finishSwingCal();
     }
+    if (calibrating && now > calEnd) finishSwingCal();
     return;
   }
 
-  if (cfg.cal && cfg.snare == 0) {
-    float aR = (hx * cfg.rx + hy * cfg.ry + hz * cfg.rz) * 9.81f;   // m/s^2 toward right
-    vRight = (vRight + aR * dt) * 0.985f;
-    if (mag < 0.1f) vRight *= 0.8f;
-    if (vRight > cfg.swthr && !inSwing && now - lastSwingT > (uint32_t)cfg.gap) {
-      inSwing = true; lastSwingT = now; swingPeak = vRight;
-      onHit(SNARE, constrain(0.7f + 0.3f * (vRight / (cfg.swthr * 2)), 0, 1), 0, vRight, now);
+  // ---- snare: swing along the learned direction (stomp/swing mode only) ----
+  if (cfg.cal && cfg.snare == 6) {
+    float proj = wx * cfg.rx + wy * cfg.ry + wz * cfg.rz;       // deg/s along the swing
+    bool clearOfStomp = now - lastStompT > 120;                  // a stomp's own jolt can spin the board; ignore that
+    if (proj > cfg.swthr && !inSwing && clearOfStomp && now - lastSwingT > (uint32_t)cfg.gap) {
+      inSwing = true; lastSwingT = now; swingPeak = proj;
+      onHit(SNARE, constrain(0.65f + 0.35f * (proj / (cfg.swthr * 2.5f)), 0, 1), 0, proj, now);
     }
-    if (inSwing) { if (vRight > swingPeak) swingPeak = vRight; if (vRight < cfg.swthr * 0.4f) inSwing = false; }
+    if (inSwing && proj < cfg.swthr * 0.3f) inSwing = false;
   }
 
-  // stomp: impact spike detector
+  // ---- kick: impact spike; not right after a swing (the foot landing from a swing isn't a stomp) ----
   if (mag > cfg.thr) {
     if (now - lastStompT > (uint32_t)cfg.gap && now - lastSwingT > 250) {
-      if (mag > peak) { peak = mag; pkx = lx; pky = ly; pkz = lz; if (!peakT) peakT = now; }
+      if (mag > peak) { peak = mag; if (!peakT) peakT = now; }
       if (now - peakT > 35) { float p = peak; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
     }
   } else if (peakT) { float p = peak; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
@@ -328,9 +272,9 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
-  char b[512];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.2f,\"lthr\":%.0f,\"kthr\":%.3f,\"gap\":%d,\"snare\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"lcal\":%d,\"rcal\":%d,\"legSwap\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.thr, cfg.sthr, cfg.swthr, cfg.lthr, cfg.kthr, cfg.gap, cfg.snare, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, cfg.legSwap, FW_VERSION, cfg.ssid);
+  char b[400];
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -346,21 +290,18 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   char s[256]; size_t n = min(len, sizeof(s) - 1); memcpy(s, data, n); s[n] = 0;
   bool f;
   if (strstr(s, "\"get\"")) { sendCfg(client); return; }
-  if (strstr(s, "\"cal\"")) { calibrating = true; calBest = 0; calEnd = millis() + 2500; return; }
-  if (strstr(s, "\"learnKick\"")) { learnDir = 1; return; }
+  if (strstr(s, "\"cal\"")) { startSwingCal(); return; }
   if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }
   if (const char* q = strstr(s, "\"ssid\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.ssid) - 1); memcpy(cfg.ssid, q, n); cfg.ssid[n] = 0; } }
   if (const char* q = strstr(s, "\"pass\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.pass) - 1); memcpy(cfg.pass, q, n); cfg.pass[n] = 0; } }
-  if (strstr(s, "\"learnSnare\"")) { learnDir = 2; return; }
   float v;
   v = jsonNum(s, "thr", &f); if (f) cfg.thr = v;
   v = jsonNum(s, "sthr", &f); if (f) cfg.sthr = v;
   v = jsonNum(s, "swthr", &f); if (f) cfg.swthr = v;
   v = jsonNum(s, "lthr", &f); if (f) cfg.lthr = v;
   v = jsonNum(s, "kthr", &f); if (f) cfg.kthr = v;
-  v = jsonNum(s, "legSwap", &f); if (f) cfg.legSwap = (int)v;
   v = jsonNum(s, "gap", &f); if (f) cfg.gap = (int)v;
-  v = jsonNum(s, "snare", &f); if (f) cfg.snare = (int)v;
+  v = jsonNum(s, "snare", &f); if (f && (v == 1 || v == 2 || v == 6)) cfg.snare = (int)v;
   v = jsonNum(s, "kit", &f); if (f) cfg.kit = constrain((int)v, 0, 1);
   v = jsonNum(s, "out", &f); if (f) cfg.out = (int)v;
   v = jsonNum(s, "quant", &f); if (f) cfg.quant = (int)v;
@@ -441,7 +382,7 @@ void setupWeb() {
 
 // ---------------- Display ----------------
 uint32_t lastDraw = 0, lastButtonMs = 0; bool screenOn = true;
-const uint32_t SCREEN_TIMEOUT_MS = 30000; bool wakeOnly = false;
+const uint32_t SCREEN_TIMEOUT_MS = 30000; bool wakeOnly = false, resetHeld = false;
 void screenSet(bool on) {
   if (on == screenOn) return;
   screenOn = on;
@@ -457,7 +398,7 @@ void drawScreen() {
   d.setTextSize(1); d.setTextColor(TFT_DARKGREY);
   d.setCursor(4, 60); d.printf("BLE %s  WiFi %d", bleConnected ? "on" : "--", WiFi.softAPgetStationNum());
   d.setCursor(4, 72); d.printf("batt %d%%  v%s", M5.Power.getBatteryLevel(), FW_VERSION);
-  d.setCursor(4, 84); d.print(cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.snare == 2 ? "tap=kick stomp=snare" : (cfg.lcal && cfg.rcal ? "left/right legs" : "legs: SET L/R"));
+  d.setCursor(4, 84); d.print(calibrating ? "swing foot 3x..." : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A");
   d.endWrite();
 }
 
@@ -495,8 +436,10 @@ void loop() {
   }
   if (screenOn && now - lastButtonMs > SCREEN_TIMEOUT_MS) screenSet(false);
   // Button A: calibrate the "right" direction. Hold 2 s: factory reset.
-  if (M5.BtnA.wasReleased()) wakeOnly = false;
-  if (M5.BtnA.pressedFor(2000)) { cfg = Cfg(); saveCfg(); sendCfg(nullptr); }
+  if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else if (!resetHeld && cfg.snare == 6) startSwingCal(); resetHeld = false; }
+  if (M5.BtnA.pressedFor(2000) && !resetHeld) {   // reset settings, keep Wi-Fi
+    resetHeld = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.sigVer = 3; cfg = d; saveCfg(); sendCfg(nullptr);
+  }
 
   float ax, ay, az;
   float wx = 0, wy = 0, wz = 0;
