@@ -353,6 +353,9 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   amp_look: rig, rig_prev, rig_next; not in the state chunk) on the RIG page where the amp folder stepper was (the
   folder is on AMP), with a full-page list "Rigs" (the last list); exact value = name only (a restore), a nudge or
   arrow loads; MIDI Program Change n = rig n+1. quad_test loads every rig and checks names; new rigs go at the end.
+  Voicing pass (the user: "more volume and clarity, the metal ones too bright"): every rig +3 dB Output (max 9),
+  Presence +1, Treble +0.5, Bass -0.5 from 5.5 up, Input no lower than -3; Modern Metal / Djent Machine / Drop Tune
+  Metal: Treble -1.5, Presence -2, Output +1.
 - **Choruses sounded like tremolos** (Nov 2026, the user): the H90 backup's TriceraChorus presets (Lush Life, Chorus
   Lap) were converted with ldep as our Depth and mix 50: Lush Life became a 3.7 ms sweep at 5 Hz. h90_convert.py now
   takes the sweep as ddep us x ldep % (ours: Depth 100% = 3.5 ms) and the mix from preset_mix. TricraChrs (Duo and the
