@@ -9,6 +9,17 @@ Wearable foot drum. The board does all the detection; settings live on the board
 3. In Chrome on the PC open https://espressif.github.io/esptool-js/ → **Connect** → pick the board's COM port.
 4. Flash address `0x0`, choose the `.bin`, **Program**. Wait for "Leaving...", then press the board's reset button.
 
+## Using it with M5Launcher (several apps on one board)
+
+Install Launcher once from https://bmorcelli.github.io/Launcher/ (pick M5StickS3; side button 2 s until the green LED blinks, then Connect). Launcher wipes the board, so PocketBeat has to be re-added through Launcher:
+
+1. Power on. On Launcher's boot screen press the front button to open its menu.
+2. Open **WebUI**: Launcher starts a Wi-Fi network (name and password shown on screen). Join it from your phone or PC and open the address it shows.
+3. Upload `pocketbeat_sticks3.app.bin` (the app-only file, **not** the 8 MB one), then choose **Install** on it.
+4. From then on the board boots straight into PocketBeat; hold the front button during the Launcher boot screen to get back to the menu and pick another app.
+
+Only `pocketbeat_sticks3.app.bin` works inside Launcher. The plain `pocketbeat_sticks3.bin` is the whole-flash image for a board without Launcher.
+
 ## Use it
 
 - **Power on.** Screen shows BPM, last hit, Bluetooth and Wi-Fi status, battery.

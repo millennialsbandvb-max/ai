@@ -33,6 +33,7 @@ jobs:
         run: |
           mkdir -p out
           cp build/pocketbeat_sticks3.ino.merged.bin out/pocketbeat_sticks3.bin
+          cp build/pocketbeat_sticks3.ino.bin out/pocketbeat_sticks3.app.bin
           cp firmware/README.md out/
       - uses: actions/upload-artifact@v4
         with:
@@ -42,9 +43,10 @@ jobs:
         run: |
           mkdir -p firmware/bin
           cp out/pocketbeat_sticks3.bin firmware/bin/pocketbeat_sticks3.bin
+          cp out/pocketbeat_sticks3.app.bin firmware/bin/pocketbeat_sticks3.app.bin
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add firmware/bin/pocketbeat_sticks3.bin
+          git add firmware/bin/pocketbeat_sticks3.bin firmware/bin/pocketbeat_sticks3.app.bin
           git diff --cached --quiet || git commit -m "Built firmware $(git rev-parse --short HEAD)"
           git pull --rebase origin main
           git push origin HEAD:main
