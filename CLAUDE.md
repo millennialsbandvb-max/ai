@@ -346,7 +346,7 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   AMP page knobs re-spaced to seven. 0dd Rig's NAM_N is 22 (amp_presence); its set_chunk still reads six-slot
   chunks with 21 NAM values and four-slot ones (NAM's own values come from NAM's key=value chunk either way).
 - **0dd Rig rig presets** (Nov 2026, the user's ask: "20ish, some real rigs some crazy rigs"): `quadrig-mpc/src/rigs.h`,
-  22 whole boards (six slots by effect + preset name, compared by letters/digits; mix and knob overrides; amp position,
+  51 whole boards (22, then 29 more on the user's ask; six slots by effect + preset name, compared by letters/digits; mix and knob overrides; amp position,
   NAM Input/Gate/Bass/Middle/Treble/Presence, Output; amp/cab words: NAM's `nam_find` (Nov 2026, the user's ask:
   "the presets don't have any amp changing") loads the first of the user's models / IRs whose folder + name has one
   of the words, in order (none: the amp stays); Ergo EUB's programs use it for their captures ("ultra lo,svt", "bethel")). A Rig stepper (params after
