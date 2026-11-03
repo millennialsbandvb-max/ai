@@ -10,7 +10,14 @@ for kit, names in kits.items():
         w = wave.open(f'/home/claude/kit_{kit}_{n}.wav')
         sr = w.getframerate(); x = np.frombuffer(w.readframes(w.getnframes()), '<i2').astype(np.float64) / 32768
         y = resample_poly(x, SR_OUT, sr)
-        y = np.clip(y / max(1e-9, np.max(np.abs(y))) * 0.95, -1, 1)
+        # Speaker shaping for the board's tiny driver: drop sub-bass it can't reproduce,
+        # then drive into a soft clipper so the average level sits much higher.
+        from scipy.signal import butter, lfilter
+        b, a = butter(2, 110 / (SR_OUT / 2), 'high'); y = lfilter(b, a, y)
+        y = y / max(1e-9, np.max(np.abs(y)))
+        drive = 3.5 if n != 'hat' else 2.0
+        y = np.tanh(y * drive) / np.tanh(drive)
+        y = np.clip(y / max(1e-9, np.max(np.abs(y))) * 0.98, -1, 1)
         arr = (y * 32767).astype(np.int16)
         out.append(f'static const int16_t SMP_{kit}_{n}[{len(arr)}] = {{')
         rows = [','.join(str(v) for v in arr[i:i + 24]) for i in range(0, len(arr), 24)]
@@ -20,5 +27,5 @@ out.append('static const Kit KITS[2] = {')
 for kit in kits:
     out.append(f'  {{ SMP_{kit}_kick, sizeof(SMP_{kit}_kick)/2, SMP_{kit}_snare, sizeof(SMP_{kit}_snare)/2, SMP_{kit}_hat, sizeof(SMP_{kit}_hat)/2 }},')
 out.append('};'); out.append(f'static const uint32_t SMP_RATE = {SR_OUT};')
-open('/home/claude/firmware/pocketbeat_sticks3/samples.h', 'w').write('\n'.join(out))
+open('/home/claude/ai/firmware/pocketbeat_sticks3/samples.h', 'w').write('\n'.join(out))
 print('ok', sum(1 for l in out if l.startswith('static const int16_t')))

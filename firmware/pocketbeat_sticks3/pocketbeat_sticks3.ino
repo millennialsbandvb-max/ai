@@ -34,7 +34,7 @@ struct Cfg {
   int out = 0;           // 0 board speaker, 1 phone, 2 both
   int quant = 2;         // 0 off, 2 eighths, 4 sixteenths
   int hat = 2;           // 0 off, 1 quarters, 2 eighths (auto hats)
-  int vol = 200;         // speaker volume 0-255
+  int vol = 255;         // speaker volume 0-255
   float rx = 0, ry = 0, rz = 0; bool cal = false;  // "right" direction in sensor frame
 } cfg;
 Preferences prefs;
@@ -69,7 +69,7 @@ void playBoard(Kind k, float vel) {
   const int16_t* d = k == KICK ? kt.kick : k == SNARE ? kt.snare : kt.hat;
   uint32_t n = k == KICK ? kt.nKick : k == SNARE ? kt.nSnare : kt.nHat;
   int ch = (int)k;  // one speaker channel per drum, so a new hit cuts the old one
-  M5.Speaker.setChannelVolume(ch, (uint8_t)(cfg.vol * (k == HAT ? 0.55f : 1.0f) * (0.55f + 0.45f * vel)));
+  M5.Speaker.setChannelVolume(ch, (uint8_t)(cfg.vol * (k == HAT ? 0.6f : 1.0f) * (0.7f + 0.3f * vel)));
   M5.Speaker.playRaw(d, n, SMP_RATE, false, 1, ch, true);
 #endif
 }
