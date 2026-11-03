@@ -1,0 +1,292 @@
+{
+  "name": "Ergo EUB",
+  "params": [
+    {"key": "program", "name": "Program", "min": 0, "max": 1, "display": "string", "type": "stepper"},
+    {"key": "program_prev", "name": "Program <", "options": ["Off", "On"], "momentary": true},
+    {"key": "program_next", "name": "Program >", "options": ["Off", "On"], "momentary": true},
+    {"key": "input", "name": "Input", "min": -24, "max": 36, "default": 0, "unit": "dB"},
+    {"key": "comp", "name": "Comp", "options": ["Off", "On"], "default": 1},
+    {"key": "comp_pos", "name": "Comp Position", "options": ["Before EQ", "After EQ"], "default": 0},
+    {"key": "threshold", "name": "Threshold", "min": -60, "max": 0, "default": -25, "unit": "dB"},
+    {"key": "ratio", "name": "Ratio", "min": 1, "max": 20, "default": 4.4},
+    {"key": "attack", "name": "Attack", "min": 0.3, "max": 100, "default": 2.6, "unit": "ms"},
+    {"key": "release", "name": "Release", "min": 20, "max": 2000, "default": 151, "unit": "ms"},
+    {"key": "makeup", "name": "Makeup", "min": -12, "max": 24, "default": 10, "unit": "dB"},
+    {"key": "gr", "name": "GR", "min": 0, "max": 30, "default": 0, "unit": "dB"},
+    {"key": "eq", "name": "EQ", "options": ["Off", "On"], "default": 1},
+    {"key": "hpf", "name": "High-Pass", "options": ["Off", "On"], "default": 0},
+    {"key": "hpf_hz", "name": "HPF Freq", "min": 15, "max": 300, "default": 31, "unit": "Hz"},
+    {"key": "hum", "name": "Hum", "options": ["Off", "50 Hz", "60 Hz"], "default": 0},
+    {"key": "hum_depth", "name": "Hum Depth", "min": -40, "max": 0, "default": -30, "unit": "dB"},
+    {"key": "hum_q", "name": "Hum Q", "min": 1, "max": 20, "default": 9.2},
+    {"key": "hum_harm", "name": "Hum Harmonics", "min": 1, "max": 3, "default": 1},
+    {"key": "ls_hz", "name": "Low Shelf Freq", "min": 30, "max": 600, "default": 139, "unit": "Hz"},
+    {"key": "ls_gain", "name": "Low Shelf Gain", "min": -15, "max": 15, "default": 0, "unit": "dB"},
+    {"key": "p1_hz", "name": "Peak 1 Freq", "min": 20, "max": 12000, "default": 119, "unit": "Hz"},
+    {"key": "p1_gain", "name": "Peak 1 Gain", "min": -18, "max": 18, "default": 0, "unit": "dB"},
+    {"key": "p1_q", "name": "Peak 1 Q", "min": 0.3, "max": 12, "default": 1},
+    {"key": "p2_hz", "name": "Peak 2 Freq", "min": 20, "max": 12000, "default": 250, "unit": "Hz"},
+    {"key": "p2_gain", "name": "Peak 2 Gain", "min": -18, "max": 18, "default": 0, "unit": "dB"},
+    {"key": "p2_q", "name": "Peak 2 Q", "min": 0.3, "max": 12, "default": 1},
+    {"key": "p3_hz", "name": "Peak 3 Freq", "min": 20, "max": 12000, "default": 496, "unit": "Hz"},
+    {"key": "p3_gain", "name": "Peak 3 Gain", "min": -18, "max": 18, "default": 0, "unit": "dB"},
+    {"key": "p3_q", "name": "Peak 3 Q", "min": 0.3, "max": 12, "default": 1},
+    {"key": "p4_hz", "name": "Peak 4 Freq", "min": 20, "max": 12000, "default": 1000, "unit": "Hz"},
+    {"key": "p4_gain", "name": "Peak 4 Gain", "min": -18, "max": 18, "default": 0, "unit": "dB"},
+    {"key": "p4_q", "name": "Peak 4 Q", "min": 0.3, "max": 12, "default": 1},
+    {"key": "p5_hz", "name": "Peak 5 Freq", "min": 20, "max": 12000, "default": 1800, "unit": "Hz"},
+    {"key": "p5_gain", "name": "Peak 5 Gain", "min": -18, "max": 18, "default": 0, "unit": "dB"},
+    {"key": "p5_q", "name": "Peak 5 Q", "min": 0.3, "max": 12, "default": 1},
+    {"key": "p6_hz", "name": "Peak 6 Freq", "min": 20, "max": 12000, "default": 2400, "unit": "Hz"},
+    {"key": "p6_gain", "name": "Peak 6 Gain", "min": -18, "max": 18, "default": 0, "unit": "dB"},
+    {"key": "p6_q", "name": "Peak 6 Q", "min": 0.3, "max": 12, "default": 1},
+    {"key": "p7_hz", "name": "Peak 7 Freq", "min": 20, "max": 12000, "default": 4000, "unit": "Hz"},
+    {"key": "p7_gain", "name": "Peak 7 Gain", "min": -18, "max": 18, "default": 0, "unit": "dB"},
+    {"key": "p7_q", "name": "Peak 7 Q", "min": 0.3, "max": 12, "default": 1},
+    {"key": "p8_hz", "name": "Peak 8 Freq", "min": 20, "max": 12000, "default": 5500, "unit": "Hz"},
+    {"key": "p8_gain", "name": "Peak 8 Gain", "min": -18, "max": 18, "default": 0, "unit": "dB"},
+    {"key": "p8_q", "name": "Peak 8 Q", "min": 0.3, "max": 12, "default": 1},
+    {"key": "hs_hz", "name": "High Shelf Freq", "min": 1500, "max": 16000, "default": 9000, "unit": "Hz"},
+    {"key": "hs_gain", "name": "High Shelf Gain", "min": -18, "max": 18, "default": 0, "unit": "dB"},
+    {"key": "lpf", "name": "Low-Pass", "options": ["Off", "12 dB/oct", "24 dB/oct"], "default": 0},
+    {"key": "lpf_hz", "name": "LPF Freq", "min": 200, "max": 16000, "default": 794, "unit": "Hz"},
+    {"key": "r1_on", "name": "Hall 1", "options": ["Off", "On"], "default": 0},
+    {"key": "r1_mix", "name": "Hall 1 Mix", "min": 0, "max": 100, "default": 18, "unit": "%"},
+    {"key": "r1_pre", "name": "Hall 1 Pre-delay", "min": 0, "max": 200, "default": 68, "unit": "ms"},
+    {"key": "r1_decay", "name": "Hall 1 Decay", "min": 0, "max": 100, "default": 54, "unit": "%"},
+    {"key": "r1_tone", "name": "Hall 1 Tone", "min": 0, "max": 100, "default": 57, "unit": "%"},
+    {"key": "r2_on", "name": "Hall 2", "options": ["Off", "On"], "default": 0},
+    {"key": "r2_mix", "name": "Hall 2 Mix", "min": 0, "max": 100, "default": 18, "unit": "%"},
+    {"key": "r2_pre", "name": "Hall 2 Pre-delay", "min": 0, "max": 200, "default": 68, "unit": "ms"},
+    {"key": "r2_decay", "name": "Hall 2 Decay", "min": 0, "max": 100, "default": 54, "unit": "%"},
+    {"key": "r2_tone", "name": "Hall 2 Tone", "min": 0, "max": 100, "default": 57, "unit": "%"},
+    {"key": "amp", "name": "Amp", "options": ["Off", "On"], "default": 0},
+    {"key": "rig_volume", "name": "Rig Volume", "min": -24, "max": 24, "default": 0, "unit": "dB"},
+    {"key": "volume", "name": "Volume", "min": 0, "max": 100, "default": 100, "unit": "%"},
+    {
+      "key": "amp_input",
+      "name": "Input",
+      "min": -24,
+      "max": 24,
+      "default": 0,
+      "unit": "dB"
+    },
+    {
+      "key": "amp_gate",
+      "name": "Gate",
+      "min": -100,
+      "max": -20,
+      "default": -100,
+      "unit": "dB"
+    },
+    {
+      "key": "amp_bass",
+      "name": "Bass",
+      "min": 0,
+      "max": 10,
+      "default": 5
+    },
+    {
+      "key": "amp_middle",
+      "name": "Middle",
+      "min": 0,
+      "max": 10,
+      "default": 5
+    },
+    {
+      "key": "amp_treble",
+      "name": "Treble",
+      "min": 0,
+      "max": 10,
+      "default": 5
+    },
+    {
+      "key": "amp_output",
+      "name": "Output",
+      "min": -24,
+      "max": 24,
+      "default": 0,
+      "unit": "dB"
+    },
+    {
+      "key": "amp_model",
+      "name": "Model",
+      "min": 0,
+      "max": 1,
+      "display": "string",
+      "type": "stepper"
+    },
+    {
+      "key": "amp_model_prev",
+      "name": "Model <",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
+    },
+    {
+      "key": "amp_model_next",
+      "name": "Model >",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
+    },
+    {
+      "key": "amp_cab",
+      "name": "Cab",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "default": 1
+    },
+    {
+      "key": "amp_ir",
+      "name": "IR",
+      "min": 0,
+      "max": 1,
+      "display": "string",
+      "type": "stepper"
+    },
+    {
+      "key": "amp_ir_prev",
+      "name": "IR <",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
+    },
+    {
+      "key": "amp_ir_next",
+      "name": "IR >",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
+    },
+    {
+      "key": "amp_normalize",
+      "name": "Normalize",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "default": 1
+    },
+    {
+      "key": "amp_size",
+      "name": "Size",
+      "min": 0,
+      "max": 49,
+      "default": 49,
+      "unit": "%"
+    },
+    {
+      "key": "amp_folder",
+      "name": "Folder",
+      "min": 0,
+      "max": 1,
+      "display": "string",
+      "type": "stepper"
+    },
+    {
+      "key": "amp_folder_prev",
+      "name": "Folder <",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
+    },
+    {
+      "key": "amp_folder_next",
+      "name": "Folder >",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
+    },
+    {
+      "key": "amp_ir_folder",
+      "name": "IR Folder",
+      "min": 0,
+      "max": 1,
+      "display": "string",
+      "type": "stepper"
+    },
+    {
+      "key": "amp_ir_folder_prev",
+      "name": "IR Folder <",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
+    },
+    {
+      "key": "amp_ir_folder_next",
+      "name": "IR Folder >",
+      "options": [
+        "Off",
+        "On"
+      ],
+      "momentary": true
+    },
+    {
+      "key": "amp_presence",
+      "name": "Presence",
+      "min": 0,
+      "max": 10,
+      "default": 5
+    },
+    {"key": "program__list", "name": "Programs List", "options": ["Closed", "Open"]},
+    {"key": "amp_folder__list", "name": "Model Folders List", "options": ["Closed", "Open"]},
+    {"key": "amp_model__list", "name": "Models List", "options": ["Closed", "Open"]},
+    {"key": "amp_ir_folder__list", "name": "IR Folders List", "options": ["Closed", "Open"]},
+    {"key": "amp_ir__list", "name": "IRs List", "options": ["Closed", "Open"]},
+    {"key": "midi_ch__list", "name": "MIDI Ch List", "options": ["Closed", "Open"]},
+    {"key": "pick_1", "name": "List 1", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_2", "name": "List 2", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_3", "name": "List 3", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_4", "name": "List 4", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_5", "name": "List 5", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_6", "name": "List 6", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_7", "name": "List 7", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_8", "name": "List 8", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_9", "name": "List 9", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_10", "name": "List 10", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_11", "name": "List 11", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_12", "name": "List 12", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_13", "name": "List 13", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_14", "name": "List 14", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_15", "name": "List 15", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_16", "name": "List 16", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_17", "name": "List 17", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_18", "name": "List 18", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_19", "name": "List 19", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_20", "name": "List 20", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_21", "name": "List 21", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_22", "name": "List 22", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_23", "name": "List 23", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_24", "name": "List 24", "options": ["Off", "On"], "display": "string"},
+    {"key": "pick_prev", "name": "List <", "options": ["Off", "On"], "momentary": true},
+    {"key": "pick_next", "name": "List >", "options": ["Off", "On"], "momentary": true},
+    {"key": "pick_close", "name": "List Close", "options": ["Off", "On"], "momentary": true},
+    {"key": "pick_title", "name": "List Title", "options": ["Off", "On"], "display": "string"},
+    {"key": "midi_ch", "name": "MIDI Ch", "min": 0, "max": 1, "display": "string", "type": "stepper"},
+    {"key": "midi_ch_prev", "name": "MIDI Ch <", "options": ["Off", "On"], "momentary": true},
+    {"key": "midi_ch_next", "name": "MIDI Ch >", "options": ["Off", "On"], "momentary": true},
+    {"key": "program__sel", "name": "Programs Sel", "options": ["Off", "On"], "momentary": true},
+    {"key": "amp_folder__sel", "name": "Model Folders Sel", "options": ["Off", "On"], "momentary": true},
+    {"key": "amp_model__sel", "name": "Models Sel", "options": ["Off", "On"], "momentary": true},
+    {"key": "amp_ir_folder__sel", "name": "IR Folders Sel", "options": ["Off", "On"], "momentary": true},
+    {"key": "amp_ir__sel", "name": "IRs Sel", "options": ["Off", "On"], "momentary": true},
+    {"key": "midi_ch__sel", "name": "MIDI Ch Sel", "options": ["Off", "On"], "momentary": true}
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "Ergo EUB",
+  "vendor": "Other Things",
+  "uid": "ERGO",
+  "version": 1000,
+  "so": "Ergo-EUB.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}
