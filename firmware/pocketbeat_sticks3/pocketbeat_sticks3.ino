@@ -41,7 +41,7 @@ struct Cfg {
   float kthr = 1.8f;     // kick threshold in bounce/stomp/lift mode; lighter landings are hats
   float swthr = 0.35f;   // swing speed threshold, m/s
   int gap = 120;         // ms between hits
-  int snare = 3;         // 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare, 3 high lift, 4 bounce=hat/stomp=kick/lift=snare
+  int snare = 2;         // 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare, 3 high lift, 4 bounce=hat/stomp=kick/lift=snare
   float lthr = 35.0f;    // lift threshold, degrees of rotation since the foot last went still
   int kit = 0;           // 0 acoustic, 1 electro
   int out = 0;           // 0 board speaker, 1 phone, 2 both
@@ -67,6 +67,7 @@ void loadCfg() {
   prefs.begin("pb", true);
   size_t n = prefs.getBytesLength("cfg");
   if (n > 0 && n <= sizeof(cfg)) prefs.getBytes("cfg", &cfg, n);   // older builds stored fewer fields; new ones keep defaults
+  if (cfg.snare != 1 && cfg.snare != 2 && cfg.snare != 5) cfg.snare = 2;   // retired modes -> tap/stomp
   prefs.end();
 }
 
@@ -172,7 +173,7 @@ void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
   float when = now;
   if (!beatMs) {
     // Bounces start the clock on the second bounce; other hits need two even gaps.
-    if (nInt >= 1 && (k == TAP || (nInt == 2 && consistent(intervals, 2, 0.2f)))) { beatMs = median(intervals, nInt); startClock(now); }
+    if (nInt >= 1) { beatMs = median(intervals, nInt); startClock(now); }   // second hit starts the hats
   } else {
     beatMs += 0.5f * (median(intervals, nInt) - beatMs);
     if (cfg.quant) {
@@ -209,7 +210,7 @@ static float dirSim(float ax, float ay, float az, float bx, float by, float bz) 
 void fireStomp(float p, float now) {
   if (cfg.snare == 5) {   // Leg mode: board across both thighs; tell the left foot from the right by how the board tips
     liftMax = 0; liftAngle = 0;
-    if (p < cfg.kthr && !learnDir) { onHit(TAP, 0, p, -1, now, 0); return; }   // light = tempo tap
+    if (p < cfg.sthr && !learnDir) { onHit(TAP, 0, p, -1, now, 0); return; }   // below the stomp line = silent tempo bounce
     // Signature: jolt direction (accel at the peak) + tilt direction (strongest gyro reading near the impact).
     float f[6];
     float m = sqrtf(pkx * pkx + pky * pky + pkz * pkz); if (m < 1e-3f) m = 1;
@@ -240,7 +241,7 @@ void fireStomp(float p, float now) {
     float sl = cfg.lcal ? sim(cfg.lf) : -1, sr = cfg.rcal ? sim(cfg.rf) : -1;
     bool left = sl >= sr;
     Kind k = (left ^ (cfg.legSwap != 0)) ? KICK : SNARE;
-    float vel = constrain(0.6f + 0.4f * (p / (cfg.kthr * 2)), 0, 1);
+    float vel = constrain(0.6f + 0.4f * (p / (cfg.sthr * 2)), 0, 1);
     onHit(k, vel, p, -1, now, fabsf(sl - sr) * 100);   // "lift" slot carries how clearly it matched (0-200)
     return;
   }
@@ -446,7 +447,7 @@ void drawScreen() {
   d.setTextSize(1); d.setTextColor(TFT_DARKGREY);
   d.setCursor(4, 60); d.printf("BLE %s  WiFi %d", bleConnected ? "on" : "--", WiFi.softAPgetStationNum());
   d.setCursor(4, 72); d.printf("batt %d%%  v%s", M5.Power.getBatteryLevel(), FW_VERSION);
-  d.setCursor(4, 84); d.print(cfg.snare == 0 ? (cfg.cal ? "snare: swing R" : "snare: SET RIGHT") : cfg.snare == 1 ? "tap=sn stomp=kk" : cfg.snare == 2 ? "tap=kk stomp=sn" : cfg.snare == 3 ? "snare: high lift" : cfg.snare == 4 ? "bounce/stomp/lift" : (cfg.lcal && cfg.rcal ? "left/right legs" : "legs: SET L/R"));
+  d.setCursor(4, 84); d.print(cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.snare == 2 ? "tap=kick stomp=snare" : (cfg.lcal && cfg.rcal ? "left/right legs" : "legs: SET L/R"));
   d.endWrite();
 }
 
@@ -484,7 +485,7 @@ void loop() {
   }
   if (screenOn && now - lastButtonMs > SCREEN_TIMEOUT_MS) screenSet(false);
   // Button A: calibrate the "right" direction. Hold 2 s: factory reset.
-  if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else { calibrating = true; calBest = 0; calEnd = now + 2500; } }
+  if (M5.BtnA.wasReleased()) wakeOnly = false;
   if (M5.BtnA.pressedFor(2000)) { cfg = Cfg(); saveCfg(); sendCfg(nullptr); }
 
   float ax, ay, az;
