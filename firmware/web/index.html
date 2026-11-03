@@ -76,12 +76,15 @@
 <h2>Snare trigger</h2>
 <div class="seg" data-key="snare">
   <button type="button" data-v="3">Stomp = kick, lift = snare</button>
+  <button type="button" data-v="5">Direction (learned)</button>
   <button type="button" data-v="4">Bounce = hat, stomp = kick, lift = snare</button>
   <button type="button" data-v="0">Swing right</button>
   <button type="button" data-v="1">Tap = snare, stomp = kick</button>
   <button type="button" data-v="2">Tap = kick, stomp = snare</button>
 </div>
 <div class="row"><button type="button" id="calBtn">Set right: tap, then swing right once</button></div>
+<div class="row"><button type="button" id="learnKick">Set kick: tap, then do the kick move</button><button type="button" id="learnSnare">Set snare: tap, then do the snare move</button></div>
+<div class="tile" style="flex:none"><b id="dirState">—</b><span>direction mode: learned directions</span></div>
 <div class="tiles">
   <div class="tile"><b id="mSwing">—</b><span>last swing · m/s</span></div>
   <div class="tile"><b id="mLift">—</b><span>last lift · degrees</span></div>
@@ -128,7 +131,7 @@
   <input type="range" id="vol" data-key="vol" min="0" max="255" step="1" value="200"></div>
 <div class="ctl"><label for="pvol">Phone volume</label><output id="pvolOut"></output>
   <input type="range" id="pvol" min="0" max="100" step="1" value="85"></div>
-<p class="hint">Default mode: stomp = kick, lift the foot high = snare (gyro), hi-hat automatic from your tempo. Light bounces of the leg (above the blue line, below the orange kick line) make no sound but set the tempo, so bounce to keep time and the hats follow. "Last lift" is how fast the leg rotated before landing. Everything here is stored on the board, so once it's tuned you can close this page and just play. Bluetooth MIDI is always on: pair the board in GarageBand (Settings › Advanced › Bluetooth MIDI) to use the phone's drum sounds with the phone locked.</p>
+<p class="hint">Default mode: stomp = kick, lift the foot high = snare (gyro), hi-hat automatic from your tempo. Light bounces of the leg (above the blue line, below the orange kick line) make no sound but set the tempo, so bounce to keep time and the hats follow. "Last lift" is how fast the leg rotated before landing. Direction mode (board resting on your lap): tap "Set kick" then do your kick move once, tap "Set snare" then do your snare move once. From then on each jolt above the orange line is matched to whichever of the two directions it's closest to (the log's angle column shows the match strength, 0-100); lighter jolts are tempo taps. Everything here is stored on the board, so once it's tuned you can close this page and just play. Bluetooth MIDI is always on: pair the board in GarageBand (Settings › Advanced › Bluetooth MIDI) to use the phone's drum sounds with the phone locked.</p>
 <p class="err" id="err" hidden></p>
 <button class="big" id="go" type="button">Enable sound on this phone</button>
 
@@ -164,10 +167,10 @@
   const cv = $('scope'), g2 = cv.getContext('2d');
   function draw() {
     const w = cv.width, h = cv.height, thr = +$('thr').value, sthr = +$('sthr').value, mode = +(cfg.snare || 0);
-    const kthr = +$('kthr').value; const scale = (mode === 1 || mode === 2) ? Math.max(sthr * 1.5, 1.5) : (mode === 3 || mode === 4) ? Math.max(kthr * 1.5, 1.5) : Math.max(thr * 3, 1.5);
+    const kthr = +$('kthr').value; const scale = (mode === 1 || mode === 2) ? Math.max(sthr * 1.5, 1.5) : (mode === 3 || mode === 4 || mode === 5) ? Math.max(kthr * 1.5, 1.5) : Math.max(thr * 3, 1.5);
     g2.clearRect(0, 0, w, h); const y = v => h - Math.min(1, v / scale) * h;
     g2.lineWidth = 2; g2.setLineDash([8, 8]);
-    const lines = mode === 1 ? [[thr, colors.snare], [sthr, colors.kick]] : mode === 2 ? [[thr, colors.kick], [sthr, colors.snare]] : (mode === 3 || mode === 4) ? [[thr, colors.hat], [kthr, colors.kick]] : [[thr, colors.kick]];
+    const lines = mode === 1 ? [[thr, colors.snare], [sthr, colors.kick]] : mode === 2 ? [[thr, colors.kick], [sthr, colors.snare]] : (mode === 3 || mode === 4 || mode === 5) ? [[thr, colors.hat], [kthr, colors.kick]] : [[thr, colors.kick]];
     for (const [v, c] of lines) { g2.strokeStyle = c; g2.beginPath(); g2.moveTo(0, y(v)); g2.lineTo(w, y(v)); g2.stroke(); }
     g2.setLineDash([]); g2.strokeStyle = '#f2efe6'; g2.lineWidth = 3; g2.beginPath();
     for (let i = 0; i < trace.length; i++) { const v = trace[(ti + i) % trace.length], x = (i / (trace.length - 1)) * w; i ? g2.lineTo(x, y(v)) : g2.moveTo(x, y(v)); }
@@ -189,6 +192,8 @@
     for (const seg of document.querySelectorAll('.seg[data-key]')) { const v = String(c[seg.dataset.key]); for (const b of seg.children) b.classList.toggle('on', b.dataset.v === v); }
     kit = +(c.kit || 0);
     $('calState').textContent = c.cal ? 'set' : 'not set';
+    $('dirState').textContent = (c.kcal ? 'kick ✓' : 'kick –') + '   ' + (c.scal ? 'snare ✓' : 'snare –');
+    $('learnKick').classList.remove('arm'); $('learnSnare').classList.remove('arm');
   }
   for (const el of document.querySelectorAll('input[type=range][data-key]')) {
     el.addEventListener('input', () => { $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); });
@@ -201,6 +206,8 @@
     cfg[seg.dataset.key] = +b.dataset.v; if (seg.dataset.key === 'kit') kit = +b.dataset.v;
     send({ set: { [seg.dataset.key]: +b.dataset.v } });
   });
+  $('learnKick').addEventListener('click', () => { send({ learnKick: 1 }); $('learnKick').classList.add('arm'); });
+  $('learnSnare').addEventListener('click', () => { send({ learnSnare: 1 }); $('learnSnare').classList.add('arm'); });
   $('calBtn').addEventListener('click', () => { send({ cal: 1 }); $('calBtn').classList.add('arm'); $('calBtn').textContent = 'Swing right now…'; $('calState').textContent = 'listening'; });
 
   // ---------- WebSocket to the board ----------

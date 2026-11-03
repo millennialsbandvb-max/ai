@@ -42,6 +42,8 @@ struct Cfg {
   int hat = 2;           // 0 off, 1 quarters, 2 eighths (auto hats)
   int vol = 255;         // speaker volume 0-255
   float rx = 0, ry = 0, rz = 0; bool cal = false;  // "right" direction in sensor frame
+  float kx = 0, ky = 0, kz = 0; bool kcal = false; // learned kick direction (Direction mode)
+  float sx = 0, sy = 0, sz = 0; bool scal = false; // learned snare direction (Direction mode)
 } cfg;
 Preferences prefs;
 
@@ -180,9 +182,29 @@ bool calibrating = false; uint32_t calEnd = 0; float calBest = 0, calX = 0, calY
 float meterBuf[12]; int nMeter = 0; uint32_t lastMeterSend = 0;
 float gyroMag = 0, liftMax = 0;   // deg/s; liftMax = fastest rotation since the last landing, decays slowly
 float liftAngle = 0, stillMs = 0; // degrees rotated since the foot last went still
+float pkx = 0, pky = 0, pkz = 0;   // linear-accel vector at the impact peak (direction of the jolt)
+int learnDir = 0;                  // 1 = next landing sets kick direction, 2 = snare
 uint32_t lastT = 0;
 
+static float dirSim(float ax, float ay, float az, float bx, float by, float bz) {
+  float d = ax * bx + ay * by + az * bz, m = sqrtf(ax * ax + ay * ay + az * az) * sqrtf(bx * bx + by * by + bz * bz);
+  return m > 0 ? d / m : 0;
+}
 void fireStomp(float p, float now) {
+  if (cfg.snare == 5) {   // Direction mode (board on the lap): match the jolt's direction to the learned kick/snare directions
+    float m = sqrtf(pkx * pkx + pky * pky + pkz * pkz); if (m < 1e-3f) m = 1;
+    float ux = pkx / m, uy = pky / m, uz = pkz / m;
+    liftMax = 0; liftAngle = 0;
+    if (learnDir == 1) { cfg.kx = ux; cfg.ky = uy; cfg.kz = uz; cfg.kcal = true; learnDir = 0; saveCfg(); sendCfg(nullptr); return; }
+    if (learnDir == 2) { cfg.sx = ux; cfg.sy = uy; cfg.sz = uz; cfg.scal = true; learnDir = 0; saveCfg(); sendCfg(nullptr); return; }
+    if (p < cfg.kthr) { onHit(TAP, 0, p, -1, now, 0); return; }          // light = tempo tap
+    float sk = cfg.kcal ? dirSim(ux, uy, uz, cfg.kx, cfg.ky, cfg.kz) : -1;
+    float ss = cfg.scal ? dirSim(ux, uy, uz, cfg.sx, cfg.sy, cfg.sz) : -1;
+    float vel = constrain(0.6f + 0.4f * (p / (cfg.kthr * 2)), 0, 1);
+    // report similarity (0-100) in the "lift" slot so the log shows how clear the match was
+    if (ss > sk) onHit(SNARE, vel, p, -1, now, ss * 100); else onHit(KICK, vel, p, -1, now, sk * 100);
+    return;
+  }
   if (cfg.snare == 4) {   // bounce = hat, stomp = kick, lift = snare
     float lift = liftAngle; liftAngle = 0; liftMax = 0;
     if (lift >= cfg.lthr) onHit(SNARE, constrain(0.7f + 0.3f * (lift / (2 * cfg.lthr)), 0, 1), p, -1, now, lift);
@@ -247,7 +269,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   // stomp: impact spike detector
   if (mag > cfg.thr) {
     if (now - lastStompT > (uint32_t)cfg.gap && now - lastSwingT > 250) {
-      if (mag > peak) { peak = mag; if (!peakT) peakT = now; }
+      if (mag > peak) { peak = mag; pkx = lx; pky = ly; pkz = lz; if (!peakT) peakT = now; }
       if (now - peakT > 35) { float p = peak; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
     }
   } else if (peakT) { float p = peak; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
@@ -255,9 +277,9 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
-  char b[320];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.2f,\"lthr\":%.0f,\"kthr\":%.3f,\"gap\":%d,\"snare\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d}}",
-           cfg.thr, cfg.sthr, cfg.swthr, cfg.lthr, cfg.kthr, cfg.gap, cfg.snare, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0);
+  char b[384];
+  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.2f,\"lthr\":%.0f,\"kthr\":%.3f,\"gap\":%d,\"snare\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"kcal\":%d,\"scal\":%d}}",
+           cfg.thr, cfg.sthr, cfg.swthr, cfg.lthr, cfg.kthr, cfg.gap, cfg.snare, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.kcal ? 1 : 0, cfg.scal ? 1 : 0);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -274,6 +296,8 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   bool f;
   if (strstr(s, "\"get\"")) { sendCfg(client); return; }
   if (strstr(s, "\"cal\"")) { calibrating = true; calBest = 0; calEnd = millis() + 2500; return; }
+  if (strstr(s, "\"learnKick\"")) { learnDir = 1; return; }
+  if (strstr(s, "\"learnSnare\"")) { learnDir = 2; return; }
   float v;
   v = jsonNum(s, "thr", &f); if (f) cfg.thr = v;
   v = jsonNum(s, "sthr", &f); if (f) cfg.sthr = v;
@@ -322,7 +346,7 @@ void drawScreen() {
   d.setTextSize(1); d.setTextColor(TFT_DARKGREY);
   d.setCursor(4, 60); d.printf("BLE %s  WiFi %d", bleConnected ? "on" : "--", WiFi.softAPgetStationNum());
   d.setCursor(4, 72); d.printf("batt %d%%", M5.Power.getBatteryLevel());
-  d.setCursor(4, 84); d.print(cfg.snare == 0 ? (cfg.cal ? "snare: swing R" : "snare: SET RIGHT") : cfg.snare == 1 ? "tap=sn stomp=kk" : cfg.snare == 2 ? "tap=kk stomp=sn" : cfg.snare == 3 ? "snare: high lift" : "bounce/stomp/lift");
+  d.setCursor(4, 84); d.print(cfg.snare == 0 ? (cfg.cal ? "snare: swing R" : "snare: SET RIGHT") : cfg.snare == 1 ? "tap=sn stomp=kk" : cfg.snare == 2 ? "tap=kk stomp=sn" : cfg.snare == 3 ? "snare: high lift" : cfg.snare == 4 ? "bounce/stomp/lift" : (cfg.kcal && cfg.scal ? "direction mode" : "direction: SET K/S"));
   d.endWrite();
 }
 
