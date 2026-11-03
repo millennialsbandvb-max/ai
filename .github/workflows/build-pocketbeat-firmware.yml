@@ -29,11 +29,20 @@ jobs:
             --output-dir build \
             firmware/pocketbeat_sticks3
           ls -la build
+      - name: Compile lite (no samples/speaker, for M5Launcher)
+        run: |
+          arduino-cli compile \
+            --fqbn "esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,CDCOnBoot=cdc" \
+            --build-property "compiler.cpp.extra_flags=-DBLEMIDI_ESP32_NIMBLE -DPB_LITE" \
+            --output-dir build_lite \
+            firmware/pocketbeat_sticks3
+          ls -la build_lite
       - name: Package
         run: |
           mkdir -p out
           cp build/pocketbeat_sticks3.ino.merged.bin out/pocketbeat_sticks3.bin
           cp build/pocketbeat_sticks3.ino.bin out/pocketbeat_sticks3.app.bin
+          cp build_lite/pocketbeat_sticks3.ino.bin out/pocketbeat_sticks3_lite.app.bin
           cp firmware/README.md out/
       - uses: actions/upload-artifact@v4
         with:
@@ -44,9 +53,10 @@ jobs:
           mkdir -p firmware/bin
           cp out/pocketbeat_sticks3.bin firmware/bin/pocketbeat_sticks3.bin
           cp out/pocketbeat_sticks3.app.bin firmware/bin/pocketbeat_sticks3.app.bin
+          cp out/pocketbeat_sticks3_lite.app.bin firmware/bin/pocketbeat_sticks3_lite.app.bin
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add firmware/bin/pocketbeat_sticks3.bin firmware/bin/pocketbeat_sticks3.app.bin
+          git add firmware/bin/
           git diff --cached --quiet || git commit -m "Built firmware $(git rev-parse --short HEAD)"
           git pull --rebase origin main
           git push origin HEAD:main

@@ -147,6 +147,7 @@
     if (ctx) return;
     ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
     master = ctx.createGain(); master.gain.value = $('pvol').value / 100; master.connect(ctx.destination);
+    if (!window.PB_KITS) return;
     for (const name of kitNames) { buffers[name] = {}; for (const [k, b64] of Object.entries(window.PB_KITS[name])) ctx.decodeAudioData(b64ToBuf(b64), b => buffers[name][k] = b, () => {}); }
   }
   function playPhone(kind, vel) {

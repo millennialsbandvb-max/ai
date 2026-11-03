@@ -15,7 +15,9 @@
 #include <Preferences.h>
 #include <BLEMIDI_Transport.h>
 #include <hardware/BLEMIDI_ESP32_NimBLE.h>
+#ifndef PB_LITE
 #include "samples.h"
+#endif
 #include "web_assets.h"
 #include "pb_types.h"
 
@@ -59,6 +61,9 @@ const char* lastKind = "";
 const uint8_t midiNote[] = { 36, 38, 42 };   // GM drums: kick, snare, closed hat
 
 void playBoard(Kind k, float vel) {
+#ifdef PB_LITE
+  return;                    // lite build: no samples, no speaker (Bluetooth MIDI + phone only)
+#else
   if (cfg.out == 1) return;  // phone only
   const Kit& kt = KITS[cfg.kit];
   const int16_t* d = k == KICK ? kt.kick : k == SNARE ? kt.snare : kt.hat;
@@ -66,6 +71,7 @@ void playBoard(Kind k, float vel) {
   int ch = (int)k;  // one speaker channel per drum, so a new hit cuts the old one
   M5.Speaker.setChannelVolume(ch, (uint8_t)(cfg.vol * (k == HAT ? 0.55f : 1.0f) * (0.55f + 0.45f * vel)));
   M5.Speaker.playRaw(d, n, SMP_RATE, false, 1, ch, true);
+#endif
 }
 void sendMidi(Kind k, float vel) {
   if (!bleConnected) return;
@@ -282,8 +288,12 @@ void setupWeb() {
     res->addHeader("Content-Encoding", "gzip"); r->send(res);
   });
   server.on("/samples.js", HTTP_GET, [](AsyncWebServerRequest* r) {
+#ifdef PB_LITE
+    r->send(200, "application/javascript", "window.PB_KITS=null;");
+#else
     AsyncWebServerResponse* res = r->beginResponse(200, "application/javascript", WEB_SAMPLES_GZ, WEB_SAMPLES_GZ_LEN);
     res->addHeader("Content-Encoding", "gzip"); res->addHeader("Cache-Control", "max-age=86400"); r->send(res);
+#endif
   });
   server.onNotFound([](AsyncWebServerRequest* r) { r->redirect("/"); });  // captive-portal style
   server.begin();
@@ -305,7 +315,10 @@ void drawScreen() {
 }
 
 void setup() {
-  auto c = M5.config(); c.internal_imu = true; c.internal_spk = true;
+  auto c = M5.config(); c.internal_imu = true;
+#ifndef PB_LITE
+  c.internal_spk = true;
+#endif
   M5.begin(c);
   M5.Display.setRotation(1);
   loadCfg();
