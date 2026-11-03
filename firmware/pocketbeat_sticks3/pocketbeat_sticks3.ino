@@ -121,77 +121,7 @@ void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
   }
 }
 
-// ---------------- Beat clock (port of the web version) ----------------
-// A clock starts after 3 evenly spaced hits. Hats free-run from the clock; each hit nudges
-// the phase a little. Tempo follows the median of recent good gaps, slowly.
-float intervals[4]; int nInt = 0; float rejected[3]; int nRej = 0;
-float beatMs = 0; uint32_t lastHitMs = 0; bool clockOn = false;
-float nextHat = 0, lastHatSched = 0, drift = 0; uint32_t hatIdx = 0;
-
-float median(float* a, int n) { float b[8]; memcpy(b, a, n * sizeof(float)); for (int i = 1; i < n; i++) for (int j = i; j > 0 && b[j - 1] > b[j]; j--) { float t = b[j]; b[j] = b[j - 1]; b[j - 1] = t; } return b[(n - 1) / 2]; }
-bool consistent(float* a, int n, float tol) { float m = median(a, n); for (int i = 0; i < n; i++) if (fabsf(a[i] - m) / m >= tol) return false; return true; }
-void pushInt(float v) { if (nInt < 4) intervals[nInt++] = v; else { memmove(intervals, intervals + 1, 3 * sizeof(float)); intervals[3] = v; } }
-float hatSub() { return cfg.hat == 2 ? beatMs / 2 : beatMs; }
-void startClock(float now) { nextHat = now; lastHatSched = now; hatIdx = 0; drift = 0; clockOn = true; }
-void stopClock() { clockOn = false; nInt = 0; nRej = 0; lastHitMs = 0; beatMs = 0; ws.textAll("{\"bpm\":0}"); }
-
-void clockTick(float now) {
-  if (!clockOn) return;
-  if (now - lastHitMs > beatMs * 1.6f) { stopClock(); return; }       // stop soon after the foot stops
-  if (cfg.hat == 0) { nextHat = now; return; }
-  float sub = hatSub();
-  while (nextHat <= now) {
-    if (drift != 0) { float d = drift * 0.35f; nextHat += d; drift -= d; if (fabsf(drift) < 1) drift = 0; }
-    bool onBeat = cfg.hat == 2 ? (hatIdx % 2 == 0) : true;
-    if (now - nextHat < 40) hit(HAT, onBeat ? 0.7f : 0.45f);
-    lastHatSched = nextHat; hatIdx++; nextHat += sub;
-  }
-}
-void nudgeHats(float now) {
-  float sub = hatSub();
-  float nearest = lastHatSched + roundf((now - lastHatSched) / sub) * sub;
-  float err = now - nearest;
-  drift = constrain(0.7f * err, -0.25f * sub, 0.25f * sub);
-}
-
-// Pending quantized hit (held back to the next grid line, at most 90 ms)
-struct Pending { bool on = false; float at = 0; Kind k; float vel, g, sw, lift; } pending;
-
-void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
-  if (lastHitMs) {
-    float dt = now - lastHitMs;
-    if (!beatMs) {
-      if (dt > 250 && dt < 2000) { if (nInt >= 2) { intervals[0] = intervals[1]; nInt = 1; } intervals[nInt++] = dt; } else nInt = 0;
-    } else {
-      float r = dt / beatMs;
-      if (r > 1.7f && r < 2.3f) dt /= 2;
-      if (dt / beatMs > 0.7f && dt / beatMs < 1.4f) { pushInt(dt); nRej = 0; }
-      else if (dt > 250 && dt < 2000) {
-        if (nRej < 3) rejected[nRej++] = dt; else { rejected[0] = rejected[1]; rejected[1] = rejected[2]; rejected[2] = dt; }
-        // Two off-tempo hits that agree with each other = a deliberate tempo change: jump to it.
-        if (nRej >= 2 && consistent(rejected + nRej - 2, 2, 0.2f)) { intervals[0] = rejected[nRej - 2]; intervals[1] = rejected[nRej - 1]; nInt = 2; nRej = 0; beatMs = median(intervals, 2); }
-      }
-    }
-  }
-  lastHitMs = now;
-  float when = now;
-  if (!beatMs) {
-    // Bounces start the clock on the second bounce; other hits need two even gaps.
-    if (nInt >= 1) { beatMs = median(intervals, nInt); startClock(now); }   // second hit starts the hats
-  } else {
-    beatMs += 0.5f * (median(intervals, nInt) - beatMs);
-    if (cfg.quant) {
-      float gsub = beatMs / cfg.quant;
-      float grid = lastHatSched + roundf((now - lastHatSched) / gsub) * gsub;
-      if (grid - now < 90 && grid >= now - 5) when = grid;
-    }
-    if (!clockOn) startClock(now); else nudgeHats(now);
-  }
-  if (ws.count()) { char b[32]; snprintf(b, sizeof b, "{\"bpm\":%d}", beatMs ? (int)roundf(60000.0f / beatMs) : 0); ws.textAll(b); }
-  if (k == TAP) { if (ws.count()) { char b[64]; snprintf(b, sizeof b, "{\"hit\":\"tap\",\"v\":0,\"g\":%.2f,\"lift\":%.0f}", g, lift); ws.textAll(b); } return; }
-  if (when > now + 1) { pending = { true, when, k, vel, g, sw, lift }; }
-  else hit(k, vel, g, sw, lift);
-}
+#include "pb_clock.h"
 
 // ---------------- Motion detection ----------------
 // Board taped to the top of the shoe.
@@ -205,10 +135,11 @@ float meterBuf[12]; int nMeter = 0; uint32_t lastMeterSend = 0;
 uint32_t lastT = 0;
 // swing calibration: capture up to 3 swings, average their direction
 bool calibrating = false; uint32_t calEnd = 0; int calCount = 0; bool calInSwing = false;
+int calState = 0; uint32_t calStillSince = 0; float calDx = 0, calDy = 0, calDz = 0;
 float calBest = 0, calBx = 0, calBy = 0, calBz = 0, calSx = 0, calSy = 0, calSz = 0;
 
 void startSwingCal() {
-  calibrating = true; calEnd = millis() + 8000; calCount = 0; calInSwing = false;
+  calibrating = true; calEnd = millis() + 10000; calCount = 0; calInSwing = false; calState = 0;
   calSx = calSy = calSz = 0; ws.textAll("{\"learn\":\"swing your foot 0/3\"}");
 }
 void finishSwingCal() {
@@ -238,13 +169,23 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   if (nMeter < 12) meterBuf[nMeter++] = mag;
 
   if (calibrating) {
-    // a swing = rotation above 120 deg/s; remember its strongest direction, count it when it settles
-    if (wm > 120) { if (!calInSwing) { calInSwing = true; calBest = 0; } if (wm > calBest) { calBest = wm; calBx = wx; calBy = wy; calBz = wz; } }
-    else if (calInSwing && wm < 50) {
-      calInSwing = false; calCount++;
-      calSx += calBx / calBest; calSy += calBy / calBest; calSz += calBz / calBest;
-      char b[64]; snprintf(b, sizeof b, "{\"learn\":\"swing your foot %d/3\"}", calCount); ws.textAll(b);
-      if (calCount >= 3) finishSwingCal();
+    // A swing starts when rotation passes 120 deg/s. Lock onto the direction it starts in and keep the
+    // strongest reading only while the foot keeps turning that way; once it reverses (the swing back)
+    // the swing is counted and everything is ignored until the foot is still again.
+    if (calState == 0 && wm > 120) {
+      calState = 1; calBest = wm; calBx = wx; calBy = wy; calBz = wz;
+      calDx = wx / wm; calDy = wy / wm; calDz = wz / wm;
+    } else if (calState == 1) {
+      float along = wx * calDx + wy * calDy + wz * calDz;
+      if (along > calBest) { calBest = along; calBx = wx; calBy = wy; calBz = wz; }
+      if (along < 50) {   // slowed down or reversed: the out-swing is over
+        calCount++; calSx += calBx / calBest; calSy += calBy / calBest; calSz += calBz / calBest;
+        char b[64]; snprintf(b, sizeof b, "{\"learn\":\"swing your foot %d/3\"}", calCount); ws.textAll(b);
+        calState = 2; calStillSince = 0;
+        if (calCount >= 3) finishSwingCal();
+      }
+    } else if (calState == 2) {   // ignore the swing back; wait for ~150 ms of stillness
+      if (wm < 40) { if (!calStillSince) calStillSince = now; else if (now - calStillSince >= 150) calState = 0; } else calStillSince = 0;
     }
     if (calibrating && now > calEnd) finishSwingCal();
     return;
@@ -291,6 +232,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   bool f;
   if (strstr(s, "\"get\"")) { sendCfg(client); return; }
   if (strstr(s, "\"cal\"")) { startSwingCal(); return; }
+  if (strstr(s, "\"flipSwing\"")) { cfg.rx = -cfg.rx; cfg.ry = -cfg.ry; cfg.rz = -cfg.rz; saveCfg(); ws.textAll("{\"learn\":\"flipped ✓\"}"); return; }
   if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }
   if (const char* q = strstr(s, "\"ssid\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.ssid) - 1); memcpy(cfg.ssid, q, n); cfg.ssid[n] = 0; } }
   if (const char* q = strstr(s, "\"pass\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.pass) - 1); memcpy(cfg.pass, q, n); cfg.pass[n] = 0; } }
