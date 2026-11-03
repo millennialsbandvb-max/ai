@@ -113,9 +113,9 @@
 </div>
 
 <div class="ctl"><label for="thr">Lightest hit that counts</label><output id="thrOut"></output>
-  <input type="range" id="thr" data-key="thr" min="0.05" max="1.5" step="0.005" value="0.8"></div>
+  <input type="range" id="thr" data-key="thr" min="0.02" max="1.5" step="0.005" value="0.8"></div>
 <div class="ctl"><label for="sthr">Stomp line (harder than this = stomp)</label><output id="sthrOut"></output>
-  <input type="range" id="sthr" data-key="sthr" min="0.1" max="3" step="0.005" value="2.5"></div>
+  <input type="range" id="sthr" data-key="sthr" min="0.04" max="3" step="0.005" value="2.5"></div>
 <div class="ctl"><label for="gap">Minimum gap between hits</label><output id="gapOut"></output>
   <input type="range" id="gap" data-key="gap" min="60" max="400" step="10" value="120"></div>
 <div class="ctl"><label for="vol">Board speaker volume</label><output id="volOut"></output>
@@ -164,7 +164,7 @@
   const cv = $('scope'), g2 = cv.getContext('2d');
   function draw() {
     const w = cv.width, h = cv.height, thr = +$('thr').value, sthr = +$('sthr').value, mode = +(cfg.snare || 0);
-    const scale = Math.max(sthr * 1.5, 1.5);
+    const scale = Math.max(sthr * 1.6, thr * 3, 0.15);
     g2.clearRect(0, 0, w, h); const y = v => h - Math.min(1, v / scale) * h;
     g2.lineWidth = 2; g2.setLineDash([8, 8]);
     const lines = [[thr, colors.hat], [sthr, mode === 1 ? colors.kick : colors.snare]];
