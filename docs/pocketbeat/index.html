@@ -247,7 +247,7 @@
     if (!clockOn) return;
     const now = ctx.currentTime;
     // Keep going until the player has been quiet for a whole bar (4 beats, plus slack).
-    if (now - lastStompT > beatSec * 4.5) { stopClock(); return; }
+    if (now - lastStompT > beatSec * 1.6) { stopClock(); return; }
     if (hatMode === 0) { nextHat = now; return; }
     const sub = hatSub();
     // Hats free-run: each one is placed one subdivision after the previous one, so they are
@@ -307,7 +307,8 @@
 
     let when = now;
     if (!beatSec) {
-      if (intervals.length === 2 && consistent(intervals, 0.2)) { beatSec = median(intervals); startClock(now); }
+      // Bounces start the clock on the second bounce; other hits need two even gaps.
+      if (intervals.length >= 1 && (kind === 'tap' || (intervals.length === 2 && consistent(intervals, 0.2)))) { beatSec = median(intervals); startClock(now); }
     } else {
       // Tempo moves slowly toward the median of the last 6 good gaps.
       const newBeat = median(intervals);

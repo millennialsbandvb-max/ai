@@ -116,7 +116,7 @@ void stopClock() { clockOn = false; nInt = 0; nRej = 0; lastHitMs = 0; beatMs = 
 
 void clockTick(float now) {
   if (!clockOn) return;
-  if (now - lastHitMs > beatMs * 4.5f) { stopClock(); return; }       // a whole bar of silence
+  if (now - lastHitMs > beatMs * 1.6f) { stopClock(); return; }       // stop soon after the foot stops
   if (cfg.hat == 0) { nextHat = now; return; }
   float sub = hatSub();
   while (nextHat <= now) {
@@ -155,7 +155,8 @@ void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
   lastHitMs = now;
   float when = now;
   if (!beatMs) {
-    if (nInt == 2 && consistent(intervals, 2, 0.2f)) { beatMs = median(intervals, 2); startClock(now); }
+    // Bounces start the clock on the second bounce; other hits need two even gaps.
+    if (nInt >= 1 && (k == TAP || (nInt == 2 && consistent(intervals, 2, 0.2f)))) { beatMs = median(intervals, nInt); startClock(now); }
   } else {
     beatMs += 0.5f * (median(intervals, nInt) - beatMs);
     if (cfg.quant) {
