@@ -153,6 +153,7 @@ int main(int argc, char **argv) {
         if (!strstr(m2, "Loading") && !strstr(m2, "Scanning") && !strstr(i2, "Loading") && !strstr(i2, "Scanning")) break;
         usleep(100000);
     }
+    render(e2, 0.3f, &peak);   /* (the amp's colour follows its model now and then) */
     int same = 1;
     for (int i = 0; i < e->numParams; i++) {
         char a[64], b[64];
@@ -208,6 +209,20 @@ int main(int argc, char **argv) {
         char f1[64];
         disp(e, fx1, f1);
         CHECK(!strcmp(t, RIGS[2].name) && !strcmp(f1, RIGS[N_RIGS - 1].s[0].fx), "a restored Rig value changed the board");
+    }
+    /* a rig picks an amp from the library by its words (QUAD_AMP_TEST=1: a library of "Marshall Plexi" and
+     * "Fender Twin" models): Plexi Crunch -> the Marshall, Texas Blues -> the Fender, Fuzz Synth Beast (svt / ampeg /
+     * orange: none there) -> stays */
+    if (getenv("QUAD_AMP_TEST")) {
+        const int rig = param(e, "Rig"), next = param(e, "Rig >"), model = param(e, "Model");
+        static const char *const WANT[][2] = {{"Plexi Crunch", "Marshall Plexi"}, {"Texas Blues", "Fender Twin"}, {"Fuzz Synth Beast", "Marshall Plexi"}};   /* (no match: still the one Shoegaze Wall, just before, chose) */
+        for (int w = 0; w < 3; w++) {
+            for (int k = 0; k < 40; k++) { disp(e, rig, t); if (!strcmp(t, WANT[w][0])) break; e->setParameter(e, next, 1); e->setParameter(e, next, 0); }
+            char m[64] = "";
+            for (int k = 0; k < 60; k++) { render(e, 0.05f, &peak); usleep(50000); disp(e, model, m); if (!strcmp(m, WANT[w][1])) break; }
+            printf("  rig %s: amp \"%s\"\n", WANT[w][0], m);
+            CHECK(!strcmp(m, WANT[w][1]), "a rig doesn't choose its amp from the library");
+        }
     }
     /* a chunk from before Presence (NAM's 21 parameters) */
     {

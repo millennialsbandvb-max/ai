@@ -31,6 +31,7 @@ AEffect *nam_entry(audioMasterCallback);
 int duo_pick(AEffect *, int, int, int, char *, int);   /* their full-page lists (tools/picklist.h) */
 int amb_pick(AEffect *, int, int, int, char *, int);
 int nam_pick(AEffect *, int, int, int, char *, int);
+void nam_find(AEffect *, const char *, const char *);   /* (NAM loads the first of the user's models / IRs with one of the words) */
 int duo_look(AEffect *), amb_look(AEffect *);   /* the colour of their pedal (tools/pedal_looks.h) */
 
 #define NS 6
@@ -537,6 +538,7 @@ static void load_rig(Plugin *s, int r) {
     const float nam[6] = {(g->input + 24) / 48, (g->gate + 100) / 80, g->bass / 10, g->mid / 10, g->treble / 10, g->presence / 10};
     static const int NAM_AT[6] = {0, 1, 2, 3, 4, 21};   /* NAM's Input, Gate, Bass, Middle, Treble, Presence */
     for (int i = 0; i < 6; i++) setParameter(&s->fx, kNam0 + NAM_AT[i], clampf(nam[i], 0, 1));
+    nam_find(s->nam, g->amp, g->cab);   /* (an amp from the user's library that fits the rig, if there's one) */
     for (int i = 0; i < kNumSaved; i++) {
         const int w = i >= kSlot0 && i < kNam0 ? (i - kSlot0) % SP : -1;
         if (w != S_PREV && w != S_NEXT) s->automate[i] = 1;   /* (MPC shows the whole board anew) */

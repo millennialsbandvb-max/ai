@@ -347,7 +347,9 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   chunks with 21 NAM values and four-slot ones (NAM's own values come from NAM's key=value chunk either way).
 - **0dd Rig rig presets** (Nov 2026, the user's ask: "20ish, some real rigs some crazy rigs"): `quadrig-mpc/src/rigs.h`,
   22 whole boards (six slots by effect + preset name, compared by letters/digits; mix and knob overrides; amp position,
-  NAM Input/Gate/Bass/Middle/Treble/Presence, Output; the amp model stays the user's). A Rig stepper (params after
+  NAM Input/Gate/Bass/Middle/Treble/Presence, Output; amp/cab words: NAM's `nam_find` (Nov 2026, the user's ask:
+  "the presets don't have any amp changing") loads the first of the user's models / IRs whose folder + name has one
+  of the words, in order (none: the amp stays); Ergo EUB's programs use it for their captures ("ultra lo,svt", "bethel")). A Rig stepper (params after
   amp_look: rig, rig_prev, rig_next; not in the state chunk) on the RIG page where the amp folder stepper was (the
   folder is on AMP), with a full-page list "Rigs" (the last list); exact value = name only (a restore), a nudge or
   arrow loads; MIDI Program Change n = rig n+1. quad_test loads every rig and checks names; new rigs go at the end.

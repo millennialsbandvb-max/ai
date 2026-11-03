@@ -245,6 +245,7 @@ struct Plugin {
     int model_step = 0, ir_step = 0;       // +-1 per arrow press
     int model_pick = -1, ir_pick = -1;     // an absolute index (in the folder's view)
     std::string model_by_name, ir_by_name; // from a saved project
+    std::string model_words, ir_words;     // a host's preset: load the first model / IR whose name has one of these (nam_find)
     struct FolderReq { int step = 0, pick = -1; std::string by_name; bool restore = false; } mfolder, ifolder;
     bool rescan = true, reload = false, resize = false;
     std::atomic<bool> poisoned{false};    // the model produced a non-number: the worker reloads it fresh
@@ -381,8 +382,10 @@ void Plugin::run_worker() {
         lk.lock();
         bool do_scan = rescan, do_reload = reload || poisoned.exchange(false), do_resize = resize;
         int mstep = model_step, istep = ir_step, mpick = model_pick, ipick = ir_pick;
-        std::string mname = model_by_name, iname = ir_by_name;
+        std::string mname = model_by_name, iname = ir_by_name, mwords = model_words, iwords = ir_words;
         const FolderReq mf_req = mfolder, if_req = ifolder;
+        model_words.clear();
+        ir_words.clear();
         rescan = reload = resize = false;
         model_step = ir_step = 0;
         model_pick = ir_pick = -1;
@@ -391,12 +394,12 @@ void Plugin::run_worker() {
         mfolder = ifolder = FolderReq();
         auto asked = [](const FolderReq &r) { return r.step || r.pick >= 0 || r.restore; };
         if (!do_scan && !do_reload && !do_resize && !mstep && !istep && mpick < 0 && ipick < 0 && mname.empty() &&
-            iname.empty() && !asked(mf_req) && !asked(if_req))
+            iname.empty() && !asked(mf_req) && !asked(if_req) && mwords.empty() && iwords.empty())
             continue;
         lk.unlock();
 
         const double sr = sample_rate.load();
-        if (do_scan || mstep || istep || mf_req.step || mf_req.pick >= 0 || if_req.step || if_req.pick >= 0) {   // pick up files copied in since the last look
+        if (do_scan || mstep || istep || mf_req.step || mf_req.pick >= 0 || if_req.step || if_req.pick >= 0 || !mwords.empty() || !iwords.empty()) {   // pick up files copied in since the last look
             auto mf = scan(bases, "Models", ".nam"), inf = scan(bases, "IRs", ".wav");
             std::lock_guard<std::mutex> l(lib_mutex);
             auto keep = [](Library &lib, std::vector<fs::path> files) {
@@ -429,6 +432,27 @@ void Plugin::run_worker() {
             return !r.restore;
         };
         const bool mjump = choose_folder(models, mf_req), ijump = choose_folder(irs, if_req);
+        /* words from a host's preset ("plexi,1959,marshall": the first word any file has wins; folder + name, any case) */
+        auto find_words = [&](Library &lib, const std::string &words) -> std::string {
+            std::lock_guard<std::mutex> l(lib_mutex);
+            size_t p = 0;
+            while (p < words.size()) {
+                size_t e = words.find(',', p);
+                if (e == std::string::npos) e = words.size();
+                std::string w = words.substr(p, e - p);
+                p = e + 1;
+                for (auto &c : w) c = (char)std::tolower((unsigned char)c);
+                if (w.empty()) continue;
+                for (const auto &f : lib.files) {
+                    std::string t = folder_of(f) + "/" + f.stem().string();
+                    for (auto &c : t) c = (char)std::tolower((unsigned char)c);
+                    if (t.find(w) != std::string::npos) return f.stem().string();
+                }
+            }
+            return "";
+        };
+        if (!mwords.empty() && mname.empty()) mname = find_words(models, mwords);
+        if (!iwords.empty() && iname.empty()) iname = find_words(irs, iwords);
         // resolve what to load next
         auto choose = [&](Library &lib, int step, int pick, const std::string &name, bool first, bool jump) -> int {
             std::lock_guard<std::mutex> l(lib_mutex);
@@ -826,6 +850,13 @@ extern "C" int nam_pick(AEffect *e, int list, int op, int i, char *out, int max)
     if (op == PL_CURRENT) return folders ? folder_index(lib) : view_pos(lib);
     if (op == PL_NAME && i >= 0 && i < n) copy_str(out, folders ? lib.folders[i].c_str() : lib.files[lib.view[i]].stem().string().c_str(), (size_t)max);
     return 0;
+}
+/* a host's preset choosing the amp by words (0dd Rig's rigs, Ergo EUB's programs): the worker loads the first model
+ * (and IR) whose folder or name has one of the comma-separated words, in their order; none: it stays as it is */
+extern "C" void nam_find(AEffect *e, const char *model_words, const char *ir_words) {
+    Plugin *s = P(e);
+    const std::string mw = model_words ? model_words : "", iw = ir_words ? ir_words : "";
+    s->post([&] { s->model_words = mw; s->ir_words = iw; });
 }
 static const char *const LIST_KEYS[] = {"folder", "model", "ir_folder", "ir"};
 static const char *const LIST_TITLES[] = {"Model Folders", "Models", "IR Folders", "IRs"};

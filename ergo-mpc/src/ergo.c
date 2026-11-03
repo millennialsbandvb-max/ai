@@ -9,12 +9,14 @@
  * Halls: two of the same kind (the owner likes them stacked), each Mix (wet against dry), Pre-delay, Decay, Tone.
  * Volume: last, log taper (gain = v^2.5), 0% = silence; MIDI CC 7 or 11 (an expression pedal), any channel / MIDI Ch.
  * No gate anywhere (the amp's own gate is NAM's, set per program). Programs: ERGO_PROGRAMS (the handoff's rigs);
- * the amp model, cab IR and their folders are the user's (a program sets NAM's knobs, not its model).
+ * the amp model and IR are the user's: a program sets NAM's knobs and asks for a capture by words ("ultra lo,svt"),
+ * which loads only if one of the user's models has them.
  * State: a chunk, "ERGO1 <n>" + our values, then NAM's own chunk (its model / IR paths). */
 #include "vocal_core.h"
 
 AEffect *nam_entry(audioMasterCallback);
 int nam_pick(AEffect *, int, int, int, char *, int);
+void nam_find(AEffect *, const char *, const char *);
 
 #define NAM_N 22   /* NAM MPC's parameters (nam-mpc/params.json; gen-params checks the order) */
 #define NPEAK 8
@@ -71,6 +73,7 @@ typedef struct {
     int rev[2]; float mix, pre, decay, tone;   /* (both halls alike) */
     int amp; float nam_in, nam_gate, nam_bass, nam_mid, nam_treble, nam_out;
     float rig_vol;
+    const char *capture;   /* words for the capture (NAM folder + name, any case); NULL: the amp stays */
 } Prog;
 #define NOPK {0, 0, 1}
 #define AUTOQ {119, 3.3f, 1}, {398, -1.4f, 1}, {2400, -8.8f, 1.13f}, {5500, -15, 1}   /* the Auto-Q 8-band's peaks */
@@ -78,23 +81,23 @@ static const Prog PROGS[] = {
     /* name             input comp pos thr     ratio att  rel  makeup hpf hz  hum depth  q     ls hz ls dB */
     {"Ergo Simple",      0.5f, 1, 1, -20,   4,   20,  198, 7.6f, 0, 31, 2, -30, 9.2f, 139, 0,
      {NOPK, NOPK, NOPK, NOPK, NOPK, NOPK, NOPK, NOPK}, 9000, 0, 2, 398,
-     {0, 0}, 18, 68, 54, 57, 1, 7.2f, -59, 5, 5, 1.9f, 0, 0},
+     {0, 0}, 18, 68, 54, 57, 1, 7.2f, -59, 5, 5, 1.9f, 0, 0, "ultra lo,svt,ampeg"},
     {"Ergo Arco",       -9.6f, 1, 1, -16.2f, 1.9f, 42, 412, 6.4f, 0, 31, 2, -30, 9.2f, 139, 0,
      {NOPK, NOPK, NOPK, NOPK, NOPK, NOPK, NOPK, NOPK}, 9000, 0, 2, 1784,
-     {0, 0}, 18, 68, 54, 57, 1, 0, -100, 5, 5, 5, 0, 0},
+     {0, 0}, 18, 68, 54, 57, 1, 0, -100, 5, 5, 5, 0, 0, "ultra lo,svt,ampeg"},
     {"Ergo to Bass",     0,    1, 0, -25,   4.4f, 2.6f, 151, 10, 1, 31, 0, -30, 9.2f, 242, 2.2f,
      {AUTOQ, {496, -5.8f, 0.7f}, NOPK, NOPK, NOPK}, 9000, -10, 1, 794,
-     {0, 0}, 18, 68, 54, 57, 0, 0, -100, 5, 5, 5, 0, 0},
+     {0, 0}, 18, 68, 54, 57, 0, 0, -100, 5, 5, 5, 0, 0, NULL},
     {"Ergo to Bass 1EQ", 0,    1, 0, -25,   4.4f, 2.6f, 151, 10, 0, 31, 0, -30, 9.2f, 139, 2.6f,
      {{496, -5.8f, 0.7f}, {1800, 2.2f, 1}, NOPK, NOPK, NOPK, NOPK, NOPK, NOPK}, 9000, 0, 2, 794,
-     {0, 0}, 18, 68, 54, 57, 0, 0, -100, 5, 5, 5, 0, 0},
+     {0, 0}, 18, 68, 54, 57, 0, 0, -100, 5, 5, 5, 0, 0, NULL},
     {"Ergo Pop Rock",    3.4f, 1, 0, -21.6f, 3,   12,  63,  6,  1, 31, 2, -3.1f, 3.3f, 242, 2.2f,
      {AUTOQ, {496, -5.8f, 0.7f}, {1800, 2.2f, 1}, {119, -3.8f, 2.8f}, NOPK}, 9000, -10, 2, 794,
-     {1, 1}, 18, 68, 54, 57, 0, -2.8f, -100, 3.9f, 3.9f, 3.4f, 4.8f, 8.2f},
+     {1, 1}, 18, 68, 54, 57, 0, -2.8f, -100, 3.9f, 3.9f, 3.4f, 4.8f, 8.2f, NULL},
     /* the same with the amp on (the owner keeps the Bethel Clean capture as an option) */
     {"Ergo Pop Rock Amp", 3.4f, 1, 0, -21.6f, 3,  12,  63,  6,  1, 31, 2, -3.1f, 3.3f, 242, 2.2f,
      {AUTOQ, {496, -5.8f, 0.7f}, {1800, 2.2f, 1}, {119, -3.8f, 2.8f}, NOPK}, 9000, -10, 2, 794,
-     {1, 1}, 18, 68, 54, 57, 1, -2.8f, -100, 3.9f, 3.9f, 3.4f, 4.8f, 8.2f},
+     {1, 1}, 18, 68, 54, 57, 1, -2.8f, -100, 3.9f, 3.9f, 3.4f, 4.8f, 8.2f, "bethel,tone hammer,aguilar"},
 };
 #define NPROGS ((int)(sizeof PROGS / sizeof *PROGS))
 #define DEFAULT_PROG 3   /* Ergo to Bass 1EQ: the base (the handoff's "build first") */
@@ -325,6 +328,7 @@ static void load_program(Plugin *s, int idx) {
      * dB, 21 Presence 0..10); the model and IR stay */
     set_nam(s, 0, (g->nam_in + 24) / 48); set_nam(s, 1, (g->nam_gate + 100) / 80); set_nam(s, 2, g->nam_bass / 10);
     set_nam(s, 3, g->nam_mid / 10); set_nam(s, 4, g->nam_treble / 10); set_nam(s, 5, (g->nam_out + 24) / 48); set_nam(s, 21, 0.5f);
+    if (g->capture) nam_find(s->nam, g->capture, NULL);   /* (the capture the rig used, if it's in the user's library) */
     s->program = idx;
     s->norm[kProgram] = (float)idx / (float)(NPROGS - 1);
     s->automate[kProgram] = 1;
