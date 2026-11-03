@@ -353,6 +353,11 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   amp_look: rig, rig_prev, rig_next; not in the state chunk) on the RIG page where the amp folder stepper was (the
   folder is on AMP), with a full-page list "Rigs" (the last list); exact value = name only (a restore), a nudge or
   arrow loads; MIDI Program Change n = rig n+1. quad_test loads every rig and checks names; new rigs go at the end.
+- **Choruses sounded like tremolos** (Nov 2026, the user): the H90 backup's TriceraChorus presets (Lush Life, Chorus
+  Lap) were converted with ldep as our Depth and mix 50: Lush Life became a 3.7 ms sweep at 5 Hz. h90_convert.py now
+  takes the sweep as ddep us x ldep % (ours: Depth 100% = 3.5 ms) and the mix from preset_mix. TricraChrs (Duo and the
+  Tri Chorus plugin): the fast ensemble wobble is 0.12 (was 0.35) of the sweep, the centre voice 0.45 (was 0.7: two
+  voices alike on one side cancel and swell), the sweep 3.5 ms (was 4.5).
 - MPC drives: `/sdcard` is an internal SD card; the user's cards mount as `/media/<label>`.
 - Debugging only on the device needs a firmware round trip: write reports to every drive (see `mpc-remote/probe/`).
 - Blocked in this environment: publishing the image via Git LFS, running third-party tools cloned from the

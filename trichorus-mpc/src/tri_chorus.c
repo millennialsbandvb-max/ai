@@ -148,7 +148,7 @@ static void process(AEffect *e, float **in, float **out, int32_t n) {
     const float ratio = powf(2, SHIM_ST[option_of(p[kShimPitch], NSHIM)] / 12);
     const float mix_t = vib ? 1 : p[kMix], og = powf(10, lerp(-24, 12, p[kOutput]) / 20);
     /* three voices panned left, centre, right (Width: towards mono) */
-    const float pan[3][2] = {{lerp(0.6f, 1.0f, width), lerp(0.6f, 0.0f, width)}, {0.7f, 0.7f}, {lerp(0.6f, 0.0f, width), lerp(0.6f, 1.0f, width)}};
+    const float pan[3][2] = {{lerp(0.6f, 1.0f, width), lerp(0.6f, 0.0f, width)}, {0.45f, 0.45f}, {lerp(0.6f, 0.0f, width), lerp(0.6f, 1.0f, width)}};
     for (int k = 0; k < n; k++) {
         float l = il ? il[k] : 0, r = ir ? ir[k] : 0;
         if (!finite_bits(l) || l > 8 || l < -8) l = 0;   /* only clean audio in */
@@ -162,10 +162,10 @@ static void process(AEffect *e, float **in, float **out, int32_t n) {
         const float mono = lp(&s->pre, (l + r) * 0.5f, pre_a);
         line_push(&s->line, tanh_fast(mono * 1.2f) / 1.2f);
         float wl = 0, wr = 0;
-        const float swing = s->depth_s * (vib ? 0.008f : 0.0045f) * fs;   /* up to 8 / 4.5 ms of sweep */
+        const float swing = s->depth_s * (vib ? 0.008f : 0.0035f) * fs;   /* up to 8 / 3.5 ms of sweep */
         for (int v = 0; v < 3; v++) {
             const float off = (float)v / 3;
-            const float m = sine01(s->lfo + off) + ens * 0.35f * sine01(s->fast + off * 1.7f);
+            const float m = sine01(s->lfo + off) + ens * 0.12f * sine01(s->fast + off * 1.7f);
             float y = line_read(&s->line, s->delay_s + swing * 0.5f * (1 + m) + 2);
             y = lp(&s->tone[v][1], lp(&s->tone[v][0], y, tone_a), tone_a);   /* the BBD's darkening, two poles */
             wl += y * pan[v][0];

@@ -1384,13 +1384,13 @@ static void run_algo(Slot *s, const float in[2], float out[2]) {
         const float ph = adv(&s->lfo[0], V(0), fs), fast = adv(&s->lfo[1], V(0) * 9.5f, fs);
         const int vib = V(7) > 0.5f;
         const float w = PC(3), ens = PC(2);
-        const float pan[3][2] = {{lerp(0.6f, 1.0f, w), lerp(0.6f, 0.0f, w)}, {0.7f, 0.7f}, {lerp(0.6f, 0.0f, w), lerp(0.6f, 1.0f, w)}};
+        const float pan[3][2] = {{lerp(0.6f, 1.0f, w), lerp(0.6f, 0.0f, w)}, {0.45f, 0.45f}, {lerp(0.6f, 0.0f, w), lerp(0.6f, 1.0f, w)}};   /* (a lighter centre: two voices alike on one side cancel and swell, tremolo-like) */
         const float mono = lp(&s->op[0][7], (in[0] + in[1]) * 0.5f, c[22]);
         line_push(&s->dl[0], tanh_fast(mono * 1.2f) / 1.2f);
-        const float swing = PC(1) * (vib ? 0.008f : 0.0045f) * fs;
+        const float swing = PC(1) * (vib ? 0.008f : 0.0035f) * fs;
         float wet[2] = {0, 0};
         for (int v = 0; v < 3; v++) {
-            const float off = (float)v / 3, m = sine01(ph + off) + ens * 0.35f * sine01(fast + off * 1.7f);
+            const float off = (float)v / 3, m = sine01(ph + off) + ens * 0.12f * sine01(fast + off * 1.7f);   /* (the fast wobble, kept small: more read as tremolo) */
             float y = line_read(&s->dl[0], c[23] + swing * 0.5f * (1 + m) + 2);
             y = lp(&s->op[1][v], lp(&s->op[0][v], y, c[20]), c[20]);   /* the BBD's darkening */
             wet[0] += y * pan[v][0];

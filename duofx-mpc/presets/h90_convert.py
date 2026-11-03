@@ -79,8 +79,13 @@ def convert(algorithm, p):
                                  "Fine A": g(p, "Detune1"), "Fine B": g(p, "Detune2"), "Level A": g(p, "LevelA", d=100),
                                  "Level B": g(p, "LevelB", d=70), "Width": abs(g(p, "Pan1")) / 2 + abs(g(p, "Pan2")) / 2}
     if algorithm == "TriceraChorus":
-        return "TricraChrs", 50, {"Rate": cl(g(p, "rate", d=0.6), 0.05, 8), "Depth": cl(g(p, "ldep", d=50), 0, 100),
-                                  "Ensemble": cl(g(p, "rdep", d=35), 0, 100)}
+        # (the H90's sweep is ddep microseconds x ldep %: Lush Life's is ~0.4 ms at 5 Hz; ours, Depth 100% = 4.5 ms.
+        # Taking ldep as our Depth gave 3.7 ms at 5 Hz, a tremolo-like wobble. The mix is its own preset_mix.)
+        sweep_ms = g(p, "ddep", d=500) / 1000 * g(p, "ldep", d=50) / 100
+        pmix = g(p, "preset_mix", d=0.5)
+        return "TricraChrs", cl(pmix * 100 if pmix <= 1 else pmix, 10, 100), {
+            "Rate": cl(g(p, "rate", d=0.6), 0.05, 8), "Depth": cl(sweep_ms / 4.5 * 100, 3, 100),
+            "Ensemble": cl(g(p, "rdep", d=35), 0, 100)}
     if algorithm == "Flanger":
         return "Flanger", 50, {"Delay": 0.3 * (10 / 0.3) ** (g(p, "dlbs", d=40) / 100), "Depth": cl(g(p, "dpth") * 2, 0, 100),
                                "Rate": cl(g(p, "sped", d=0.25), 0.02, 8), "Feedback": cl(g(p, "itsy") * 6, -95, 95)}
