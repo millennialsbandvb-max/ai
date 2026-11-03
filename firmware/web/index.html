@@ -76,15 +76,19 @@
 <h2>Snare trigger</h2>
 <div class="seg" data-key="snare">
   <button type="button" data-v="3">Stomp = kick, lift = snare</button>
-  <button type="button" data-v="5">Direction (learned)</button>
+  <button type="button" data-v="5">Left / right leg (board across lap)</button>
   <button type="button" data-v="4">Bounce = hat, stomp = kick, lift = snare</button>
   <button type="button" data-v="0">Swing right</button>
   <button type="button" data-v="1">Tap = snare, stomp = kick</button>
   <button type="button" data-v="2">Tap = kick, stomp = snare</button>
 </div>
 <div class="row"><button type="button" id="calBtn">Set right: tap, then swing right once</button></div>
-<div class="row"><button type="button" id="learnKick">Set kick: tap, then do the kick move</button><button type="button" id="learnSnare">Set snare: tap, then do the snare move</button></div>
-<div class="tile" style="flex:none"><b id="dirState">—</b><span>direction mode: learned directions</span></div>
+<div class="row"><button type="button" id="learnLeft">Set left: tap, then stomp left foot 3×</button><button type="button" id="learnRight">Set right: tap, then stomp right foot 3×</button></div>
+<div class="tile" style="flex:none"><b id="dirState">—</b><span>left / right legs learned</span></div>
+<div class="seg" data-key="legSwap">
+  <button type="button" data-v="0">Left = kick, right = snare</button>
+  <button type="button" data-v="1">Left = snare, right = kick</button>
+</div>
 <div class="tiles">
   <div class="tile"><b id="mSwing">—</b><span>last swing · m/s</span></div>
   <div class="tile"><b id="mLift">—</b><span>last lift · degrees</span></div>
@@ -131,7 +135,7 @@
   <input type="range" id="vol" data-key="vol" min="0" max="255" step="1" value="200"></div>
 <div class="ctl"><label for="pvol">Phone volume</label><output id="pvolOut"></output>
   <input type="range" id="pvol" min="0" max="100" step="1" value="85"></div>
-<p class="hint">Default mode: stomp = kick, lift the foot high = snare (gyro), hi-hat automatic from your tempo. Light bounces of the leg (above the blue line, below the orange kick line) make no sound but set the tempo, so bounce to keep time and the hats follow. "Last lift" is how fast the leg rotated before landing. Direction mode (board resting on your lap): tap "Set kick" then do your kick move once, tap "Set snare" then do your snare move once. From then on each jolt above the orange line is matched to whichever of the two directions it's closest to (the log's angle column shows the match strength, 0-100); lighter jolts are tempo taps. Everything here is stored on the board, so once it's tuned you can close this page and just play. Bluetooth MIDI is always on: pair the board in GarageBand (Settings › Advanced › Bluetooth MIDI) to use the phone's drum sounds with the phone locked.</p>
+<p class="hint">Default mode: stomp = kick, lift the foot high = snare (gyro), hi-hat automatic from your tempo. Light bounces of the leg (above the blue line, below the orange kick line) make no sound but set the tempo, so bounce to keep time and the hats follow. "Last lift" is how fast the leg rotated before landing. Left / right leg mode: rest the board across both thighs (not in the gap between them). Tap "Set left" and stomp your left foot 3 times, then "Set right" and stomp your right foot 3 times. After that every stomp above the orange line goes to the leg it matches; lighter bounces keep the tempo. In the log, "match" is how clearly a stomp matched one leg over the other: higher is clearer, under about 20 means the two legs look alike from where the board sits. Everything here is stored on the board, so once it's tuned you can close this page and just play. Bluetooth MIDI is always on: pair the board in GarageBand (Settings › Advanced › Bluetooth MIDI) to use the phone's drum sounds with the phone locked.</p>
 <h2>Firmware · installed: <span id="ver">?</span></h2>
 <div class="ctl"><label for="ssid">Home Wi-Fi name</label><output></output><input type="text" id="ssid" placeholder="your Wi-Fi network" style="grid-column:1/-1;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px"></div>
 <div class="ctl"><label for="pass">Home Wi-Fi password</label><output></output><input type="password" id="pass" placeholder="password" style="grid-column:1/-1;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px"></div>
@@ -198,8 +202,8 @@
     for (const seg of document.querySelectorAll('.seg[data-key]')) { const v = String(c[seg.dataset.key]); for (const b of seg.children) b.classList.toggle('on', b.dataset.v === v); }
     kit = +(c.kit || 0);
     $('calState').textContent = c.cal ? 'set' : 'not set';
-    $('dirState').textContent = (c.kcal ? 'kick ✓' : 'kick –') + '   ' + (c.scal ? 'snare ✓' : 'snare –');
-    $('learnKick').classList.remove('arm'); $('learnSnare').classList.remove('arm');
+    $('dirState').textContent = (c.lcal ? 'left ✓' : 'left –') + '   ' + (c.rcal ? 'right ✓' : 'right –');
+    $('learnLeft').classList.remove('arm'); $('learnRight').classList.remove('arm');
     if (c.ver) $('ver').textContent = c.ver;
     if (c.ssid !== undefined && document.activeElement !== $('ssid')) $('ssid').value = c.ssid;
   }
@@ -214,8 +218,8 @@
     cfg[seg.dataset.key] = +b.dataset.v; if (seg.dataset.key === 'kit') kit = +b.dataset.v;
     send({ set: { [seg.dataset.key]: +b.dataset.v } });
   });
-  $('learnKick').addEventListener('click', () => { send({ learnKick: 1 }); $('learnKick').classList.add('arm'); });
-  $('learnSnare').addEventListener('click', () => { send({ learnSnare: 1 }); $('learnSnare').classList.add('arm'); });
+  $('learnLeft').addEventListener('click', () => { send({ learnLeft: 1 }); $('learnLeft').classList.add('arm'); $('dirState').textContent = 'stomp left foot: 0/3'; });
+  $('learnRight').addEventListener('click', () => { send({ learnRight: 1 }); $('learnRight').classList.add('arm'); $('dirState').textContent = 'stomp right foot: 0/3'; });
   $('saveWifi').addEventListener('click', () => { send({ set: { ssid: $('ssid').value, pass: $('pass').value } }); $('otaMsg').textContent = 'Wi-Fi saved on the board.'; });
   $('otaBtn').addEventListener('click', () => { send({ ota: 1 }); $('otaMsg').textContent = 'Starting…'; });
   $('pickFw').addEventListener('click', () => $('fwFile').click());
@@ -240,12 +244,13 @@
       if (m.hit) {
         show(m.hit);
         if (m.hit === 'tap') { logRows.unshift('tap   ' + m.g.toFixed(2) + ' g  angle ' + String(Math.round(m.lift)).padStart(3) + '°  (tempo only)'); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); return; }
-        if (m.hit !== 'hat' || m.g !== undefined) { logRows.unshift((m.hit + '     ').slice(0, 5) + ' ' + (m.g !== undefined ? m.g.toFixed(2) + ' g' : '      ') + (m.lift !== undefined ? '  angle ' + String(Math.round(m.lift)).padStart(3) + '°' : '') + (m.sw !== undefined ? '  swing ' + m.sw.toFixed(2) : '')); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); } if (m.g !== undefined) $('mPeak').textContent = m.g.toFixed(2); if (m.sw !== undefined) $('mSwing').textContent = m.sw.toFixed(2); if (m.lift !== undefined) $('mLift').textContent = Math.round(m.lift);
+        if (m.hit !== 'hat' || m.g !== undefined) { logRows.unshift((m.hit + '     ').slice(0, 5) + ' ' + (m.g !== undefined ? m.g.toFixed(2) + ' g' : '      ') + (m.lift !== undefined ? (+(cfg.snare) === 5 ? '  match ' + String(Math.round(m.lift)).padStart(3) : '  angle ' + String(Math.round(m.lift)).padStart(3) + '°') : '') + (m.sw !== undefined ? '  swing ' + m.sw.toFixed(2) : '')); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); } if (m.g !== undefined) $('mPeak').textContent = m.g.toFixed(2); if (m.sw !== undefined) $('mSwing').textContent = m.sw.toFixed(2); if (m.lift !== undefined) $('mLift').textContent = Math.round(m.lift);
         const out = +(cfg.out || 0); if (phoneSound && (out === 1 || out === 2)) playPhone(m.hit, m.v || 1);
       }
       if (m.bpm !== undefined) $('bpm').textContent = m.bpm || '—';
       if (m.batt !== undefined) $('batt').textContent = m.batt + '%';
       if (m.ota) $('otaMsg').textContent = m.ota;
+      if (m.learn) $('dirState').textContent = 'learning ' + m.learn;
       if (m.cal !== undefined) { $('calBtn').classList.remove('arm'); $('calBtn').textContent = 'Set right: tap, then swing right once'; $('calState').textContent = m.cal ? 'set' : 'no swing seen'; }
     };
   }

@@ -52,6 +52,9 @@ struct Cfg {
   float kx = 0, ky = 0, kz = 0; bool kcal = false; // learned kick direction (Direction mode)
   float sx = 0, sy = 0, sz = 0; bool scal = false; // learned snare direction (Direction mode)
   char ssid[33] = ""; char pass[65] = "";          // home Wi-Fi for GitHub updates
+  float lf[6] = {0}; float rf[6] = {0};            // learned left/right leg signatures (Leg mode)
+  bool lcal = false, rcal = false;
+  int legSwap = 0;                                 // 0: left = kick, right = snare; 1: swapped
 } cfg;
 Preferences prefs;
 
@@ -62,7 +65,8 @@ void saveCfg() {
 }
 void loadCfg() {
   prefs.begin("pb", true);
-  if (prefs.getBytesLength("cfg") == sizeof(cfg)) prefs.getBytes("cfg", &cfg, sizeof(cfg));
+  size_t n = prefs.getBytesLength("cfg");
+  if (n > 0 && n <= sizeof(cfg)) prefs.getBytes("cfg", &cfg, n);   // older builds stored fewer fields; new ones keep defaults
   prefs.end();
 }
 
@@ -193,7 +197,9 @@ float meterBuf[12]; int nMeter = 0; uint32_t lastMeterSend = 0;
 float gyroMag = 0, liftMax = 0;   // deg/s; liftMax = fastest rotation since the last landing, decays slowly
 float liftAngle = 0, stillMs = 0; // degrees rotated since the foot last went still
 float pkx = 0, pky = 0, pkz = 0;   // linear-accel vector at the impact peak (direction of the jolt)
-int learnDir = 0;                  // 1 = next landing sets kick direction, 2 = snare
+int learnDir = 0;                  // 1 = learning left leg, 2 = learning right leg
+int learnCount = 0; float learnAcc[6];
+const int GN = 48; float gHist[GN][3]; uint32_t gHistT[GN]; int gHi = 0;
 uint32_t lastT = 0;
 
 static float dirSim(float ax, float ay, float az, float bx, float by, float bz) {
@@ -201,18 +207,41 @@ static float dirSim(float ax, float ay, float az, float bx, float by, float bz) 
   return m > 0 ? d / m : 0;
 }
 void fireStomp(float p, float now) {
-  if (cfg.snare == 5) {   // Direction mode (board on the lap): match the jolt's direction to the learned kick/snare directions
-    float m = sqrtf(pkx * pkx + pky * pky + pkz * pkz); if (m < 1e-3f) m = 1;
-    float ux = pkx / m, uy = pky / m, uz = pkz / m;
+  if (cfg.snare == 5) {   // Leg mode: board across both thighs; tell the left foot from the right by how the board tips
     liftMax = 0; liftAngle = 0;
-    if (learnDir == 1) { cfg.kx = ux; cfg.ky = uy; cfg.kz = uz; cfg.kcal = true; learnDir = 0; saveCfg(); sendCfg(nullptr); return; }
-    if (learnDir == 2) { cfg.sx = ux; cfg.sy = uy; cfg.sz = uz; cfg.scal = true; learnDir = 0; saveCfg(); sendCfg(nullptr); return; }
-    if (p < cfg.kthr) { onHit(TAP, 0, p, -1, now, 0); return; }          // light = tempo tap
-    float sk = cfg.kcal ? dirSim(ux, uy, uz, cfg.kx, cfg.ky, cfg.kz) : -1;
-    float ss = cfg.scal ? dirSim(ux, uy, uz, cfg.sx, cfg.sy, cfg.sz) : -1;
+    if (p < cfg.kthr && !learnDir) { onHit(TAP, 0, p, -1, now, 0); return; }   // light = tempo tap
+    // Signature: jolt direction (accel at the peak) + tilt direction (strongest gyro reading near the impact).
+    float f[6];
+    float m = sqrtf(pkx * pkx + pky * pky + pkz * pkz); if (m < 1e-3f) m = 1;
+    f[0] = pkx / m; f[1] = pky / m; f[2] = pkz / m;
+    float bx = 0, by = 0, bz = 0, bm = 0;
+    for (int i = 0; i < GN; i++) {
+      if (now - gHistT[i] > 160) continue;
+      float gm = sqrtf(gHist[i][0] * gHist[i][0] + gHist[i][1] * gHist[i][1] + gHist[i][2] * gHist[i][2]);
+      if (gm > bm) { bm = gm; bx = gHist[i][0]; by = gHist[i][1]; bz = gHist[i][2]; }
+    }
+    // the tilt is the stronger left/right cue, so weight it double; ignore it if the board barely rotated
+    if (bm > 15) { f[3] = 2 * bx / bm; f[4] = 2 * by / bm; f[5] = 2 * bz / bm; } else { f[3] = f[4] = f[5] = 0; }
+
+    if (learnDir) {   // learning: average three stomps of that foot
+      if (learnCount == 0) for (int i = 0; i < 6; i++) learnAcc[i] = 0;
+      for (int i = 0; i < 6; i++) learnAcc[i] += f[i];
+      learnCount++;
+      char b[64]; snprintf(b, sizeof b, "{\"learn\":\"%s %d/3\"}", learnDir == 1 ? "left" : "right", learnCount); ws.textAll(b);
+      if (learnCount >= 3) {
+        float* dst = learnDir == 1 ? cfg.lf : cfg.rf;
+        for (int i = 0; i < 6; i++) dst[i] = learnAcc[i];
+        if (learnDir == 1) cfg.lcal = true; else cfg.rcal = true;
+        learnDir = 0; learnCount = 0; saveCfg(); sendCfg(nullptr);
+      }
+      return;
+    }
+    auto sim = [&](const float* r) { float d = 0, a2 = 0, b2 = 0; for (int i = 0; i < 6; i++) { d += f[i] * r[i]; a2 += f[i] * f[i]; b2 += r[i] * r[i]; } return (a2 > 0 && b2 > 0) ? d / sqrtf(a2 * b2) : -1.0f; };
+    float sl = cfg.lcal ? sim(cfg.lf) : -1, sr = cfg.rcal ? sim(cfg.rf) : -1;
+    bool left = sl >= sr;
+    Kind k = (left ^ (cfg.legSwap != 0)) ? KICK : SNARE;
     float vel = constrain(0.6f + 0.4f * (p / (cfg.kthr * 2)), 0, 1);
-    // report similarity (0-100) in the "lift" slot so the log shows how clear the match was
-    if (ss > sk) onHit(SNARE, vel, p, -1, now, ss * 100); else onHit(KICK, vel, p, -1, now, sk * 100);
+    onHit(k, vel, p, -1, now, fabsf(sl - sr) * 100);   // "lift" slot carries how clearly it matched (0-200)
     return;
   }
   if (cfg.snare == 4) {   // bounce = hat, stomp = kick, lift = snare
@@ -239,6 +268,7 @@ void fireStomp(float p, float now) {
 void processMotion(float ax, float ay, float az, float wx, float wy, float wz, uint32_t now) {  // accel in g (incl. gravity), gyro in deg/s
   float dt = lastT ? min((uint32_t)50, now - lastT) / 1000.0f : 0; lastT = now;
   gyroMag = sqrtf(wx * wx + wy * wy + wz * wz);
+  gHist[gHi][0] = wx; gHist[gHi][1] = wy; gHist[gHi][2] = wz; gHistT[gHi] = now; gHi = (gHi + 1) % GN;
   if (gyroMag > liftMax) liftMax = gyroMag; else liftMax *= (1.0f - 1.2f * dt);  // forgets a lift after ~1 s
   if (gyroMag > 20) { liftAngle += gyroMag * dt; stillMs = 0; } else { stillMs += dt * 1000; if (stillMs > 250) liftAngle = 0; }
   const float k = 0.05f; gx += k * (ax - gx); gy += k * (ay - gy); gz += k * (az - gz);
@@ -288,8 +318,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[512];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.2f,\"lthr\":%.0f,\"kthr\":%.3f,\"gap\":%d,\"snare\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"kcal\":%d,\"scal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.thr, cfg.sthr, cfg.swthr, cfg.lthr, cfg.kthr, cfg.gap, cfg.snare, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.kcal ? 1 : 0, cfg.scal ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.2f,\"lthr\":%.0f,\"kthr\":%.3f,\"gap\":%d,\"snare\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"lcal\":%d,\"rcal\":%d,\"legSwap\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.thr, cfg.sthr, cfg.swthr, cfg.lthr, cfg.kthr, cfg.gap, cfg.snare, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, cfg.legSwap, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -317,6 +347,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "swthr", &f); if (f) cfg.swthr = v;
   v = jsonNum(s, "lthr", &f); if (f) cfg.lthr = v;
   v = jsonNum(s, "kthr", &f); if (f) cfg.kthr = v;
+  v = jsonNum(s, "legSwap", &f); if (f) cfg.legSwap = (int)v;
   v = jsonNum(s, "gap", &f); if (f) cfg.gap = (int)v;
   v = jsonNum(s, "snare", &f); if (f) cfg.snare = (int)v;
   v = jsonNum(s, "kit", &f); if (f) cfg.kit = constrain((int)v, 0, 1);
@@ -415,7 +446,7 @@ void drawScreen() {
   d.setTextSize(1); d.setTextColor(TFT_DARKGREY);
   d.setCursor(4, 60); d.printf("BLE %s  WiFi %d", bleConnected ? "on" : "--", WiFi.softAPgetStationNum());
   d.setCursor(4, 72); d.printf("batt %d%%  v%s", M5.Power.getBatteryLevel(), FW_VERSION);
-  d.setCursor(4, 84); d.print(cfg.snare == 0 ? (cfg.cal ? "snare: swing R" : "snare: SET RIGHT") : cfg.snare == 1 ? "tap=sn stomp=kk" : cfg.snare == 2 ? "tap=kk stomp=sn" : cfg.snare == 3 ? "snare: high lift" : cfg.snare == 4 ? "bounce/stomp/lift" : (cfg.kcal && cfg.scal ? "direction mode" : "direction: SET K/S"));
+  d.setCursor(4, 84); d.print(cfg.snare == 0 ? (cfg.cal ? "snare: swing R" : "snare: SET RIGHT") : cfg.snare == 1 ? "tap=sn stomp=kk" : cfg.snare == 2 ? "tap=kk stomp=sn" : cfg.snare == 3 ? "snare: high lift" : cfg.snare == 4 ? "bounce/stomp/lift" : (cfg.lcal && cfg.rcal ? "left/right legs" : "legs: SET L/R"));
   d.endWrite();
 }
 
