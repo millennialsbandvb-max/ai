@@ -68,14 +68,31 @@ struct Pending { bool on = false; float at = 0; Kind k; float vel, g, sw, lift; 
 
 void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
   float when = now;
-  // Locked tempo, once the count-in is done: hits never change the tempo, they only nudge the grid.
-  if (cfg.tlock && locked && clockOn) {
-    if (cfg.quant) {
-      float gsub = beatMs / cfg.quant;
-      float grid = lastEighth + roundf((now - lastEighth) / gsub) * gsub;
-      if (grid - now < 90 && grid >= now - 5) when = grid;
+  if (cfg.tlock) {
+    if (locked && clockOn) {
+      // Locked: the tempo and the hats' timing are fixed; hits just play (quantized if on).
+      if (cfg.quant) {
+        float gsub = beatMs / cfg.quant;
+        float grid = lastEighth + roundf((now - lastEighth) / gsub) * gsub;
+        if (grid - now < 90 && grid >= now - 5) when = grid;
+      }
+    } else {
+      // Count-in: 8 evenly spaced hits. The tempo is the total time of the 8 hits divided into 7 beats.
+      if (lockHits > 0 && now - lastHitMs > 2000) lockHits = 0;   // too long a gap: start counting again
+      if (++lockHits == 1) countStart = now;
+      if (lockHits >= COUNT_IN) {
+        beatMs = (now - countStart) / (COUNT_IN - 1);
+        locked = true;
+        startClock(now, now);                                       // the 8th hit is a beat; hats start from here
+        lastEighth = now - beatMs / 2; nextEighth = now; eighthIdx = 0;   // first hat lands with the 8th hit
+      }
+      if (ws.count()) {
+        char b[64];
+        if (locked) snprintf(b, sizeof b, "{\"bpm\":%d,\"locked\":1}", (int)roundf(60000.0f / beatMs));
+        else snprintf(b, sizeof b, "{\"count\":%d}", lockHits);
+        ws.textAll(b);
+      }
     }
-    nudgeGrid(now);
     lastHitMs = now;
     if (k == TAP) return;
     if (when > now + 1) { pending = { true, when, k, vel, g, sw, lift }; }
@@ -118,16 +135,6 @@ void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
     }
   }
   lastHitMs = now;
-  if (cfg.tlock && !locked) {
-    if (++lockHits == 1) countStart = now;
-    if (lockHits >= COUNT_IN && clockOn && beatMs) {
-      // Measure across the whole count-in: count how many 8ths it spans, divide. Averages out the wobble.
-      float span = now - countStart;
-      int n8 = (int)roundf(span / (beatMs / 2));
-      if (n8 >= 2) { float B = 2 * span / n8; if (fabsf(B - beatMs) / beatMs < 0.15f) beatMs = B; }
-      locked = true;
-    }
-  }
   if (ws.count()) { char b[48]; snprintf(b, sizeof b, "{\"bpm\":%d,\"locked\":%d}", beatMs ? (int)roundf(60000.0f / beatMs) : 0, locked ? 1 : 0); ws.textAll(b); }
   if (k == TAP) { if (ws.count()) { char b[64]; snprintf(b, sizeof b, "{\"hit\":\"tap\",\"v\":0,\"g\":%.2f,\"lift\":%.0f}", g, lift); ws.textAll(b); } return; }
   if (when > now + 1) { pending = { true, when, k, vel, g, sw, lift }; }
