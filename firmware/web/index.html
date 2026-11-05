@@ -147,6 +147,10 @@
   <input type="range" id="thr" data-key="thr" min="0.05" max="8" step="0.01" value="1.8"></div>
 <div class="ctl" id="sthrCtl"><label for="sthr">Stomp line (harder than this = stomp)</label><output id="sthrOut"></output>
   <input type="range" id="sthr" data-key="sthr" min="0.1" max="12" step="0.01" value="3.5"></div>
+<div class="ctl" id="klvlCtl"><label for="klvl">Kick needs at least</label><output id="klvlOut"></output>
+  <input type="range" id="klvl" data-key="klvl" min="0.1" max="8" step="0.01" value="1.2"></div>
+<div class="ctl" id="slvlCtl"><label for="slvl">Snare needs at least</label><output id="slvlOut"></output>
+  <input type="range" id="slvl" data-key="slvl" min="0.1" max="8" step="0.01" value="1.2"></div>
 <div class="ctl" id="tthrCtl"><label for="tthr">Toe lift (toe must drop at least this far to be a toe)</label><output id="tthrOut"></output>
   <input type="range" id="tthr" data-key="tthr" min="0" max="80" step="1" value="15"></div>
 <div class="ctl" id="swthrCtl"><label for="swthr">Swing speed (faster than this = snare)</label><output id="swthrOut"></output>
@@ -217,7 +221,7 @@
   }
 
   // ---------- Settings UI ----------
-  const fmt = { thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', tthr: v => v + '°', othr: v => v + '°', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
+  const fmt = { thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', tthr: v => v + '°', othr: v => v + '°', klvl: v => (+v).toFixed(2) + ' g', slvl: v => (+v).toFixed(2) + ' g', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
   function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function applyCfg(c) {
     cfg = c;
@@ -250,6 +254,7 @@
     const swing = mode === 6, th = mode === 7 || mode === 8, shk = mode === 9;
     $('swingBox').hidden = !swing; $('swthrCtl').hidden = !swing; $('thBox').hidden = !th; $('tthrCtl').hidden = !th; $('sthrCtl').hidden = swing || th || shk;
     $('shkBox').hidden = !shk;
+    $('klvlCtl').hidden = !th; $('slvlCtl').hidden = !th; $('thr').closest('.ctl').hidden = th;
     $('thrLabel').textContent = shk ? 'Lightest shake that counts (full volume at 4× this)' : swing ? 'Stomp threshold (harder than this = kick)' : th ? 'Lightest stomp that counts' : 'Lightest tap that counts';
   }
   $('learnHeel').addEventListener('click', () => { send({ learnHeel: 1 }); $('learnHeel').classList.add('arm'); });

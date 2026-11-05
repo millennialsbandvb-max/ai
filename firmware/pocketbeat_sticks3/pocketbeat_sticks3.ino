@@ -63,6 +63,7 @@ struct Cfg {
   int ohat = 1;                                    // auto hats open when the toe is raised
   float othr = 20.0f;                              // ...past this many degrees from flat
   float fx = 0, fy = 0, fz = 0; bool flatSet = false;   // gravity direction with the foot flat
+  float klvl = 1.2f, slvl = 1.2f;                  // heel/toe modes: minimum impact (g) for a kick and for a snare
 } cfg;
 Preferences prefs;
 
@@ -156,6 +157,7 @@ void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
 }
 
 float toeAngle = 0; bool hatIsOpen = false;   // degrees the foot is tilted away from flat; open-hat state
+float qx = 0, qy = 0, qz = 0; bool qInit = false;   // gravity direction tracked with the gyro (instant), corrected slowly by the accelerometer
 #include "pb_clock.h"
 
 // ---------------- Motion detection ----------------
@@ -169,8 +171,8 @@ uint32_t lastSwingT = 0; bool inSwing = false; float swingPeak = 0;
 float meterBuf[12]; int nMeter = 0; uint32_t lastMeterSend = 0;
 uint32_t stillSince = 0;                      // for capturing "flat" automatically the first time
 void setFlat() {
-  float m = sqrtf(gx * gx + gy * gy + gz * gz); if (m < 0.5f) return;
-  cfg.fx = gx / m; cfg.fy = gy / m; cfg.fz = gz / m; cfg.flatSet = true; saveCfg();
+  if (!qInit) return;
+  cfg.fx = qx; cfg.fy = qy; cfg.fz = qz; cfg.flatSet = true; saveCfg();
   ws.textAll("{\"flat\":1}");
 }
 // gyro history, to read how the foot was rotating just before an impact
@@ -252,6 +254,7 @@ void fireStomp(float p, float now) {
     hitAngle = ang;
     bool toe = st >= sh && ang >= cfg.tthr;
     Kind k = (toe == (cfg.snare == 7)) ? KICK : SNARE;
+    if (p < (k == KICK ? cfg.klvl : cfg.slvl)) return;   // not hard enough for that drum
     onHit(k, constrain(0.6f + 0.4f * (p / (cfg.thr * 2.5f)), 0, 1), p, -1, now, fabsf(st - sh) * 100);
     return;
   }
@@ -264,18 +267,29 @@ void fireStomp(float p, float now) {
 }
 
 void processMotion(float ax, float ay, float az, float wx, float wy, float wz, uint32_t now) {  // accel in g (incl. gravity), gyro in deg/s
+  float dts = lastT ? min((uint32_t)50, now - lastT) / 1000.0f : 0;   // seconds since the previous sample
   lastT = now;
   const float k = 0.05f; gx += k * (ax - gx); gy += k * (ay - gy); gz += k * (az - gz);
   {
-    float gm = sqrtf(gx * gx + gy * gy + gz * gz);
-    if (cfg.flatSet && gm > 0.5f) {
-      float c = (gx * cfg.fx + gy * cfg.fy + gz * cfg.fz) / gm;
+    // Track the gravity direction: rotate it with the gyro every sample (no lag), and pull it gently
+    // toward the accelerometer when the board isn't being jolted, so it can't drift.
+    float am = sqrtf(ax * ax + ay * ay + az * az);
+    if (!qInit && am > 0.5f) { qx = ax / am; qy = ay / am; qz = az / am; qInit = true; }
+    if (qInit) {
+      float rx = wx * 0.0174533f, ry = wy * 0.0174533f, rz = wz * 0.0174533f;   // rad/s
+      // a direction fixed in the world, seen from the rotating board: dq/dt = q x w
+      float nx = qx + (qy * rz - qz * ry) * dts, ny = qy + (qz * rx - qx * rz) * dts, nz = qz + (qx * ry - qy * rx) * dts;
+      if (am > 0.85f && am < 1.15f) { const float a = 0.02f; nx += a * (ax / am - nx); ny += a * (ay / am - ny); nz += a * (az / am - nz); }
+      float nm = sqrtf(nx * nx + ny * ny + nz * nz); if (nm > 0) { qx = nx / nm; qy = ny / nm; qz = nz / nm; }
+    }
+    if (cfg.flatSet && qInit) {
+      float c = qx * cfg.fx + qy * cfg.fy + qz * cfg.fz;
       toeAngle = acosf(constrain(c, -1.0f, 1.0f)) * 57.2958f;
       if (!hatIsOpen && toeAngle > cfg.othr) hatIsOpen = true;            // a few degrees of hysteresis
       else if (hatIsOpen && toeAngle < cfg.othr - 4) hatIsOpen = false;   // so it doesn't flutter at the line
     } else if (!cfg.flatSet) {
       // never set: take "flat" from the first full second the foot is still
-      float lin = fabsf(sqrtf(ax * ax + ay * ay + az * az) - 1.0f);
+      float lin = fabsf(am - 1.0f);
       if (lin < 0.04f) { if (!stillSince) stillSince = now; else if (now - stillSince > 1000) setFlat(); } else stillSince = 0;
     }
   }
@@ -320,7 +334,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   }
 
   // ---- kick: impact spike; not right after a swing (the foot landing from a swing isn't a stomp) ----
-  if (mag > cfg.thr) {
+  float gate = (cfg.snare == 7 || cfg.snare == 8) ? min(cfg.klvl, cfg.slvl) : cfg.thr;
+  if (mag > gate) {
     uint32_t gapMs = cfg.snare == 9 ? 55 : (uint32_t)cfg.gap;   // shakers retrigger fast
     if (now - lastStompT > gapMs && now - lastSwingT > 250) {
       if (mag > peak) { peak = mag; if (!peakT) peakT = now; }
@@ -331,9 +346,9 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
-  char b[560];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  char b[640];
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -370,6 +385,8 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "shk", &f); if (f) cfg.shk = constrain((int)v, 0, 2);
   v = jsonNum(s, "ohat", &f); if (f) cfg.ohat = (int)v ? 1 : 0;
   v = jsonNum(s, "othr", &f); if (f) cfg.othr = constrain(v, 3.0f, 80.0f);
+  v = jsonNum(s, "klvl", &f); if (f) cfg.klvl = v;
+  v = jsonNum(s, "slvl", &f); if (f) cfg.slvl = v;
   v = jsonNum(s, "kit", &f); if (f) cfg.kit = constrain((int)v, 0, 1);
   v = jsonNum(s, "out", &f); if (f) cfg.out = (int)v;
   v = jsonNum(s, "quant", &f); if (f) cfg.quant = (int)v;
