@@ -58,7 +58,8 @@ struct Cfg {
   int sigVer = 0;                                  // 2 = leg signatures use the pre-stomp tilt
   float tthr = 15.0f;                              // toe must have dropped at least this many degrees to count as a toe
   int tlock = 0;                                   // 0 = tempo follows the player, 1 = learned from the first 8 hits, held until 2 bars of silence
-  float bpm = 100.0f;                              // locked tempo
+  float bpm = 100.0f;                              // locked tempo (unused since count-in lock)
+  int shk = 0;                                     // Shaker mode sound: 0 shaker, 1 maracas, 2 tambourine
 } cfg;
 Preferences prefs;
 
@@ -76,7 +77,7 @@ void loadCfg() {
   }
   if (cfg.sigVer < 4) { cfg.lcal = false; cfg.rcal = false; cfg.sigVer = 4; cfg.snare = 8; cfg.thr = 1.2f; }
   if (cfg.sigVer < 5) { cfg.tthr = 15.0f; cfg.sigVer = 5; }   // lf/rf now hold toe/heel signatures; start in heel/toe mode
-  if (cfg.snare != 1 && cfg.snare != 2 && cfg.snare != 6 && cfg.snare != 7 && cfg.snare != 8) cfg.snare = 8;
+  if (cfg.snare != 1 && cfg.snare != 2 && cfg.snare != 6 && cfg.snare != 7 && cfg.snare != 8 && cfg.snare != 9) cfg.snare = 8;
   prefs.end();
 }
 
@@ -88,10 +89,11 @@ AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 bool bleConnected = false;
 
-const char* kindName[] = { "kick", "snare", "hat", "tap" };
+const char* kindName[] = { "kick", "snare", "hat", "tap", "shaker" };
 const char* lastKind = "";
 float hitAngle = -1;   // toe drop angle reported with the next hit (deg)
-const uint8_t midiNote[] = { 36, 38, 42, 0 };   // GM drums: kick, snare, closed hat (tap: none)
+const uint8_t midiNote[] = { 36, 38, 42, 0, 82 };   // GM drums: kick, snare, closed hat (tap: none), shaker (set per cfg.shk)
+const uint8_t shakeNote[] = { 82, 70, 54 };          // GM: Shaker, Maracas, Tambourine
 
 void playBoard(Kind k, float vel) {
 #ifdef PB_LITE
@@ -101,6 +103,12 @@ void playBoard(Kind k, float vel) {
   const Kit& kt = KITS[cfg.kit];
   const int16_t* d = k == KICK ? kt.kick : k == SNARE ? kt.snare : kt.hat;
   uint32_t n = k == KICK ? kt.nKick : k == SNARE ? kt.nSnare : kt.nHat;
+  if (k == SHAKE) {
+    d = cfg.shk == 2 ? SMP_tamb : SMP_shaker; n = cfg.shk == 2 ? sizeof(SMP_tamb) / 2 : sizeof(SMP_shaker) / 2;
+    M5.Speaker.setChannelVolume(3, (uint8_t)(cfg.vol * (0.15f + 0.85f * vel)));
+    M5.Speaker.playRaw(d, n, SMP_RATE, false, 1, 3, true);
+    return;
+  }
   int ch = (int)k;  // one speaker channel per drum, so a new hit cuts the old one
   M5.Speaker.setChannelVolume(ch, (uint8_t)(cfg.vol * (k == HAT ? 0.6f : 1.0f) * (0.7f + 0.3f * vel)));
   M5.Speaker.playRaw(d, n, SMP_RATE, false, 1, ch, true);
@@ -108,6 +116,14 @@ void playBoard(Kind k, float vel) {
 }
 void sendMidi(Kind k, float vel) {
   uint8_t v = (uint8_t)constrain(60 + vel * 67, 1, 127);
+  if (k == SHAKE) {
+    uint8_t sv = (uint8_t)constrain(8 + vel * 119, 1, 127), note = shakeNote[cfg.shk];
+    if (bleConnected) { MIDI.sendNoteOn(note, sv, 10); MIDI.sendNoteOff(note, 0, 10); }
+#ifdef HAVE_USB_MIDI
+    usbMidi.noteOn(note, sv, 10); usbMidi.noteOff(note, 0, 10);
+#endif
+    return;
+  }
   if (bleConnected) { MIDI.sendNoteOn(midiNote[k], v, 10); MIDI.sendNoteOff(midiNote[k], 0, 10); }
 #ifdef HAVE_USB_MIDI
   usbMidi.noteOn(midiNote[k], v, 10);
@@ -119,7 +135,8 @@ void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
   playBoard(k, vel);
   sendMidi(k, vel);
   if (ws.count()) {
-    char buf[160]; int n = snprintf(buf, sizeof buf, "{\"hit\":\"%s\",\"v\":%.2f,\"g\":%.2f", kindName[k], vel, g);
+    const char* nm = k == SHAKE ? (cfg.shk == 2 ? "tamb" : "shaker") : kindName[k];
+    char buf[160]; int n = snprintf(buf, sizeof buf, "{\"hit\":\"%s\",\"v\":%.2f,\"g\":%.2f", nm, vel, g);
     if (sw >= 0) n += snprintf(buf + n, sizeof buf - n, ",\"sw\":%.1f", sw);
     if (lift >= 0) n += snprintf(buf + n, sizeof buf - n, ",\"lift\":%.0f", lift);
     if (hitAngle >= 0 && k != HAT) { n += snprintf(buf + n, sizeof buf - n, ",\"ang\":%.0f", hitAngle); hitAngle = -1; }
@@ -188,6 +205,11 @@ void finishSwingCal() {
 }
 
 void fireStomp(float p, float now) {
+  if (cfg.snare == 9) {   // Shaker: every shake is a hit; strength sets the velocity (lightest = thr, full at 4x thr)
+    float vel = constrain((p - cfg.thr) / (cfg.thr * 3), 0.0f, 1.0f);
+    hit(SHAKE, vel, p);
+    return;
+  }
   if (cfg.snare == 7 || cfg.snare == 8) {   // toe vs heel, from the foot's rotation just before the impact
     float r[3]; preImpactRotation(onsetT, r);
     float rm = sqrtf(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]);
@@ -269,9 +291,10 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 
   // ---- kick: impact spike; not right after a swing (the foot landing from a swing isn't a stomp) ----
   if (mag > cfg.thr) {
-    if (now - lastStompT > (uint32_t)cfg.gap && now - lastSwingT > 250) {
+    uint32_t gapMs = cfg.snare == 9 ? 55 : (uint32_t)cfg.gap;   // shakers retrigger fast
+    if (now - lastStompT > gapMs && now - lastSwingT > 250) {
       if (mag > peak) { peak = mag; if (!peakT) peakT = now; }
-      if (now - peakT > 35) { float p = peak; onsetT = peakT; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
+      if (now - peakT > (cfg.snare == 9 ? 15u : 35u)) { float p = peak; onsetT = peakT; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
     }
   } else if (peakT) { float p = peak; onsetT = peakT; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
 }
@@ -279,8 +302,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[480];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"tthr\":%.0f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.tthr, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"tthr\":%.0f,\"shk\":%d,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.tthr, cfg.shk, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -312,7 +335,8 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "lthr", &f); if (f) cfg.lthr = v;
   v = jsonNum(s, "kthr", &f); if (f) cfg.kthr = v;
   v = jsonNum(s, "gap", &f); if (f) cfg.gap = (int)v;
-  v = jsonNum(s, "snare", &f); if (f && (v == 1 || v == 2 || v == 6 || v == 7 || v == 8)) cfg.snare = (int)v;
+  v = jsonNum(s, "snare", &f); if (f && (v == 1 || v == 2 || v == 6 || v == 7 || v == 8 || v == 9)) { cfg.snare = (int)v; if (v == 9 && clockOn) stopClock(); }
+  v = jsonNum(s, "shk", &f); if (f) cfg.shk = constrain((int)v, 0, 2);
   v = jsonNum(s, "kit", &f); if (f) cfg.kit = constrain((int)v, 0, 1);
   v = jsonNum(s, "out", &f); if (f) cfg.out = (int)v;
   v = jsonNum(s, "quant", &f); if (f) cfg.quant = (int)v;
@@ -409,7 +433,7 @@ void drawScreen() {
   d.setTextSize(1); d.setTextColor(TFT_DARKGREY);
   d.setCursor(4, 60); d.printf("BLE %s  WiFi %d", bleConnected ? "on" : "--", WiFi.softAPgetStationNum());
   d.setCursor(4, 72); d.printf("batt %d%%  v%s", M5.Power.getBatteryLevel(), FW_VERSION);
-  d.setCursor(4, 84); d.print(calibrating ? "swing foot 3x..." : cfg.snare == 7 ? (cfg.lcal && cfg.rcal ? "toe=kick heel=snare" : "SET TOE/HEEL") : cfg.snare == 8 ? (cfg.lcal && cfg.rcal ? "heel=kick toe=snare" : "SET TOE/HEEL") : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A");
+  d.setCursor(4, 84); d.print(calibrating ? "swing foot 3x..." : cfg.snare == 9 ? (cfg.shk == 2 ? "tambourine" : cfg.shk == 1 ? "maracas" : "shaker") : cfg.snare == 7 ? (cfg.lcal && cfg.rcal ? "toe=kick heel=snare" : "SET TOE/HEEL") : cfg.snare == 8 ? (cfg.lcal && cfg.rcal ? "heel=kick toe=snare" : "SET TOE/HEEL") : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A");
   d.endWrite();
 }
 

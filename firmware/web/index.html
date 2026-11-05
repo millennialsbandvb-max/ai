@@ -83,6 +83,14 @@
   <button type="button" data-v="6">Stomp = kick, swing = snare</button>
   <button type="button" data-v="2">Tap = kick, stomp = snare</button>
   <button type="button" data-v="1">Tap = snare, stomp = kick</button>
+  <button type="button" data-v="9">Shaker</button>
+</div>
+<div id="shkBox">
+<div class="seg" data-key="shk">
+  <button type="button" data-v="0">Shaker</button>
+  <button type="button" data-v="1">Maracas</button>
+  <button type="button" data-v="2">Tambourine</button>
+</div>
 </div>
 <div id="thBox" style="display:flex;flex-direction:column;gap:10px">
 <div class="row"><button type="button" id="learnHeel">Set heel: tap, then heel-stomp 3×</button><button type="button" id="learnToe">Set toe: tap, then toe-stomp 3×</button></div>
@@ -135,7 +143,7 @@
   <input type="range" id="vol" data-key="vol" min="0" max="255" step="1" value="200"></div>
 <div class="ctl"><label for="pvol">Phone volume</label><output id="pvolOut"></output>
   <input type="range" id="pvol" min="0" max="100" step="1" value="85"></div>
-<p class="hint">Tempo · Lock after 8 hits: count in with eight even hits (two bars of quarter notes; the BPM tile counts them). The tempo is the total time of those eight hits, and the hats start on the eighth. After that nothing you play changes the tempo or moves the hats. Stop for two bars and the hats stop and it resets for a new count-in. Follow my playing: the tempo keeps following your hits, as before. Heel / toe modes (board taped on the toes): tap "Set heel" and do 3 heel stomps, then "Set toe" and do 3 toe stomps. It tells them apart by which way your foot is rotating as it lands, and a toe also has to drop at least the "Toe lift" angle. The log shows each hit's lift angle: set the Toe lift slider between your heel numbers and your toe numbers. Stomp / swing mode (board taped on top of the shoe): a stomp above the orange line is a kick; swinging your foot in the learned direction faster than the swing speed is a snare. Teach the swing once: tap "Set swing" (or press the board's front button) and swing your foot 3 times the way you'll play it, pausing a moment after each; it learns the direction your foot starts moving and ignores the swing back. If it ever triggers on the swing back instead, tap "Flip swing direction". Tap / stomp modes: blue line = lightest tap that counts, yellow line = the stomp line. In every mode each hit sets the tempo; the hi-hat starts on your second hit and stops when you stop. The log shows each kick's impact (g) and each snare's swing speed (°/s), handy for setting the sliders. Everything here is stored on the board. Bluetooth and USB MIDI are always on.</p>
+<p class="hint">Shaker mode: every shake plays, and how hard you shake sets the volume (MIDI velocity), from the "lightest shake" line up to full at four times that. Pick Shaker (MIDI note 82), Maracas (70) or Tambourine (54); no kick, snare or hats in this mode. Tempo · Lock after 8 hits: count in with eight even hits (two bars of quarter notes; the BPM tile counts them). The tempo is the total time of those eight hits, and the hats start on the eighth. After that nothing you play changes the tempo or moves the hats. Stop for two bars and the hats stop and it resets for a new count-in. Follow my playing: the tempo keeps following your hits, as before. Heel / toe modes (board taped on the toes): tap "Set heel" and do 3 heel stomps, then "Set toe" and do 3 toe stomps. It tells them apart by which way your foot is rotating as it lands, and a toe also has to drop at least the "Toe lift" angle. The log shows each hit's lift angle: set the Toe lift slider between your heel numbers and your toe numbers. Stomp / swing mode (board taped on top of the shoe): a stomp above the orange line is a kick; swinging your foot in the learned direction faster than the swing speed is a snare. Teach the swing once: tap "Set swing" (or press the board's front button) and swing your foot 3 times the way you'll play it, pausing a moment after each; it learns the direction your foot starts moving and ignores the swing back. If it ever triggers on the swing back instead, tap "Flip swing direction". Tap / stomp modes: blue line = lightest tap that counts, yellow line = the stomp line. In every mode each hit sets the tempo; the hi-hat starts on your second hit and stops when you stop. The log shows each kick's impact (g) and each snare's swing speed (°/s), handy for setting the sliders. Everything here is stored on the board. Bluetooth and USB MIDI are always on.</p>
 <h2>Firmware · installed: <span id="ver">?</span></h2>
 <div class="ctl"><label for="ssid">Home Wi-Fi name</label><output></output><input type="text" id="ssid" placeholder="your Wi-Fi network" style="grid-column:1/-1;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px"></div>
 <div class="ctl"><label for="pass">Home Wi-Fi password</label><output></output><input type="password" id="pass" placeholder="password" style="grid-column:1/-1;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px"></div>
@@ -149,7 +157,7 @@
 <script>
 (() => {
   const $ = id => document.getElementById(id);
-  const colors = { kick: '#ff6a3d', snare: '#ffd166', hat: '#7bdff2' };
+  const colors = { kick: '#ff6a3d', snare: '#ffd166', hat: '#7bdff2', shaker: '#7bf2a8', tamb: '#f27bd5' };
   let cfg = {}, ws = null, phoneSound = false; const logRows = [];
 
   // ---------- Phone audio (optional) ----------
@@ -165,7 +173,7 @@
   }
   function playPhone(kind, vel) {
     if (!ctx) return; const b = buffers[kitNames[kit]] && buffers[kitNames[kit]][kind]; if (!b) return;
-    const s = ctx.createBufferSource(); s.buffer = b; const g = ctx.createGain(); g.gain.value = (kind === 'hat' ? 0.5 : 0.95) * (0.55 + 0.45 * vel);
+    const s = ctx.createBufferSource(); s.buffer = b; const g = ctx.createGain(); g.gain.value = (kind === 'shaker' || kind === 'tamb') ? 0.1 + 0.9 * vel : (kind === 'hat' ? 0.5 : 0.95) * (0.55 + 0.45 * vel);
     s.connect(g).connect(master); s.start();
   }
   $('pvol').addEventListener('input', () => { $('pvolOut').textContent = $('pvol').value + '%'; if (master) master.gain.value = $('pvol').value / 100; });
@@ -177,7 +185,7 @@
   const cv = $('scope'), g2 = cv.getContext('2d');
   function draw() {
     const w = cv.width, h = cv.height, thr = +$('thr').value, sthr = +$('sthr').value, mode = +(cfg.snare || 0);
-    const swingMode = [6, 7, 8].includes(+(cfg.snare || 8));
+    const swingMode = [6, 7, 8, 9].includes(+(cfg.snare || 8));
     const scale = swingMode ? Math.max(thr * 2, 0.15) : Math.max(sthr * 1.6, thr * 3, 0.15);
     g2.clearRect(0, 0, w, h); const y = v => h - Math.min(1, v / scale) * h;
     g2.lineWidth = 2; g2.setLineDash([8, 8]);
@@ -222,9 +230,10 @@
     send({ set: { [seg.dataset.key]: +b.dataset.v } });
   });
   function modeUi(mode) {
-    const swing = mode === 6, th = mode === 7 || mode === 8;
-    $('swingBox').hidden = !swing; $('swthrCtl').hidden = !swing; $('thBox').hidden = !th; $('tthrCtl').hidden = !th; $('sthrCtl').hidden = swing || th;
-    $('thrLabel').textContent = swing ? 'Stomp threshold (harder than this = kick)' : th ? 'Lightest stomp that counts' : 'Lightest tap that counts';
+    const swing = mode === 6, th = mode === 7 || mode === 8, shk = mode === 9;
+    $('swingBox').hidden = !swing; $('swthrCtl').hidden = !swing; $('thBox').hidden = !th; $('tthrCtl').hidden = !th; $('sthrCtl').hidden = swing || th || shk;
+    $('shkBox').hidden = !shk;
+    $('thrLabel').textContent = shk ? 'Lightest shake that counts (full volume at 4× this)' : swing ? 'Stomp threshold (harder than this = kick)' : th ? 'Lightest stomp that counts' : 'Lightest tap that counts';
   }
   $('learnHeel').addEventListener('click', () => { send({ learnHeel: 1 }); $('learnHeel').classList.add('arm'); });
   $('learnToe').addEventListener('click', () => { send({ learnToe: 1 }); $('learnToe').classList.add('arm'); });
@@ -253,7 +262,7 @@
       if (m.hit) {
         show(m.hit);
         if (m.hit === 'tap') { logRows.unshift('bounce ' + m.g.toFixed(2) + ' g  (tempo only)'); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); return; }
-        if (m.hit !== 'hat' || m.g !== undefined) { logRows.unshift((m.hit + '     ').slice(0, 5) + ' ' + (m.g !== undefined && !(m.sw >= 0) ? m.g.toFixed(2) + ' g' : '') + (m.sw !== undefined && m.sw >= 0 ? '  swing ' + Math.round(m.sw) + '°/s' : '') + (m.ang !== undefined ? '  lift ' + Math.round(m.ang) + '°' : '') + (m.lift !== undefined && m.lift >= 0 ? '  match ' + Math.round(m.lift) : '')); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); } if (m.g !== undefined && !(m.sw >= 0)) $('mPeak').textContent = m.g.toFixed(2); 
+        if (m.hit !== 'hat' || m.g !== undefined) { logRows.unshift((m.hit + '     ').slice(0, 5) + ' ' + (m.g !== undefined && !(m.sw >= 0) ? m.g.toFixed(2) + ' g' : '') + (m.sw !== undefined && m.sw >= 0 ? '  swing ' + Math.round(m.sw) + '°/s' : '') + (m.ang !== undefined ? '  lift ' + Math.round(m.ang) + '°' : '') + ((m.hit === 'shaker' || m.hit === 'tamb') ? '  vel ' + Math.round(8 + m.v * 119) : '') + (m.lift !== undefined && m.lift >= 0 ? '  match ' + Math.round(m.lift) : '')); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); } if (m.g !== undefined && !(m.sw >= 0)) $('mPeak').textContent = m.g.toFixed(2); 
         const out = +(cfg.out || 0); if (phoneSound && (out === 1 || out === 2)) playPhone(m.hit, m.v || 1);
       }
       if (m.bpm !== undefined) $('bpm').textContent = m.bpm ? m.bpm + (m.locked ? ' 🔒' : '') : '—';
