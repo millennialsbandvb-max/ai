@@ -1,0 +1,9 @@
+{
+  "name": "Chr0ma Console",
+  "vendor": "Other Things",
+  "uid": "CHRM",
+  "version": 1000,
+  "so": "Chr0ma-Console.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}
