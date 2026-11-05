@@ -64,6 +64,7 @@ struct Cfg {
   float othr = 20.0f;                              // ...past this many degrees from flat
   float fx = 0, fy = 0, fz = 0; bool flatSet = false;   // gravity direction with the foot flat
   float klvl = 1.2f, slvl = 1.2f;                  // heel/toe modes: minimum impact (g) for a kick and for a snare
+  float toeSig[11] = {0}, heelSig[11] = {0};       // learned toe / heel: rot[3], dir[3], reb[3], rise ms, foot angle
 } cfg;
 Preferences prefs;
 
@@ -80,7 +81,8 @@ void loadCfg() {
     Cfg d; cfg.thr = d.thr; cfg.sthr = 3.5f; cfg.swthr = d.swthr; cfg.gap = d.gap; cfg.cal = false; cfg.snare = 6; cfg.sigVer = 3;
   }
   if (cfg.sigVer < 4) { cfg.lcal = false; cfg.rcal = false; cfg.sigVer = 4; cfg.snare = 8; cfg.thr = 1.2f; }
-  if (cfg.sigVer < 5) { cfg.tthr = 15.0f; cfg.sigVer = 5; }   // lf/rf now hold toe/heel signatures; start in heel/toe mode
+  if (cfg.sigVer < 5) { cfg.tthr = 15.0f; cfg.sigVer = 5; }
+  if (cfg.sigVer < 6) { cfg.lcal = false; cfg.rcal = false; cfg.sigVer = 6; }   // toe/heel now learn five measurements   // lf/rf now hold toe/heel signatures; start in heel/toe mode
   if (cfg.snare != 1 && cfg.snare != 2 && cfg.snare != 6 && cfg.snare != 7 && cfg.snare != 8 && cfg.snare != 9) cfg.snare = 8;
   prefs.end();
 }
@@ -96,6 +98,7 @@ bool bleConnected = false;
 const char* kindName[] = { "kick", "snare", "hat", "tap", "shaker", "hatOpen" };
 const char* lastKind = "";
 float hitAngle = -1;   // toe drop angle reported with the next hit (deg)
+char hitVotes[6] = "";  // per-measurement toe/heel votes reported with the next hit
 const uint8_t midiNote[] = { 36, 38, 42, 0, 82, 46 };   // GM drums: kick, snare, closed hat (tap: none), shaker (set per cfg.shk)
 const uint8_t shakeNote[] = { 82, 70, 54 };          // GM: Shaker, Maracas, Tambourine
 
@@ -151,6 +154,7 @@ void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
     if (sw >= 0) n += snprintf(buf + n, sizeof buf - n, ",\"sw\":%.1f", sw);
     if (lift >= 0) n += snprintf(buf + n, sizeof buf - n, ",\"lift\":%.0f", lift);
     if (hitAngle >= 0 && k != HAT) { n += snprintf(buf + n, sizeof buf - n, ",\"ang\":%.0f", hitAngle); hitAngle = -1; }
+    if (hitVotes[0] && k != HAT && k != OHAT) { n += snprintf(buf + n, sizeof buf - n, ",\"votes\":\"%s\"", hitVotes); hitVotes[0] = 0; }
     snprintf(buf + n, sizeof buf - n, "}");
     ws.textAll(buf);
   }
@@ -178,6 +182,10 @@ void setFlat() {
 // gyro history, to read how the foot was rotating just before an impact
 const int GH = 256; float gH[GH][3]; uint32_t gHT[GH]; int gHi = 0;
 uint32_t onsetT = 0;                       // when the current impact started
+float pkx = 0, pky = 0, pkz = 0;           // jolt direction at the impact's peak (linear accel)
+uint32_t peakAt = 0, peakAtFired = 0;      // when the peak happened (for sharpness)
+float onsetAngle = 0, onsetAngleFired = 0; // foot angle when the impact started
+float fpkx = 0, fpky = 0, fpkz = 0;        // peak direction of the impact being classified
 int learnTH = 0, learnN = 0; float learnSum[3];   // learning toe (1) / heel (2)
 
 // How far the foot rotated along direction d (unit vector) in the 450 ms before the impact,
@@ -193,6 +201,45 @@ static float dropAngle(uint32_t t0, const float* d) {
     if (proj > 0) sum += proj * dtm / 1000.0f;
   }
   return sum;
+}
+// Average rotation (deg/s, 3-D) over [t0+from, t0+to] ms.
+static void avgRotation(uint32_t t0, int from, int to, float* out) {
+  out[0] = out[1] = out[2] = 0; int n = 0;
+  for (int i = 0; i < GH; i++) {
+    int32_t rel = (int32_t)(gHT[i] - t0);
+    if (rel < from || rel > to) continue;
+    out[0] += gH[i][0]; out[1] += gH[i][1]; out[2] += gH[i][2]; n++;
+  }
+  if (n) { out[0] /= n; out[1] /= n; out[2] /= n; }
+}
+static void unit3(float* v) { float m = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); if (m > 1e-3f) { v[0] /= m; v[1] /= m; v[2] /= m; } else v[0] = v[1] = v[2] = 0; }
+float learnSig[11];
+// The five measurements of the impact being classified:
+//  rot  = which way the foot was turning just before it landed (-90..-10 ms), unit vector
+//  dir  = which way the jolt pushed the board at its peak, unit vector
+//  reb  = which way the foot started rocking right after the hit (+5..+35 ms), unit vector
+//  rise = ms from the start of the jolt to its peak (sharp toe strike vs softer heel strike)
+//  ang  = foot angle when the jolt started (degrees from flat)
+static void impactSignature(float* x) {
+  avgRotation(onsetT, -90, -10, x); if (sqrtf(x[0] * x[0] + x[1] * x[1] + x[2] * x[2]) < 8) x[0] = x[1] = x[2] = 0; else unit3(x);
+  x[3] = fpkx; x[4] = fpky; x[5] = fpkz; unit3(x + 3);
+  avgRotation(onsetT, 5, 35, x + 6); if (sqrtf(x[6] * x[6] + x[7] * x[7] + x[8] * x[8]) < 8) x[6] = x[7] = x[8] = 0; else unit3(x + 6);
+  x[9] = (float)(peakAtFired - onsetT);
+  x[10] = cfg.flatSet ? onsetAngleFired : 0;
+}
+static float cos3(const float* a, const float* b) {
+  float d = a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+  float m = sqrtf(a[0] * a[0] + a[1] * a[1] + a[2] * a[2]) * sqrtf(b[0] * b[0] + b[1] * b[1] + b[2] * b[2]);
+  return m > 1e-3f ? d / m : 0;
+}
+// Similarity of an impact to a learned strike; v[] gets each measurement's part of the score.
+static float sigScore(const float* x, const float* m, float* v) {
+  v[0] = cos3(x, m);
+  v[1] = cos3(x + 3, m + 3);
+  v[2] = 0.7f * cos3(x + 6, m + 6);
+  v[3] = -0.5f * min(2.0f, fabsf(x[9] - m[9]) / max(4.0f, 0.5f * m[9]));
+  v[4] = cfg.flatSet ? -0.5f * min(2.0f, fabsf(x[10] - m[10]) / 8.0f) : 0;
+  return v[0] + v[1] + v[2] + v[3] + v[4];
 }
 // Average rotation (deg/s, 3-D) from 90 ms to 10 ms before the impact started.
 static void preImpactRotation(uint32_t t0, float* out) {
@@ -229,33 +276,36 @@ void fireStomp(float p, float now) {
     hit(SHAKE, vel, p);
     return;
   }
-  if (cfg.snare == 7 || cfg.snare == 8) {   // toe vs heel, from the foot's rotation just before the impact
-    float r[3]; preImpactRotation(onsetT, r);
-    float rm = sqrtf(r[0] * r[0] + r[1] * r[1] + r[2] * r[2]);
+  if (cfg.snare == 7 || cfg.snare == 8) {   // toe vs heel from five measurements, learned with Set toe / Set heel
+    float x[11]; impactSignature(x);
     if (learnTH) {
-      float own[3] = { rm > 1 ? r[0] / rm : 0, rm > 1 ? r[1] / rm : 0, rm > 1 ? r[2] / rm : 0 };
-      float ang = dropAngle(onsetT, own);
-      if (rm > 1) { learnSum[0] += own[0]; learnSum[1] += own[1]; learnSum[2] += own[2]; learnN++; }
-      char b[96]; snprintf(b, sizeof b, "{\"learn\":\"%s %d/3 (lift %.0f deg)\"}", learnTH == 1 ? "toe" : "heel", learnN, ang); ws.textAll(b);
+      for (int i = 0; i < 11; i++) learnSig[i] += x[i];
+      learnN++;
+      float own[3] = { x[0], x[1], x[2] };
+      char b[112]; snprintf(b, sizeof b, "{\"learn\":\"%s %d/3 (lift %.0f deg, rise %.0f ms)\"}", learnTH == 1 ? "toe" : "heel", learnN, dropAngle(onsetT, own), x[9]); ws.textAll(b);
       if (learnN >= 3) {
-        float* dst = learnTH == 1 ? cfg.lf : cfg.rf;
-        dst[0] = learnSum[0]; dst[1] = learnSum[1]; dst[2] = learnSum[2];
+        float* dst = learnTH == 1 ? cfg.toeSig : cfg.heelSig;
+        for (int i = 0; i < 11; i++) dst[i] = learnSig[i] / 3;
         if (learnTH == 1) cfg.lcal = true; else cfg.rcal = true;
         learnTH = 0; saveCfg(); sendCfg(nullptr);
       }
       return;
     }
-    auto sim = [&](const float* v) { float d = r[0] * v[0] + r[1] * v[1] + r[2] * v[2], m = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]) * rm; return m > 0 ? d / m : 0.0f; };
-    float st = cfg.lcal ? sim(cfg.lf) : 0, sh = cfg.rcal ? sim(cfg.rf) : 0;
-    // toe only if it looks like a toe AND the toe actually dropped far enough
-    float td[3] = {0, 0, 0}; float tm = sqrtf(cfg.lf[0] * cfg.lf[0] + cfg.lf[1] * cfg.lf[1] + cfg.lf[2] * cfg.lf[2]);
-    if (tm > 0) { td[0] = cfg.lf[0] / tm; td[1] = cfg.lf[1] / tm; td[2] = cfg.lf[2] / tm; }
-    float ang = tm > 0 ? dropAngle(onsetT, td) : 0;
+    // Score against each learned strike; each measurement votes, the totals decide.
+    float vt[5], vh[5];
+    float st = cfg.lcal ? sigScore(x, cfg.toeSig, vt) : -99, sh = cfg.rcal ? sigScore(x, cfg.heelSig, vh) : -99;
+    char votes[6] = "-----";
+    if (cfg.lcal && cfg.rcal) for (int i = 0; i < 5; i++) votes[i] = vt[i] > vh[i] + 0.05f ? 'T' : vh[i] > vt[i] + 0.05f ? 'H' : '=';
+    strcpy(hitVotes, votes);
+    // a toe also has to have dropped far enough
+    float tn = sqrtf(cfg.toeSig[0] * cfg.toeSig[0] + cfg.toeSig[1] * cfg.toeSig[1] + cfg.toeSig[2] * cfg.toeSig[2]);
+    float td[3] = { tn > 0 ? cfg.toeSig[0] / tn : 0, tn > 0 ? cfg.toeSig[1] / tn : 0, tn > 0 ? cfg.toeSig[2] / tn : 0 };
+    float ang = tn > 0 ? dropAngle(onsetT, td) : 0;
     hitAngle = ang;
     bool toe = st >= sh && ang >= cfg.tthr;
     Kind k = (toe == (cfg.snare == 7)) ? KICK : SNARE;
     if (p < (k == KICK ? cfg.klvl : cfg.slvl)) return;   // not hard enough for that drum
-    onHit(k, constrain(0.6f + 0.4f * (p / (cfg.thr * 2.5f)), 0, 1), p, -1, now, fabsf(st - sh) * 100);
+    onHit(k, constrain(0.6f + 0.4f * (p / ((k == KICK ? cfg.klvl : cfg.slvl) * 2.5f)), 0, 1), p, -1, now, fabsf(st - sh) * 30);
     return;
   }
   if (cfg.snare == 6) { onHit(KICK, constrain(0.6f + 0.4f * (p / (cfg.thr * 2.5f)), 0, 1), p, -1, now); return; }
@@ -338,10 +388,11 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   if (mag > gate) {
     uint32_t gapMs = cfg.snare == 9 ? 55 : (uint32_t)cfg.gap;   // shakers retrigger fast
     if (now - lastStompT > gapMs && now - lastSwingT > 250) {
-      if (mag > peak) { peak = mag; if (!peakT) peakT = now; }
-      if (now - peakT > (cfg.snare == 9 ? 15u : 35u)) { float p = peak; onsetT = peakT; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
+      if (!peakT) onsetAngle = toeAngle;
+      if (mag > peak) { peak = mag; pkx = lx; pky = ly; pkz = lz; peakAt = now; if (!peakT) peakT = now; }
+      if (now - peakT > (cfg.snare == 9 ? 15u : 35u)) { float p = peak; onsetT = peakT; peakAtFired = peakAt; onsetAngleFired = onsetAngle; fpkx = pkx; fpky = pky; fpkz = pkz; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
     }
-  } else if (peakT) { float p = peak; onsetT = peakT; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
+  } else if (peakT) { float p = peak; onsetT = peakT; peakAtFired = peakAt; onsetAngleFired = onsetAngle; fpkx = pkx; fpky = pky; fpkz = pkz; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
 }
 
 // ---------------- Web ----------------
@@ -365,8 +416,8 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   bool f;
   if (strstr(s, "\"get\"")) { sendCfg(client); return; }
   if (strstr(s, "\"cal\"")) { startSwingCal(); return; }
-  if (strstr(s, "\"learnToe\"")) { learnTH = 1; learnN = 0; learnSum[0] = learnSum[1] = learnSum[2] = 0; ws.textAll("{\"learn\":\"toe 0/3\"}"); return; }
-  if (strstr(s, "\"learnHeel\"")) { learnTH = 2; learnN = 0; learnSum[0] = learnSum[1] = learnSum[2] = 0; ws.textAll("{\"learn\":\"heel 0/3\"}"); return; }
+  if (strstr(s, "\"learnToe\"")) { learnTH = 1; learnN = 0; memset(learnSig, 0, sizeof learnSig); ws.textAll("{\"learn\":\"toe 0/3\"}"); return; }
+  if (strstr(s, "\"learnHeel\"")) { learnTH = 2; learnN = 0; memset(learnSig, 0, sizeof learnSig); ws.textAll("{\"learn\":\"heel 0/3\"}"); return; }
   if (strstr(s, "\"setFlat\"")) { setFlat(); return; }
   if (strstr(s, "\"flipSwing\"")) { cfg.rx = -cfg.rx; cfg.ry = -cfg.ry; cfg.rz = -cfg.rz; saveCfg(); ws.textAll("{\"learn\":\"flipped ✓\"}"); return; }
   if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }
@@ -523,7 +574,7 @@ void loop() {
   // Button A: calibrate the "right" direction. Hold 2 s: factory reset.
   if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else if (!resetHeld && cfg.snare == 6) startSwingCal(); resetHeld = false; }
   if (M5.BtnA.pressedFor(2000) && !resetHeld) {   // reset settings, keep Wi-Fi
-    resetHeld = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.sigVer = 5; cfg = d; saveCfg(); sendCfg(nullptr);
+    resetHeld = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.sigVer = 6; cfg = d; saveCfg(); sendCfg(nullptr);
   }
 
   float ax, ay, az;
