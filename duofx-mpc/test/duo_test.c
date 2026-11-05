@@ -162,8 +162,8 @@ int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: %s <Duo-FX.so> [algorithm]\n", argv[0]); return 2; }
     void *h = dlopen(argv[1], RTLD_NOW);
     if (!h || !(*(void **)&entry = dlsym(h, "VSTPluginMain"))) { fprintf(stderr, "can't load %s\n", argv[1]); return 1; }
-    {   /* the algorithm names, from the plugin (58 options, listed A-Z with Off first) */
-        nalgo = 58;
+    {   /* the algorithm names, from the plugin (60 options, listed A-Z with Off first) */
+        nalgo = 60;
         AEffect *e = make();
         for (int a = 0; a < nalgo; a++) {
             e->setParameter(e, P_ALGO, (float)a / (float)(nalgo - 1));

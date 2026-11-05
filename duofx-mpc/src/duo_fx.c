@@ -47,6 +47,8 @@ static const char *const HEADS[] = {"1", "2", "3", "1+2", "1+3", "2+3", "1+2+3"}
 static const char *const SHAPES[] = {"Sine", "Triangle", "Square", "Random"};
 static const char *const STAGES[] = {"4", "6", "8", "12"};
 static const char *const VIBE_MODES[] = {"Chorus", "Vibrato"};
+static const char *const COMP_TYPES[] = {"Ross", "Dyna", "Studio", "Opto", "Squash", "Limiter"};
+static const char *const BODIES[] = {"Dreadnought", "Jumbo", "Parlor", "Concert", "Nylon", "Resonator"};
 static const char *const PHASE_MODES[] = {"Phaser", "Vibrato"};
 static const char *const FLANGE_MODES[] = {"Classic", "Thru-Zero"};
 static const char *const CHORDS[] = {"Unison", "Octaves", "Fifths", "Major", "Minor", "Sus4", "Maj7", "Min7"};
@@ -136,10 +138,11 @@ enum {   /* in the pop-up's order */
     /* modulation */ A_CHORUS, A_FLANGER, A_TREMOLO, A_PHASER, A_VIBE, A_SFLANGER, A_SPHASER, A_TRICHORUS,
     /* reverb */ A_HALL, A_ROOM, A_PLATE, A_SPRING, A_SHIMMER, A_ABYSS, A_CLASSIC, A_CRUSHVERB, A_TREMVERB, A_WARP,
     /* granular */ A_GRAINWEB, A_GLITCH, A_GRAINMOD, A_STUTTER,
+    /* dynamics, tone (Nov 2026; at the end: the presets' algorithm numbers stay) */ A_COMP, A_ACOUSTIC,
     A_OFF, kNumAlgos
 };
-enum { G_DELAY, G_DIST, G_PITCH, G_MOD, G_REVERB, G_GRAIN, G_NONE };
-static const char *const GROUP_NAMES[] = {"Delay", "Distortion", "Pitch", "Modulation", "Reverb", "Granular", ""};
+enum { G_DELAY, G_DIST, G_PITCH, G_MOD, G_REVERB, G_GRAIN, G_DYN, G_TONE, G_NONE };
+static const char *const GROUP_NAMES[] = {"Delay", "Distortion", "Pitch", "Modulation", "Reverb", "Granular", "Dynamics", "Tone", ""};
 
 typedef struct { const char *name; int group; float mix; const char *about; Knob k[NK]; } Algo;
 static const Algo ALGOS[kNumAlgos] = {
@@ -316,6 +319,12 @@ static const Algo ALGOS[kNumAlgos] = {
     [A_STUTTER] = {"Stutter", G_GRAIN, 100, "Catches a slice and repeats it, with tape-stop",
         {MS("Slice", 20, 1000, 125), INT("Repeats", 1, 16, 4, ""), HZ("Rate", 0.2f, 8, 1), PCT("Chance", 60), PCT("Fade", 20),
          PCT("Tape Stop", 0), PCT("Reverse", 0), NONE}},
+    [A_COMP] = {"Compressor", G_DYN, 100, "A compressor pedal: six kinds, from squashy to clean",
+        {CHO("Type", COMP_TYPES, 0), PCT("Sustain", 50), MS("Attack", 0.3f, 100, 8), MS("Release", 20, 1500, 200),
+         LIN("Ratio", 1.5f, 20, 4, ":1"), LIN("Level", -12, 18, 0, "dB"), PCT("Tone", 70), NONE}},
+    [A_ACOUSTIC] = {"Acoustic Sim", G_TONE, 100, "Makes an electric guitar sound like an acoustic one",
+        {CHO("Body", BODIES, 0), PCT("Body Size", 60), PCT("Top", 60), PCT("Pick", 40), HZ("Low Cut", 40, 250, 80),
+         PCT("Width", 50), LIN("Level", -12, 6, 0, "dB"), NONE}},
     [A_OFF] = {"Off", G_NONE, 0, "Passes the sound through", {NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE}},
 };
 
@@ -715,6 +724,32 @@ static void slot_control(Slot *s) {
     case A_FLANGER: c[20] = lp_coef(tone_cut(V(4)), fs); break;
     case A_SFLANGER: c[20] = lp_coef(tone_cut(V(5)), fs); break;
     case A_VIBE: c[20] = lp_coef(tone_cut(V(4)), fs); break;
+    case A_COMP: {   /* type: ratio x, knee dB, saturation, tone ceiling, program-dependent release */
+        static const float T[6][4] = {{1, 10, 0.35f, 9000}, {1.3f, 6, 0.5f, 12000}, {1, 6, 0, 18000}, {0.8f, 12, 0.1f, 16000},
+                                      {3, 4, 0.25f, 11000}, {0, 2, 0, 18000}};
+        const int t = (int)V(0);
+        c[20] = -50 * PC(1);                                   /* threshold dB */
+        c[21] = t == 5 ? 30 : clampf(V(4) * T[t][0], 1.2f, 40);  /* ratio */
+        c[22] = 1 - expf(-1 / ((t == 5 ? 0.3f : V(2)) * 0.001f * fs));
+        c[23] = 1 - expf(-1 / (V(3) * 0.001f * fs));
+        c[24] = db(V(5) + -c[20] * (1 - 1 / c[21]) * 0.35f);   /* level, + part of the squeeze back */
+        c[25] = lp_coef(expmap(1500, T[t][3], PC(6)), fs);
+        c[26] = T[t][1]; c[27] = T[t][2]; c[28] = (float)t;
+        break;
+    }
+    case A_ACOUSTIC: {   /* body: low resonance (Hz, dB, Q), second resonance, pickup-honk cut (Hz, dB), top shelf (Hz, dB) */
+        static const float B[6][9] = {{95, 7, 1.5f, 210, 3, 700, -6, 7000, 8}, {88, 8, 1.4f, 185, 4, 650, -5, 6500, 7},
+                                      {140, 4, 1.8f, 290, 4, 900, -4, 7500, 9}, {115, 5, 1.6f, 240, 3, 800, -5, 8000, 8},
+                                      {105, 6, 1.4f, 220, 3, 1200, -3, 4500, -2}, {300, 6, 3, 1200, 5, 500, -2, 5000, 4}};
+        const float *b = B[(int)V(0)];
+        const float body = PC(1) * 1.2f, top = PC(2) * 1.25f;
+        s->sc[0] = svf_co(b[0], b[2], fs); s->sc[1] = svf_co(b[3], 2, fs); s->sc[2] = svf_co(b[5], 0.8f, fs);
+        s->sc[3] = svf_co(3500, 1.2f, fs);
+        c[20] = db(b[1] * body) - 1; c[21] = db(b[4] * body) - 1; c[22] = db(b[6]) - 1; c[23] = db(PC(3) * 6) - 1;
+        c[24] = lp_coef(b[7], fs); c[25] = db(b[8] * top) - 1; c[26] = lp_coef(V(4), fs);
+        c[27] = PC(1) * 0.22f; c[28] = PC(5); c[29] = db(V(6) - 2 - 3 * PC(1) - 3 * PC(2) - 2 * PC(3));   /* (more body / top / pick: as loud) */
+        break;
+    }
     case A_TRICHORUS: c[20] = lp_coef(V(4), fs); c[21] = powf(2, SHIM_ST[(int)V(6)] / 12); c[22] = lp_coef(14000, fs);
         c[23] = 10.7f * fs / 1000; c[24] = lp_coef(9000, fs); break;
     case A_TREMOLO: c[21] = 1 + PC(2) * 15; c[22] = tanh_fast(c[21]); break;
@@ -1512,6 +1547,39 @@ static void run_algo(Slot *s, const float in[2], float out[2]) {
         }
         break;
     }
+    case A_COMP: {   /* feed-forward, linked; a soft knee; OTA-style kinds saturate a little and lose some top */
+        const float x = fmaxf(fabsf(in[0]), fabsf(in[1]));
+        float *env = &s->env[0], *rel = &s->env[1];
+        *env += (x > *env ? c[22] : c[23] * *rel) * (x - *env);
+        const float over = 20 * log10f(*env + 1e-9f) - c[20], knee = c[26], k = 1 - 1 / c[21];
+        float gr = 0;
+        if (over >= knee / 2) gr = over * k;
+        else if (over > -knee / 2) { const float u = over + knee / 2; gr = k * u * u / (2 * knee); }
+        *rel = (int)c[28] == 3 ? 1 / (1 + gr * 0.12f) : 1;   /* opto: the more it squeezes, the slower it lets go */
+        const float g = db(-gr) * c[24];
+        for (int ch = 0; ch < 2; ch++) {
+            float y = in[ch] * g;
+            if (c[27] > 0) y = tanh_fast(y * (1 + c[27] * 2)) / (1 + c[27] * 2) * (1 + c[27] * 0.5f);
+            out[ch] = lp(&s->op[ch][0], y, c[25]);
+        }
+        break;
+    }
+    case A_ACOUSTIC: {   /* EQ the pickup into a guitar body: resonances, honk cut, string top, pick, a little wood */
+        for (int ch = 0; ch < 2; ch++) {
+            float x = hp(&s->op[ch][0], in[ch], c[26]), lo, bp, hi;
+            svf(&s->svf[ch][0], &s->sc[0], x, &lo, &bp, &hi); x += c[20] * s->sc[0].k * bp;
+            svf(&s->svf[ch][1], &s->sc[1], x, &lo, &bp, &hi); x += c[21] * s->sc[1].k * bp;
+            svf(&s->svf[ch][2], &s->sc[2], x, &lo, &bp, &hi); x += c[22] * s->sc[2].k * bp;
+            svf(&s->svf[ch][3], &s->sc[3], x, &lo, &bp, &hi); x += c[23] * s->sc[3].k * bp;
+            x += c[25] * (x - lp(&s->op[ch][1], x, c[24]));   /* the strings' top */
+            line_push(&s->dl[ch], x);
+            static const float WOOD[2][3] = {{2.3f, 4.1f, 6.7f}, {2.9f, 5.3f, 7.9f}};
+            float wood = 0;
+            for (int i = 0; i < 3; i++) wood += line_read(&s->dl[ch], WOOD[c[28] > 0.01f ? ch : 0][i] * ms * (1 + c[28] * 0.3f * (float)ch)) * (0.6f - 0.15f * (float)i);
+            out[ch] = (x + lp(&s->op[ch][2], wood, 0.35f) * c[27]) * c[29];
+        }
+        break;
+    }
     case A_GLITCH: case A_STUTTER: {   /* catch a slice into dl2 (as a plain buffer) and replay it */
         const int glitch = s->algo == A_GLITCH;
         float *ph = &s->lfo[0];
@@ -1629,7 +1697,7 @@ static const unsigned char PEDAL_LOOK_OF[] = {LK_GREEN, LK_GOLD, LK_BLACK, LK_SI
     LK_YELLOW, LK_YELLOW, LK_GREEN, LK_COPPER, LK_BLACK};
 _Static_assert(sizeof PEDAL_LOOK_OF == sizeof PEDALS / sizeof *PEDALS, "a look per pedal");
 static int slot_look(const Plugin *s, int k) {
-    static const unsigned char GROUP_LOOK[] = {LK_DELAY, LK_DRIVE, LK_PITCH, LK_MOD, LK_REVERB, LK_GRAIN, LK_GRAPHITE};
+    static const unsigned char GROUP_LOOK[] = {LK_DELAY, LK_DRIVE, LK_PITCH, LK_MOD, LK_REVERB, LK_GRAIN, LK_SKY, LK_COPPER, LK_GRAPHITE};
     const int a = algo_of(s, k);
     switch (a) {
     case A_PEDALS: return PEDAL_LOOK_OF[option_of(s->norm[k * P_SLOT + P_K], N_PEDALS)];

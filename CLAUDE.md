@@ -356,6 +356,13 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   Voicing pass (the user: "more volume and clarity, the metal ones too bright"): every rig +3 dB Output (max 9),
   Presence +1, Treble +0.5, Bass -0.5 from 5.5 up, Input no lower than -3; Modern Metal / Djent Machine / Drop Tune
   Metal: Treble -1.5, Presence -2, Output +1.
+- **Compressor + Acoustic Sim** (Nov 2026, the user's ask after comparing with the HeadRush Prime): Duo FX algorithms
+  A_COMP ("Compressor", group Dynamics: Type Ross / Dyna / Studio / Opto / Squash / Limiter, Sustain = threshold 0..-50
+  dB, Attack, Release, Ratio, Level, Tone; soft knee, linked, OTA kinds saturate a little, Opto releases slower the
+  more it squeezes) and A_ACOUSTIC ("Acoustic Sim", group Tone: Body Dreadnought / Jumbo / Parlor / Concert / Nylon /
+  Resonator = two body resonances, a pickup-honk cut and a string-top shelf, Pick bell at 3.5 kHz, Low Cut, Width of
+  a short wood ambience, Level; louder body/top settings are levelled down). Appended before A_OFF so presets keep
+  their numbers (Off is 59 now); 8 + 7 presets of ours in make_presets.py; Duo 60 options, Quad DUO_NALGO 60, 71 effects.
 - **Choruses sounded like tremolos** (Nov 2026, the user): the H90 backup's TriceraChorus presets (Lush Life, Chorus
   Lap) were converted with ldep as our Depth and mix 50: Lush Life became a 3.7 ms sweep at 5 Hz. h90_convert.py now
   takes the sweep as ddep us x ldep % (ours: Depth 100% = 3.5 ms) and the mix from preset_mix. TricraChrs (Duo and the
