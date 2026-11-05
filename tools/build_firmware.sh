@@ -50,6 +50,8 @@ echo "== Quad Rig (four effects + a NAM amp)"
 (cd "$REPO/quadrig-mpc" && ./build.sh host >/dev/null && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
 echo "== Ergo EUB (the upright bass rigs in one insert)"
 (cd "$REPO/ergo-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
+echo "== Enz0 X (guitar synth)"
+(cd "$REPO/enzo-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
 echo "== EQs and dynamics (31 Smashly, X-Para EQ, Fairchyld 670)"
 (cd "$REPO/eq-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
 echo "== MPC Browser (the browser's page on the MPC's screen)"
@@ -60,7 +62,7 @@ echo "== browser remote"
 echo "== one bundle of everything"
 rm -rf "$W/extra" && mkdir -p "$W/extra"
 for b in sfizz-mpc/build/bundle duofx-mpc/build/bundle \
-         trichorus-mpc/build/bundle vocal-mpc/build/bundle ambient-mpc/build/bundle quadrig-mpc/build/bundle ergo-mpc/build/bundle \
+         trichorus-mpc/build/bundle vocal-mpc/build/bundle ambient-mpc/build/bundle quadrig-mpc/build/bundle ergo-mpc/build/bundle enzo-mpc/build/bundle \
          eq-mpc/build/bundle browser-mpc/build/bundle \
          mpc-remote/server/build/bundle; do
   cp -a "$REPO/$b/." "$W/extra/"

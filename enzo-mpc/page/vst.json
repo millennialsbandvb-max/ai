@@ -1,0 +1,9 @@
+{
+  "name": "Enz0 X",
+  "vendor": "Other Things",
+  "uid": "ENZX",
+  "version": 1000,
+  "so": "Enz0-X.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}
