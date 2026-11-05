@@ -65,6 +65,7 @@ struct Cfg {
   float fx = 0, fy = 0, fz = 0; bool flatSet = false;   // gravity direction with the foot flat
   float klvl = 1.2f, slvl = 1.2f;                  // heel/toe modes: minimum impact (g) for a kick and for a snare
   float toeSig[11] = {0}, heelSig[11] = {0};       // learned toe / heel: rot[3], dir[3], reb[3], rise ms, foot angle
+  float swang = 25.0f;                             // stomp/swing mode: degrees the foot must swing to play the snare
 } cfg;
 Preferences prefs;
 
@@ -172,6 +173,7 @@ float qx = 0, qy = 0, qz = 0; bool qInit = false;   // gravity direction tracked
 float gx = 0, gy = 0, gz = 0;        // gravity estimate (g units)
 float peak = 0; uint32_t peakT = 0, lastStompT = 0;
 uint32_t lastSwingT = 0; bool inSwing = false; float swingPeak = 0;
+float swingAngle = 0; uint32_t swingStill = 0;   // degrees swung (net) along the learned direction since the foot was last at rest
 float meterBuf[12]; int nMeter = 0; uint32_t lastMeterSend = 0;
 uint32_t stillSince = 0;                      // for capturing "flat" automatically the first time
 void setFlat() {
@@ -373,14 +375,19 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   }
 
   // ---- snare: swing along the learned direction (stomp/swing mode only) ----
+  // Add up how far the foot has turned along the swing (swinging back subtracts). Crossing the swing angle
+  // plays the snare once; it re-arms when the foot comes most of the way back, and re-zeroes when still.
   if (cfg.cal && cfg.snare == 6) {
     float proj = wx * cfg.rx + wy * cfg.ry + wz * cfg.rz;       // deg/s along the swing
+    swingAngle = max(0.0f, swingAngle + proj * dts);
+    if (wm < 15) { if (!swingStill) swingStill = now; else if (now - swingStill > 250) swingAngle = 0; } else swingStill = 0;
     bool clearOfStomp = now - lastStompT > 120;                  // a stomp's own jolt can spin the board; ignore that
-    if (proj > cfg.swthr && !inSwing && clearOfStomp && now - lastSwingT > (uint32_t)cfg.gap) {
-      inSwing = true; lastSwingT = now; swingPeak = proj;
-      onHit(SNARE, constrain(0.65f + 0.35f * (proj / (cfg.swthr * 2.5f)), 0, 1), 0, proj, now);
+    if (swingAngle >= cfg.swang && !inSwing && clearOfStomp && now - lastSwingT > (uint32_t)cfg.gap) {
+      inSwing = true; lastSwingT = now;
+      // velocity from how fast the swing was going when it crossed the line
+      onHit(SNARE, constrain(0.55f + 0.45f * (proj / 400.0f), 0.0f, 1.0f), 0, swingAngle, now);
     }
-    if (inSwing && proj < cfg.swthr * 0.3f) inSwing = false;
+    if (inSwing && swingAngle < cfg.swang * 0.4f) inSwing = false;
   }
 
   // ---- kick: impact spike; not right after a swing (the foot landing from a swing isn't a stomp) ----
@@ -398,8 +405,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[640];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -427,6 +434,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "thr", &f); if (f) cfg.thr = v;
   v = jsonNum(s, "sthr", &f); if (f) cfg.sthr = v;
   v = jsonNum(s, "swthr", &f); if (f) cfg.swthr = v;
+  v = jsonNum(s, "swang", &f); if (f) cfg.swang = constrain(v, 3.0f, 120.0f);
   v = jsonNum(s, "tthr", &f); if (f) cfg.tthr = v;
   v = jsonNum(s, "tlock", &f); if (f) cfg.tlock = (int)v ? 1 : 0;
   v = jsonNum(s, "lthr", &f); if (f) cfg.lthr = v;
