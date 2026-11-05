@@ -60,6 +60,9 @@ struct Cfg {
   int tlock = 0;                                   // 0 = tempo follows the player, 1 = learned from the first 8 hits, held until 2 bars of silence
   float bpm = 100.0f;                              // locked tempo (unused since count-in lock)
   int shk = 0;                                     // Shaker mode sound: 0 shaker, 1 maracas, 2 tambourine
+  int ohat = 1;                                    // auto hats open when the toe is raised
+  float othr = 20.0f;                              // ...past this many degrees from flat
+  float fx = 0, fy = 0, fz = 0; bool flatSet = false;   // gravity direction with the foot flat
 } cfg;
 Preferences prefs;
 
@@ -89,10 +92,10 @@ AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 bool bleConnected = false;
 
-const char* kindName[] = { "kick", "snare", "hat", "tap", "shaker" };
+const char* kindName[] = { "kick", "snare", "hat", "tap", "shaker", "hatOpen" };
 const char* lastKind = "";
 float hitAngle = -1;   // toe drop angle reported with the next hit (deg)
-const uint8_t midiNote[] = { 36, 38, 42, 0, 82 };   // GM drums: kick, snare, closed hat (tap: none), shaker (set per cfg.shk)
+const uint8_t midiNote[] = { 36, 38, 42, 0, 82, 46 };   // GM drums: kick, snare, closed hat (tap: none), shaker (set per cfg.shk)
 const uint8_t shakeNote[] = { 82, 70, 54 };          // GM: Shaker, Maracas, Tambourine
 
 void playBoard(Kind k, float vel) {
@@ -107,6 +110,13 @@ void playBoard(Kind k, float vel) {
     d = cfg.shk == 2 ? SMP_tamb : SMP_shaker; n = cfg.shk == 2 ? sizeof(SMP_tamb) / 2 : sizeof(SMP_shaker) / 2;
     M5.Speaker.setChannelVolume(3, (uint8_t)(cfg.vol * (0.15f + 0.85f * vel)));
     M5.Speaker.playRaw(d, n, SMP_RATE, false, 1, 3, true);
+    return;
+  }
+  if (k == OHAT) {
+    d = cfg.kit == 1 ? SMP_electro_hatOpen : SMP_acoustic_hatOpen;
+    n = cfg.kit == 1 ? sizeof(SMP_electro_hatOpen) / 2 : sizeof(SMP_acoustic_hatOpen) / 2;
+    M5.Speaker.setChannelVolume(HAT, (uint8_t)(cfg.vol * 0.6f * (0.7f + 0.3f * vel)));
+    M5.Speaker.playRaw(d, n, SMP_RATE, false, 1, HAT, true);   // same channel as closed hats: a closed hat cuts it off
     return;
   }
   int ch = (int)k;  // one speaker channel per drum, so a new hit cuts the old one
@@ -145,6 +155,7 @@ void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
   }
 }
 
+float toeAngle = 0; bool hatIsOpen = false;   // degrees the foot is tilted away from flat; open-hat state
 #include "pb_clock.h"
 
 // ---------------- Motion detection ----------------
@@ -156,6 +167,12 @@ float gx = 0, gy = 0, gz = 0;        // gravity estimate (g units)
 float peak = 0; uint32_t peakT = 0, lastStompT = 0;
 uint32_t lastSwingT = 0; bool inSwing = false; float swingPeak = 0;
 float meterBuf[12]; int nMeter = 0; uint32_t lastMeterSend = 0;
+uint32_t stillSince = 0;                      // for capturing "flat" automatically the first time
+void setFlat() {
+  float m = sqrtf(gx * gx + gy * gy + gz * gz); if (m < 0.5f) return;
+  cfg.fx = gx / m; cfg.fy = gy / m; cfg.fz = gz / m; cfg.flatSet = true; saveCfg();
+  ws.textAll("{\"flat\":1}");
+}
 // gyro history, to read how the foot was rotating just before an impact
 const int GH = 256; float gH[GH][3]; uint32_t gHT[GH]; int gHi = 0;
 uint32_t onsetT = 0;                       // when the current impact started
@@ -249,6 +266,19 @@ void fireStomp(float p, float now) {
 void processMotion(float ax, float ay, float az, float wx, float wy, float wz, uint32_t now) {  // accel in g (incl. gravity), gyro in deg/s
   lastT = now;
   const float k = 0.05f; gx += k * (ax - gx); gy += k * (ay - gy); gz += k * (az - gz);
+  {
+    float gm = sqrtf(gx * gx + gy * gy + gz * gz);
+    if (cfg.flatSet && gm > 0.5f) {
+      float c = (gx * cfg.fx + gy * cfg.fy + gz * cfg.fz) / gm;
+      toeAngle = acosf(constrain(c, -1.0f, 1.0f)) * 57.2958f;
+      if (!hatIsOpen && toeAngle > cfg.othr) hatIsOpen = true;            // a few degrees of hysteresis
+      else if (hatIsOpen && toeAngle < cfg.othr - 4) hatIsOpen = false;   // so it doesn't flutter at the line
+    } else if (!cfg.flatSet) {
+      // never set: take "flat" from the first full second the foot is still
+      float lin = fabsf(sqrtf(ax * ax + ay * ay + az * az) - 1.0f);
+      if (lin < 0.04f) { if (!stillSince) stillSince = now; else if (now - stillSince > 1000) setFlat(); } else stillSince = 0;
+    }
+  }
   float lx = ax - gx, ly = ay - gy, lz = az - gz;               // linear accel, g
   float mag = sqrtf(lx * lx + ly * ly + lz * lz);
   float wm = sqrtf(wx * wx + wy * wy + wz * wz);               // rotation speed, deg/s
@@ -301,9 +331,9 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
-  char b[480];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"tthr\":%.0f,\"shk\":%d,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.tthr, cfg.shk, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  char b[560];
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -322,6 +352,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   if (strstr(s, "\"cal\"")) { startSwingCal(); return; }
   if (strstr(s, "\"learnToe\"")) { learnTH = 1; learnN = 0; learnSum[0] = learnSum[1] = learnSum[2] = 0; ws.textAll("{\"learn\":\"toe 0/3\"}"); return; }
   if (strstr(s, "\"learnHeel\"")) { learnTH = 2; learnN = 0; learnSum[0] = learnSum[1] = learnSum[2] = 0; ws.textAll("{\"learn\":\"heel 0/3\"}"); return; }
+  if (strstr(s, "\"setFlat\"")) { setFlat(); return; }
   if (strstr(s, "\"flipSwing\"")) { cfg.rx = -cfg.rx; cfg.ry = -cfg.ry; cfg.rz = -cfg.rz; saveCfg(); ws.textAll("{\"learn\":\"flipped ✓\"}"); return; }
   if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }
   if (const char* q = strstr(s, "\"ssid\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.ssid) - 1); memcpy(cfg.ssid, q, n); cfg.ssid[n] = 0; } }
@@ -337,6 +368,8 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "gap", &f); if (f) cfg.gap = (int)v;
   v = jsonNum(s, "snare", &f); if (f && (v == 1 || v == 2 || v == 6 || v == 7 || v == 8 || v == 9)) { cfg.snare = (int)v; if (v == 9 && clockOn) stopClock(); }
   v = jsonNum(s, "shk", &f); if (f) cfg.shk = constrain((int)v, 0, 2);
+  v = jsonNum(s, "ohat", &f); if (f) cfg.ohat = (int)v ? 1 : 0;
+  v = jsonNum(s, "othr", &f); if (f) cfg.othr = constrain(v, 3.0f, 80.0f);
   v = jsonNum(s, "kit", &f); if (f) cfg.kit = constrain((int)v, 0, 1);
   v = jsonNum(s, "out", &f); if (f) cfg.out = (int)v;
   v = jsonNum(s, "quant", &f); if (f) cfg.quant = (int)v;
@@ -486,9 +519,9 @@ void loop() {
 
   // meter stream to the page, ~40 Hz, a dozen samples per message
   if (ws.count() && nMeter >= 12 && now - lastMeterSend > 25) {
-    char b[160]; int p = snprintf(b, sizeof b, "{\"m\":[");
+    char b[200]; int p = snprintf(b, sizeof b, "{\"m\":[");
     for (int i = 0; i < nMeter; i++) p += snprintf(b + p, sizeof b - p, "%s%.2f", i ? "," : "", meterBuf[i]);
-    snprintf(b + p, sizeof b - p, "]}"); ws.textAll(b); nMeter = 0; lastMeterSend = now;
+    snprintf(b + p, sizeof b - p, "],\"toe\":%.0f,\"open\":%d}", toeAngle, hatIsOpen ? 1 : 0); ws.textAll(b); nMeter = 0; lastMeterSend = now;
   } else if (nMeter >= 12) nMeter = 0;
 
   if (now - lastDraw > 500) {

@@ -51,7 +51,10 @@ void clockTick(float now) {
     bool onBeat = (eighthIdx % 2) == 0;
     bool play = cfg.hat == 2 || (cfg.hat == 1 && onBeat);
     // never two hats closer than ~60% of an 8th (re-locking the grid can otherwise double one up)
-    if (play && now - nextEighth < 40 && nextEighth - lastHatPlayed > 0.6f * e) { hit(HAT, onBeat ? 0.7f : 0.45f); lastHatPlayed = nextEighth; }
+    if (play && now - nextEighth < 40 && nextEighth - lastHatPlayed > 0.6f * e) {
+      hit(cfg.ohat && hatIsOpen ? OHAT : HAT, onBeat ? 0.7f : 0.45f);   // toe raised past the angle: open hat
+      lastHatPlayed = nextEighth;
+    }
     lastEighth = nextEighth; eighthIdx++; nextEighth += e;
   }
 }
