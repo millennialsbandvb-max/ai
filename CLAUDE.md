@@ -250,6 +250,11 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   ALGO_PLACE, algo_norm(); Quad FX_AT / FX_PLACE, fx_norm(), sorted from FX_NAMES); ALGOS[], presets.h and Quad's
   fx numbers are unchanged. Quad's fx f < N_DUO is Duo's place f + 1 (Duo's Off is place 0; slot B is set to 0).
   CPU: the starting board (drive, chorus, A2 amp, tape echo, hall) ~10% of a PC core; untested on the device.
+  Effect steppers (Nov 2026, to save space): each slot's effect is a stepper (FXn Effect < / > params after the rig
+  params, kFxArrow0; stepping the A-Z place, wrapping) with a full-page list "FX n Effects" (lists after Rigs), not a
+  pop-up; f*_fx__open stays as an unused param (indices). Saved only ~2 MB (the pop-ups' pictures were already
+  shared): the page's bulk is the 192 colour-look backgrounds (8 tabs x 24 looks, ~6 MB at 64 colours; 16 colours
+  saves 3 MB but washes out the labels) and the 8 base backgrounds (3.4 MB).
 - **Full-page lists** (the user disliked MPC's round knob menu on a stepper's name): tapping any stepper's name
   (presets, Duo programs, NAM/Quad folders/models/IRs, SFZ instruments, VoxLive styles) opens a list over the
   whole plugin area (title, Close, < Page / Page >, 24 rows in 3 columns; the current entry marked "> "). Plugin

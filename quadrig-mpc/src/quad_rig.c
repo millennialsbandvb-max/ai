@@ -50,7 +50,8 @@ enum { S_FX, S_OPEN, S_MIX, S_K, S_PRESET = S_K + 8, S_PREV, S_NEXT, S_BYPASS, S
 enum { kNam0 = kSlot0 + NS * SP, kNumSaved = kNam0 + NAM_N,   /* (the state chunk: these) */
        kLook0 = kNumSaved, kAmpLook = kLook0 + NS,               /* FX1..6 Look, Amp Look: read-only, the pages' colours */
        kRig, kRigPrev, kRigNext,                                 /* the rig presets (rigs.h): not in the state chunk */
-       kNumParams };
+       kFxArrow0,                                                /* FX1 Effect <, FX1 Effect >, ... (Nov 2026: steppers, not pop-ups) */
+       kNumParams = kFxArrow0 + 2 * NS };
 static const char *const AMP_POS[] = {"Amp First", "After FX 1", "After FX 2", "After FX 3", "After FX 4", "After FX 5", "Amp Last"};
 #define N_POS (NS + 1)
 
@@ -159,6 +160,16 @@ static void setParameter(AEffect *e, int32_t i, float v) {
     Plugin *s = (Plugin *)e->object;
     if (i < 0 || i >= kNumParams || (i >= kLook0 && i < kRig)) return;   /* (the looks are read-only) */
     v = clampf(v, 0, 1);
+    if (i >= kFxArrow0) {   /* an effect's < or >: the one before / after in the A-Z list */
+        const int k = (i - kFxArrow0) / 2, d = (i - kFxArrow0) % 2 ? 1 : -1;
+        if (v > 0.5f) {
+            const int place = (FX_PLACE[fx_of(s, k)] + d + N_FX) % N_FX;
+            setParameter(e, SLOT(k, S_FX), (float)place / (float)(N_FX - 1));
+            s->automate[SLOT(k, S_FX)] = 1;
+        }
+        s->norm[i] = 0;
+        return;
+    }
     if (i >= kRig) { rig_param(s, i - kRig, v); return; }
     if (i >= kNam0) { s->nam->setParameter(s->nam, i - kNam0, v); s->norm[i] = s->nam->getParameter(s->nam, i - kNam0); return; }
     if (i == kAmpPos) { s->norm[i] = (float)option_of(v, N_POS) / (N_POS - 1); s->update_display = 1; return; }
@@ -244,6 +255,7 @@ static int amp_look(Plugin *s) {   /* (NAM's model and folder names: its params 
 }
 static int slot_look(Plugin *s, int k) { return s->kind[k] == 0 ? duo_look(s->duo[k]) : s->kind[k] == 1 ? amb_look(s->amb[k]) : LK_GRAPHITE; }
 static void param_name(Plugin *s, int i, char *t) {
+    if (i >= kFxArrow0) { snprintf(t, 32, "FX%d Effect %s", (i - kFxArrow0) / 2 + 1, (i - kFxArrow0) % 2 ? ">" : "<"); return; }
     if (i >= kRig) { snprintf(t, 32, "%s", i == kRig ? "Rig" : i == kRigPrev ? "Rig <" : "Rig >"); return; }
     if (i == kAmpLook) { snprintf(t, 32, "Amp Look"); return; }
     if (i >= kLook0) { snprintf(t, 32, "FX%d Look", i - kLook0 + 1); return; }
@@ -262,6 +274,7 @@ static void param_name(Plugin *s, int i, char *t) {
 }
 static void param_display(Plugin *s, int i, char *t) {
     if (i == kRig) { snprintf(t, 32, "%s", s->rig >= 0 ? RIGS[s->rig].name : "-"); return; }
+    if (i >= kFxArrow0) { snprintf(t, 32, "%s", (i - kFxArrow0) % 2 ? ">" : "<"); return; }
     if (i > kRig) { snprintf(t, 32, "%s", i == kRigPrev ? "<" : ">"); return; }
     if (i == kAmpLook) { snprintf(t, 32, "%s", PEDAL_LOOKS[option_of(s->norm[i], N_LOOKS)].name); return; }
     if (i >= kLook0) { snprintf(t, 32, "%s", PEDAL_LOOKS[slot_look(s, i - kLook0)].name); return; }
@@ -462,6 +475,15 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
 #define RIG_LIST (NS + 4 + NS * 8)
 static int quad_pick(AEffect *e, int list, int op, int i, char *out, int max) {
     Plugin *s = (Plugin *)e->object;
+    if (list > RIG_LIST) {   /* a slot's effect, A-Z (Off first) */
+        const int k = list - RIG_LIST - 1;
+        if (op == PL_COUNT) return N_FX;
+        if (op == PL_CURRENT) return FX_PLACE[fx_of(s, k)];
+        if (op == PL_HEADING || i < 0 || i >= N_FX) return 0;
+        if (op == PL_NAME) snprintf(out, (size_t)max, "%s", FX_NAMES[FX_AT[i]]);
+        else if (op == PL_CHOOSE) { setParameter(&s->fx, SLOT(k, S_FX), (float)i / (float)(N_FX - 1)); s->automate[SLOT(k, S_FX)] = 1; }
+        return 0;
+    }
     if (list == RIG_LIST) {   /* the rig presets */
         if (op == PL_COUNT) return N_RIGS;
         if (op == PL_CURRENT) return s->rig;
@@ -491,10 +513,12 @@ static int quad_pick(AEffect *e, int list, int op, int i, char *out, int max) {
 #define KT(f) "FX " #f " Knob 1", "FX " #f " Knob 2", "FX " #f " Knob 3", "FX " #f " Knob 4", "FX " #f " Knob 5", "FX " #f " Knob 6", \
               "FX " #f " Knob 7", "FX " #f " Knob 8"
 static const char *const LIST_KEYS[] = {"f1_preset", "f2_preset", "f3_preset", "f4_preset", "f5_preset", "f6_preset", "amp_folder",
-                                        "amp_model", "amp_ir_folder", "amp_ir", KN(1), KN(2), KN(3), KN(4), KN(5), KN(6), "rig"};
+                                        "amp_model", "amp_ir_folder", "amp_ir", KN(1), KN(2), KN(3), KN(4), KN(5), KN(6), "rig",
+                                        "f1_fx", "f2_fx", "f3_fx", "f4_fx", "f5_fx", "f6_fx"};
 static const char *const LIST_TITLES[] = {"FX 1 Presets", "FX 2 Presets", "FX 3 Presets", "FX 4 Presets", "FX 5 Presets", "FX 6 Presets",
-                                          "Model Folders", "Models", "IR Folders", "IRs", KT(1), KT(2), KT(3), KT(4), KT(5), KT(6), "Rigs"};
-static const PickLists LISTS = {RIG_LIST + 1, LIST_KEYS, LIST_TITLES, quad_pick, 1};   /* (1: MIDI Ch) */
+                                          "Model Folders", "Models", "IR Folders", "IRs", KT(1), KT(2), KT(3), KT(4), KT(5), KT(6), "Rigs",
+                                          "FX 1 Effects", "FX 2 Effects", "FX 3 Effects", "FX 4 Effects", "FX 5 Effects", "FX 6 Effects"};
+static const PickLists LISTS = {RIG_LIST + 1 + NS, LIST_KEYS, LIST_TITLES, quad_pick, 1};   /* (1: MIDI Ch) */
 
 /* ---- rig presets (rigs.h) --------------------------------------------------------------------------------------- */
 static int alnum(char c) { return (c >= '0' && c <= '9') || ((c | 32) >= 'a' && (c | 32) <= 'z'); }
@@ -631,9 +655,8 @@ int main(int argc, char **argv) {
     printf("    {\"key\": \"amp_bypass\", \"name\": \"Amp Bypass\", \"options\": [\"On\", \"Bypassed\"]},\n");
     printf("    {\"key\": \"output\", \"name\": \"Output\", \"min\": -24, \"max\": 12, \"default\": 0, \"unit\": \"dB\"},\n");
     for (int k = 0; k < NS; k++) {
-        printf("    {\"key\": \"f%d_fx\", \"name\": \"FX%d Effect\", \"options\": [", k + 1, k + 1);
-        for (int p = 0; p < N_FX; p++) printf("%s\"%s\"", p ? ", " : "", FX_NAMES[FX_AT[p]]);
-        printf("]},\n");
+        /* (a stepper with a full-page list, not a pop-up: the pop-ups' option pictures were ~10 MB) */
+        printf("    {\"key\": \"f%d_fx\", \"name\": \"FX%d Effect\", \"min\": 0, \"max\": 1, \"display\": \"string\", \"type\": \"stepper\"},\n", k + 1, k + 1);
         printf("    {\"key\": \"f%d_fx__open\", \"name\": \"FX%d Effect List\", \"options\": [\"Closed\", \"Open\"]},\n", k + 1, k + 1);
         printf("    {\"key\": \"f%d_mix\", \"name\": \"FX%d Mix\", \"min\": 0, \"max\": 100, \"unit\": \"%%\"},\n", k + 1, k + 1);
         for (int i = 0; i < 8; i++) printf("    {\"key\": \"f%d_k%d\", \"name\": \"FX%d Knob %d\", \"min\": 0, \"max\": 100},\n", k + 1, i + 1, k + 1, i + 1);
@@ -684,6 +707,10 @@ int main(int argc, char **argv) {
     printf(",\n    {\"key\": \"rig\", \"name\": \"Rig\", \"min\": 0, \"max\": 1, \"display\": \"string\", \"type\": \"stepper\"}");
     printf(",\n    {\"key\": \"rig_prev\", \"name\": \"Rig <\", \"options\": [\"Off\", \"On\"], \"momentary\": true}");
     printf(",\n    {\"key\": \"rig_next\", \"name\": \"Rig >\", \"options\": [\"Off\", \"On\"], \"momentary\": true}");
+    for (int k = 0; k < NS; k++) {
+        printf(",\n    {\"key\": \"f%d_fx_prev\", \"name\": \"FX%d Effect <\", \"options\": [\"Off\", \"On\"], \"momentary\": true}", k + 1, k + 1);
+        printf(",\n    {\"key\": \"f%d_fx_next\", \"name\": \"FX%d Effect >\", \"options\": [\"Off\", \"On\"], \"momentary\": true}", k + 1, k + 1);
+    }
     pl_params_json(&LISTS, stdout);
     printf("\n  ]\n}\n");
     return count == NAM_N ? 0 : 1;
