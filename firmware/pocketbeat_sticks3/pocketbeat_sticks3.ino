@@ -57,6 +57,8 @@ struct Cfg {
   int legSwap = 0;                                 // 0: left = kick, right = snare; 1: swapped
   int sigVer = 0;                                  // 2 = leg signatures use the pre-stomp tilt
   float tthr = 15.0f;                              // toe must have dropped at least this many degrees to count as a toe
+  int tlock = 0;                                   // 0 = tempo follows the player, 1 = locked to bpm
+  float bpm = 100.0f;                              // locked tempo
 } cfg;
 Preferences prefs;
 
@@ -276,9 +278,9 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
-  char b[400];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"tthr\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.tthr, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  char b[480];
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"tthr\":%.0f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.tthr, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -306,6 +308,8 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "sthr", &f); if (f) cfg.sthr = v;
   v = jsonNum(s, "swthr", &f); if (f) cfg.swthr = v;
   v = jsonNum(s, "tthr", &f); if (f) cfg.tthr = v;
+  v = jsonNum(s, "tlock", &f); if (f) cfg.tlock = (int)v ? 1 : 0;
+  v = jsonNum(s, "bpm", &f); if (f) { cfg.bpm = constrain(v, 40.0f, 220.0f); if (cfg.tlock && clockOn) beatMs = 60000.0f / cfg.bpm; }
   v = jsonNum(s, "lthr", &f); if (f) cfg.lthr = v;
   v = jsonNum(s, "kthr", &f); if (f) cfg.kthr = v;
   v = jsonNum(s, "gap", &f); if (f) cfg.gap = (int)v;

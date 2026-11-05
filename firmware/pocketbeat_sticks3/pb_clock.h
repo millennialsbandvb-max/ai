@@ -41,7 +41,8 @@ void stopClock() { clockOn = false; lastHitMs = 0; firstHitMs = 0; beatMs = 0; o
 
 void clockTick(float now) {
   if (!clockOn) return;
-  if (now - lastHitMs > beatMs * 2.5f) { stopClock(); return; }       // about two and a half beats of silence
+  // Follow mode: stop after about two and a half beats of silence. Locked tempo: after two bars.
+  if (now - lastHitMs > beatMs * (cfg.tlock ? 8.0f : 2.5f)) { stopClock(); return; }
   float e = beatMs / 2;
   while (nextEighth <= now) {
     if (drift != 0) { float d = drift * 0.35f; nextEighth += d; drift -= d; if (fabsf(drift) < 1) drift = 0; }
@@ -65,6 +66,27 @@ struct Pending { bool on = false; float at = 0; Kind k; float vel, g, sw, lift; 
 
 void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
   float when = now;
+  if (cfg.tlock) {
+    // Locked tempo: the first hit starts the hats at the set BPM; later hits never change the tempo,
+    // they only nudge the grid so the hats stay lined up with the player.
+    float lockMs = 60000.0f / constrain(cfg.bpm, 40.0f, 220.0f);
+    if (!clockOn) { beatMs = lockMs; startClock(now, now); }
+    else {
+      beatMs = lockMs;
+      if (cfg.quant) {
+        float gsub = beatMs / cfg.quant;
+        float grid = lastEighth + roundf((now - lastEighth) / gsub) * gsub;
+        if (grid - now < 90 && grid >= now - 5) when = grid;
+      }
+      nudgeGrid(now);
+    }
+    lastHitMs = now;
+    if (ws.count()) { char b[32]; snprintf(b, sizeof b, "{\"bpm\":%d}", (int)roundf(60000.0f / beatMs)); ws.textAll(b); }
+    if (k == TAP) return;
+    if (when > now + 1) { pending = { true, when, k, vel, g, sw, lift }; }
+    else hit(k, vel, g, sw, lift);
+    return;
+  }
   if (!lastHitMs) {
     firstHitMs = now; nGaps = 0;                                 // first hit: remember it, wait for the second
   } else {

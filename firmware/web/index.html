@@ -103,6 +103,16 @@
   <button type="button" data-v="1">This phone</button>
   <button type="button" data-v="2">Both</button>
 </div>
+<h2>Tempo</h2>
+<div class="seg" data-key="tlock">
+  <button type="button" data-v="0">Follow my playing</button>
+  <button type="button" data-v="1">Locked</button>
+</div>
+<div id="lockBox" style="display:flex;flex-direction:column;gap:10px">
+<div class="ctl"><label for="bpm">Locked tempo</label><output id="bpmOut"></output>
+  <input type="range" id="bpm" data-key="bpm" min="40" max="220" step="1" value="100"></div>
+<div class="row"><button type="button" id="tapBtn">Tap tempo (tap 4+ times)</button></div>
+</div>
 <h2>Quantize</h2>
 <div class="seg" data-key="quant">
   <button type="button" data-v="0">Off</button>
@@ -130,7 +140,7 @@
   <input type="range" id="vol" data-key="vol" min="0" max="255" step="1" value="200"></div>
 <div class="ctl"><label for="pvol">Phone volume</label><output id="pvolOut"></output>
   <input type="range" id="pvol" min="0" max="100" step="1" value="85"></div>
-<p class="hint">Heel / toe modes (board taped on the toes): tap "Set heel" and do 3 heel stomps, then "Set toe" and do 3 toe stomps. It tells them apart by which way your foot is rotating as it lands, and a toe also has to drop at least the "Toe lift" angle. The log shows each hit's lift angle: set the Toe lift slider between your heel numbers and your toe numbers. Stomp / swing mode (board taped on top of the shoe): a stomp above the orange line is a kick; swinging your foot in the learned direction faster than the swing speed is a snare. Teach the swing once: tap "Set swing" (or press the board's front button) and swing your foot 3 times the way you'll play it, pausing a moment after each; it learns the direction your foot starts moving and ignores the swing back. If it ever triggers on the swing back instead, tap "Flip swing direction". Tap / stomp modes: blue line = lightest tap that counts, yellow line = the stomp line. In every mode each hit sets the tempo; the hi-hat starts on your second hit and stops when you stop. The log shows each kick's impact (g) and each snare's swing speed (°/s), handy for setting the sliders. Everything here is stored on the board. Bluetooth and USB MIDI are always on.</p>
+<p class="hint">Tempo · Locked: set the BPM (slider or Tap tempo), then just play. Your first hit starts the hats at that tempo; kicks and snares don't change it, they only keep the hats lined up with you. Stop playing for two bars and the hats stop; the next hit starts them again. Follow my playing: the tempo comes from your hits, as before. Heel / toe modes (board taped on the toes): tap "Set heel" and do 3 heel stomps, then "Set toe" and do 3 toe stomps. It tells them apart by which way your foot is rotating as it lands, and a toe also has to drop at least the "Toe lift" angle. The log shows each hit's lift angle: set the Toe lift slider between your heel numbers and your toe numbers. Stomp / swing mode (board taped on top of the shoe): a stomp above the orange line is a kick; swinging your foot in the learned direction faster than the swing speed is a snare. Teach the swing once: tap "Set swing" (or press the board's front button) and swing your foot 3 times the way you'll play it, pausing a moment after each; it learns the direction your foot starts moving and ignores the swing back. If it ever triggers on the swing back instead, tap "Flip swing direction". Tap / stomp modes: blue line = lightest tap that counts, yellow line = the stomp line. In every mode each hit sets the tempo; the hi-hat starts on your second hit and stops when you stop. The log shows each kick's impact (g) and each snare's swing speed (°/s), handy for setting the sliders. Everything here is stored on the board. Bluetooth and USB MIDI are always on.</p>
 <h2>Firmware · installed: <span id="ver">?</span></h2>
 <div class="ctl"><label for="ssid">Home Wi-Fi name</label><output></output><input type="text" id="ssid" placeholder="your Wi-Fi network" style="grid-column:1/-1;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px"></div>
 <div class="ctl"><label for="pass">Home Wi-Fi password</label><output></output><input type="password" id="pass" placeholder="password" style="grid-column:1/-1;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px"></div>
@@ -190,7 +200,7 @@
   }
 
   // ---------- Settings UI ----------
-  const fmt = { thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', tthr: v => v + '°', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
+  const fmt = { thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', tthr: v => v + '°', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
   function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function applyCfg(c) {
     cfg = c;
@@ -198,6 +208,7 @@
     for (const seg of document.querySelectorAll('.seg[data-key]')) { const v = String(c[seg.dataset.key]); for (const b of seg.children) b.classList.toggle('on', b.dataset.v === v); }
     kit = +(c.kit || 0);
     modeUi(+c.snare);
+    $('lockBox').hidden = !+c.tlock;
     $('calState').textContent = c.cal ? 'learned ✓' : 'not set yet';
     $('thState').textContent = 'heel ' + (c.hcal ? '✓' : 'not set') + ' · toe ' + (c.tcal ? '✓' : 'not set');
     $('learnHeel').classList.remove('arm'); $('learnToe').classList.remove('arm');
@@ -213,8 +224,21 @@
   for (const seg of document.querySelectorAll('.seg[data-key]')) seg.addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
     for (const x of seg.children) x.classList.toggle('on', x === b);
-    cfg[seg.dataset.key] = +b.dataset.v; if (seg.dataset.key === 'kit') kit = +b.dataset.v; if (seg.dataset.key === 'snare') modeUi(+b.dataset.v);
+    cfg[seg.dataset.key] = +b.dataset.v; if (seg.dataset.key === 'kit') kit = +b.dataset.v; if (seg.dataset.key === 'snare') modeUi(+b.dataset.v); if (seg.dataset.key === 'tlock') $('lockBox').hidden = !+b.dataset.v;
     send({ set: { [seg.dataset.key]: +b.dataset.v } });
+  });
+  // Tap tempo on the phone: average of the last few taps
+  let taps = [];
+  $('tapBtn').addEventListener('click', () => {
+    const t = performance.now();
+    if (taps.length && t - taps[taps.length - 1] > 2000) taps = [];
+    taps.push(t); if (taps.length > 6) taps.shift();
+    if (taps.length >= 2) {
+      const gaps = taps.slice(1).map((x, i) => x - taps[i]);
+      const bpm = Math.round(60000 / (gaps.reduce((a, b) => a + b, 0) / gaps.length));
+      if (bpm >= 40 && bpm <= 220) { $('bpm').value = bpm; $('bpmOut').textContent = bpm + ' bpm'; send({ set: { bpm } }); }
+    }
+    $('tapBtn').textContent = taps.length < 4 ? 'Tap tempo (' + taps.length + ' of 4)' : 'Tap tempo: ' + $('bpm').value + ' bpm';
   });
   function modeUi(mode) {
     const swing = mode === 6, th = mode === 7 || mode === 8;
