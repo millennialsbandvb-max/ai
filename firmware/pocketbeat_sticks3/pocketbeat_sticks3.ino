@@ -66,6 +66,7 @@ struct Cfg {
   float klvl = 1.2f, slvl = 1.2f;                  // heel/toe modes: minimum impact (g) for a kick and for a snare
   float toeSig[11] = {0}, heelSig[11] = {0};       // learned toe / heel: rot[3], dir[3], reb[3], rise ms, foot angle
   float swang = 25.0f;                             // stomp/swing mode: degrees the foot must swing to play the snare
+  float ux = 0, uy = 0, uz = 0; bool upSet = false; // which way gravity moves when the toe is raised (learned after Set flat)
 } cfg;
 Preferences prefs;
 
@@ -98,8 +99,8 @@ bool bleConnected = false;
 
 const char* kindName[] = { "kick", "snare", "hat", "tap", "shaker", "hatOpen" };
 const char* lastKind = "";
-float hitAngle = -1;   // toe drop angle reported with the next hit (deg)
-char hitVotes[6] = "";  // per-measurement toe/heel votes reported with the next hit
+float hitAngle = -999;   // signed toe tilt (or toe drop angle) reported with the next hit (deg)
+char hitVotes[7] = "";  // per-measurement toe/heel votes reported with the next hit
 const uint8_t midiNote[] = { 36, 38, 42, 0, 82, 46 };   // GM drums: kick, snare, closed hat (tap: none), shaker (set per cfg.shk)
 const uint8_t shakeNote[] = { 82, 70, 54 };          // GM: Shaker, Maracas, Tambourine
 
@@ -154,7 +155,7 @@ void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
     char buf[160]; int n = snprintf(buf, sizeof buf, "{\"hit\":\"%s\",\"v\":%.2f,\"g\":%.2f", nm, vel, g);
     if (sw >= 0) n += snprintf(buf + n, sizeof buf - n, ",\"sw\":%.1f", sw);
     if (lift >= 0) n += snprintf(buf + n, sizeof buf - n, ",\"lift\":%.0f", lift);
-    if (hitAngle >= 0 && k != HAT) { n += snprintf(buf + n, sizeof buf - n, ",\"ang\":%.0f", hitAngle); hitAngle = -1; }
+    if (hitAngle > -900 && k != HAT) { n += snprintf(buf + n, sizeof buf - n, ",\"ang\":%.0f", hitAngle); hitAngle = -999; }
     if (hitVotes[0] && k != HAT && k != OHAT) { n += snprintf(buf + n, sizeof buf - n, ",\"votes\":\"%s\"", hitVotes); hitVotes[0] = 0; }
     snprintf(buf + n, sizeof buf - n, "}");
     ws.textAll(buf);
@@ -176,13 +177,36 @@ uint32_t lastSwingT = 0; bool inSwing = false; float swingPeak = 0;
 float swingAngle = 0; uint32_t swingStill = 0;   // degrees swung (net) along the learned direction since the foot was last at rest
 float meterBuf[12]; int nMeter = 0; uint32_t lastMeterSend = 0;
 uint32_t stillSince = 0;                      // for capturing "flat" automatically the first time
+bool upLearn = false; uint32_t upLearnEnd = 0; float upBest = 0, upBx = 0, upBy = 0, upBz = 0;
 void setFlat() {
   if (!qInit) return;
   cfg.fx = qx; cfg.fy = qy; cfg.fz = qz; cfg.flatSet = true; saveCfg();
-  ws.textAll("{\"flat\":1}");
+  // now raise your toe: the biggest tilt in the next 5 s tells us which way is toe-up
+  upLearn = true; upLearnEnd = millis() + 5000; upBest = 0;
+  ws.textAll("{\"flat\":1,\"learn\":\"now raise your toe\"}");
+}
+void finishUpLearn() {
+  upLearn = false;
+  if (upBest < 10) { ws.textAll("{\"flat\":3}"); return; }   // toe never came up far enough
+  // tilt direction = the part of the raised-toe gravity reading that isn't along "flat"
+  float d = upBx * cfg.fx + upBy * cfg.fy + upBz * cfg.fz;
+  float tx = upBx - d * cfg.fx, ty = upBy - d * cfg.fy, tz = upBz - d * cfg.fz, tm = sqrtf(tx * tx + ty * ty + tz * tz);
+  if (tm < 1e-3f) { ws.textAll("{\"flat\":3}"); return; }
+  cfg.ux = tx / tm; cfg.uy = ty / tm; cfg.uz = tz / tm; cfg.upSet = true; saveCfg();
+  ws.textAll("{\"flat\":2}");
+}
+// Signed toe angle: + toe up, - toe down, sideways roll ignored. Before the toe-up direction is
+// learned it falls back to the unsigned tilt from flat.
+float pitchNow() {
+  if (!cfg.flatSet) return 0;
+  float c = qx * cfg.fx + qy * cfg.fy + qz * cfg.fz;
+  if (!cfg.upSet) return acosf(constrain(c, -1.0f, 1.0f)) * 57.2958f;
+  float sgn = qx * cfg.ux + qy * cfg.uy + qz * cfg.uz;
+  return atan2f(sgn, c) * 57.2958f;
 }
 // gyro history, to read how the foot was rotating just before an impact
 const int GH = 256; float gH[GH][3]; uint32_t gHT[GH]; int gHi = 0;
+float pH[GH];                              // signed toe angle at each of those samples
 uint32_t onsetT = 0;                       // when the current impact started
 float pkx = 0, pky = 0, pkz = 0;           // jolt direction at the impact's peak (linear accel)
 uint32_t peakAt = 0, peakAtFired = 0;      // when the peak happened (for sharpness)
@@ -203,6 +227,16 @@ static float dropAngle(uint32_t t0, const float* d) {
     if (proj > 0) sum += proj * dtm / 1000.0f;
   }
   return sum;
+}
+// Signed tilt before an impact: the biggest nose-up (+) or nose-down (-) tilt in the 400 ms before it.
+static float prePitch(uint32_t t0) {
+  float best = 0;
+  for (int i = 0; i < GH; i++) {
+    int32_t age = (int32_t)(t0 - gHT[i]);
+    if (age < 0 || age > 400) continue;
+    if (fabsf(pH[i]) > fabsf(best)) best = pH[i];
+  }
+  return best;
 }
 // Average rotation (deg/s, 3-D) over [t0+from, t0+to] ms.
 static void avgRotation(uint32_t t0, int from, int to, float* out) {
@@ -284,7 +318,7 @@ void fireStomp(float p, float now) {
       for (int i = 0; i < 11; i++) learnSig[i] += x[i];
       learnN++;
       float own[3] = { x[0], x[1], x[2] };
-      char b[112]; snprintf(b, sizeof b, "{\"learn\":\"%s %d/3 (lift %.0f deg, rise %.0f ms)\"}", learnTH == 1 ? "toe" : "heel", learnN, dropAngle(onsetT, own), x[9]); ws.textAll(b);
+      char b[128]; snprintf(b, sizeof b, "{\"learn\":\"%s %d/3 (tilt %+.0f deg, rise %.0f ms)\"}", learnTH == 1 ? "toe" : "heel", learnN, cfg.upSet ? prePitch(onsetT) : dropAngle(onsetT, own), x[9]); ws.textAll(b);
       if (learnN >= 3) {
         float* dst = learnTH == 1 ? cfg.toeSig : cfg.heelSig;
         for (int i = 0; i < 11; i++) dst[i] = learnSig[i] / 3;
@@ -296,15 +330,20 @@ void fireStomp(float p, float now) {
     // Score against each learned strike; each measurement votes, the totals decide.
     float vt[5], vh[5];
     float st = cfg.lcal ? sigScore(x, cfg.toeSig, vt) : -99, sh = cfg.rcal ? sigScore(x, cfg.heelSig, vh) : -99;
-    char votes[6] = "-----";
+    float pp = cfg.upSet ? prePitch(onsetT) : 0;   // + toe went up first, - heel went up first
+    char votes[7] = "------";
     if (cfg.lcal && cfg.rcal) for (int i = 0; i < 5; i++) votes[i] = vt[i] > vh[i] + 0.05f ? 'T' : vh[i] > vt[i] + 0.05f ? 'H' : '=';
+    if (cfg.upSet) votes[5] = pp >= cfg.tthr ? 'T' : pp <= -4 ? 'H' : '=';
     strcpy(hitVotes, votes);
     // a toe also has to have dropped far enough
     float tn = sqrtf(cfg.toeSig[0] * cfg.toeSig[0] + cfg.toeSig[1] * cfg.toeSig[1] + cfg.toeSig[2] * cfg.toeSig[2]);
     float td[3] = { tn > 0 ? cfg.toeSig[0] / tn : 0, tn > 0 ? cfg.toeSig[1] / tn : 0, tn > 0 ? cfg.toeSig[2] / tn : 0 };
     float ang = tn > 0 ? dropAngle(onsetT, td) : 0;
-    hitAngle = ang;
-    bool toe = st >= sh && ang >= cfg.tthr;
+    bool toe;
+    if (cfg.upSet && pp >= cfg.tthr) toe = true;          // toe came up at least the Toe lift angle: toe
+    else if (cfg.upSet && pp <= -4) toe = false;          // front of the foot tipped down (heel came up): heel
+    else toe = st >= sh && ang >= cfg.tthr;               // unclear tilt: the five measurements decide
+    hitAngle = cfg.upSet ? pp : ang;
     Kind k = (toe == (cfg.snare == 7)) ? KICK : SNARE;
     if (p < (k == KICK ? cfg.klvl : cfg.slvl)) return;   // not hard enough for that drum
     onHit(k, constrain(0.6f + 0.4f * (p / ((k == KICK ? cfg.klvl : cfg.slvl) * 2.5f)), 0, 1), p, -1, now, fabsf(st - sh) * 30);
@@ -335,8 +374,12 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
       float nm = sqrtf(nx * nx + ny * ny + nz * nz); if (nm > 0) { qx = nx / nm; qy = ny / nm; qz = nz / nm; }
     }
     if (cfg.flatSet && qInit) {
-      float c = qx * cfg.fx + qy * cfg.fy + qz * cfg.fz;
-      toeAngle = acosf(constrain(c, -1.0f, 1.0f)) * 57.2958f;
+      if (upLearn) {
+        float c = qx * cfg.fx + qy * cfg.fy + qz * cfg.fz, a = acosf(constrain(c, -1.0f, 1.0f)) * 57.2958f;
+        if (a > upBest) { upBest = a; upBx = qx; upBy = qy; upBz = qz; }
+        if (now > upLearnEnd || (upBest > 15 && a < upBest * 0.5f)) finishUpLearn();   // done once the toe comes back down
+      }
+      toeAngle = pitchNow();
       if (!hatIsOpen && toeAngle > cfg.othr) hatIsOpen = true;            // a few degrees of hysteresis
       else if (hatIsOpen && toeAngle < cfg.othr - 4) hatIsOpen = false;   // so it doesn't flutter at the line
     } else if (!cfg.flatSet) {
@@ -348,7 +391,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   float lx = ax - gx, ly = ay - gy, lz = az - gz;               // linear accel, g
   float mag = sqrtf(lx * lx + ly * ly + lz * lz);
   float wm = sqrtf(wx * wx + wy * wy + wz * wz);               // rotation speed, deg/s
-  gH[gHi][0] = wx; gH[gHi][1] = wy; gH[gHi][2] = wz; gHT[gHi] = now; gHi = (gHi + 1) % GH;
+  gH[gHi][0] = wx; gH[gHi][1] = wy; gH[gHi][2] = wz; gHT[gHi] = now; pH[gHi] = toeAngle; gHi = (gHi + 1) % GH;
   if (nMeter < 12) meterBuf[nMeter++] = mag;
 
   if (calibrating) {
@@ -405,8 +448,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[640];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
