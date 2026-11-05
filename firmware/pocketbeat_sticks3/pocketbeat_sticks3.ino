@@ -57,7 +57,7 @@ struct Cfg {
   int legSwap = 0;                                 // 0: left = kick, right = snare; 1: swapped
   int sigVer = 0;                                  // 2 = leg signatures use the pre-stomp tilt
   float tthr = 15.0f;                              // toe must have dropped at least this many degrees to count as a toe
-  int tlock = 0;                                   // 0 = tempo follows the player, 1 = locked to bpm
+  int tlock = 0;                                   // 0 = tempo follows the player, 1 = learned from the first 8 hits, held until 2 bars of silence
   float bpm = 100.0f;                              // locked tempo
 } cfg;
 Preferences prefs;
@@ -309,7 +309,6 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "swthr", &f); if (f) cfg.swthr = v;
   v = jsonNum(s, "tthr", &f); if (f) cfg.tthr = v;
   v = jsonNum(s, "tlock", &f); if (f) cfg.tlock = (int)v ? 1 : 0;
-  v = jsonNum(s, "bpm", &f); if (f) { cfg.bpm = constrain(v, 40.0f, 220.0f); if (cfg.tlock && clockOn) beatMs = 60000.0f / cfg.bpm; }
   v = jsonNum(s, "lthr", &f); if (f) cfg.lthr = v;
   v = jsonNum(s, "kthr", &f); if (f) cfg.kthr = v;
   v = jsonNum(s, "gap", &f); if (f) cfg.gap = (int)v;
