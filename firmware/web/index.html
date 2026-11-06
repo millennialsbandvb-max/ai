@@ -139,7 +139,8 @@
   <div class="tile"><b id="hatState">—</b><span>hats</span></div>
   <div class="tile" style="display:flex;align-items:center"><button type="button" id="flatBtn" style="width:100%;background:none;border:0;color:var(--fg);font-size:14px;cursor:pointer;padding:6px 0">Set flat, then raise toe</button></div>
 </div>
-<div class="ctl"><label for="othr">Open above</label><output id="othrOut"></output>
+<p class="hint" id="upState" style="margin:0">—</p>
+<div class="ctl"><label for="othr">Open when the toe is up more than</label><output id="othrOut"></output>
   <input type="range" id="othr" data-key="othr" min="3" max="60" step="1" value="20"></div>
 </div>
 
@@ -232,7 +233,8 @@
     $('ohatBox').hidden = !+c.ohat;
     if (!c.flat) $('hatState').textContent = 'set flat';
     $('calState').textContent = c.cal ? 'learned ✓' : 'not set yet';
-    $('thState').textContent = 'heel ' + (c.hcal ? '✓' : 'not set') + ' · toe ' + (c.tcal ? '✓' : 'not set');
+    $('thState').textContent = 'heel ' + (c.hcal ? '✓' : 'not set') + ' · toe ' + (c.tcal ? '✓' : 'not set') + ' · toe-up ' + (c.up ? '✓' : 'not set');
+    $('upState').textContent = c.up ? 'toe-up learned ✓' : 'toe-up not learned yet: tilt has no sign';
     $('learnHeel').classList.remove('arm'); $('learnToe').classList.remove('arm');
     $('calBtn').classList.remove('arm');
     if (c.ver) $('ver').textContent = c.ver;
@@ -282,7 +284,7 @@
       if (m.cfg) applyCfg(m.cfg);
       if (m.m) { for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; } }
       if (m.toe !== undefined) { $('toeAng').textContent = (m.toe > 0 ? '+' : '') + m.toe + '°'; $('hatState').textContent = m.open ? 'open' : 'closed'; }
-      if (m.flat === 2) $('flatBtn').textContent = 'Flat + toe-up set ✓';
+      if (m.flat === 2) { $('flatBtn').textContent = 'Flat + toe-up set ✓'; $('upState').textContent = 'toe-up learned ✓'; }
       if (m.flat === 3) $('flatBtn').textContent = 'Toe didn’t come up, try again';
       if (m.hit) {
         show(m.hit);

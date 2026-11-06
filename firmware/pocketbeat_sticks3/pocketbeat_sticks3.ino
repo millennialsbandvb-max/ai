@@ -207,6 +207,8 @@ float pitchNow() {
 // gyro history, to read how the foot was rotating just before an impact
 const int GH = 256; float gH[GH][3]; uint32_t gHT[GH]; int gHi = 0;
 float pH[GH];                              // signed toe angle at each of those samples
+float qH[GH][3];                           // gravity direction at each of those samples
+float upAcc[3]; int upN = 0;               // toe-up direction gathered from Set toe stomps
 uint32_t onsetT = 0;                       // when the current impact started
 float pkx = 0, pky = 0, pkz = 0;           // jolt direction at the impact's peak (linear accel)
 uint32_t peakAt = 0, peakAtFired = 0;      // when the peak happened (for sharpness)
@@ -317,6 +319,26 @@ void fireStomp(float p, float now) {
     if (learnTH) {
       for (int i = 0; i < 11; i++) learnSig[i] += x[i];
       learnN++;
+      // Toe stomps also teach which way is toe-up: the most-tilted moment before each one is "toe raised".
+      if (learnTH == 1 && cfg.flatSet) {
+        if (learnN == 1) { upAcc[0] = upAcc[1] = upAcc[2] = 0; upN = 0; }
+        float best = 0; int bi = -1;
+        for (int i = 0; i < GH; i++) {
+          int32_t age = (int32_t)(onsetT - gHT[i]);
+          if (age < 0 || age > 450) continue;
+          float c = qH[i][0] * cfg.fx + qH[i][1] * cfg.fy + qH[i][2] * cfg.fz, a = acosf(constrain(c, -1.0f, 1.0f)) * 57.2958f;
+          if (a > best) { best = a; bi = i; }
+        }
+        if (bi >= 0 && best > 5) {
+          float d = qH[bi][0] * cfg.fx + qH[bi][1] * cfg.fy + qH[bi][2] * cfg.fz;
+          float tx = qH[bi][0] - d * cfg.fx, ty = qH[bi][1] - d * cfg.fy, tz = qH[bi][2] - d * cfg.fz, tm = sqrtf(tx * tx + ty * ty + tz * tz);
+          if (tm > 1e-3f) { upAcc[0] += tx / tm; upAcc[1] += ty / tm; upAcc[2] += tz / tm; upN++; }
+        }
+        if (learnN >= 3 && upN >= 2) {
+          float m = sqrtf(upAcc[0] * upAcc[0] + upAcc[1] * upAcc[1] + upAcc[2] * upAcc[2]);
+          if (m > 0.5f) { cfg.ux = upAcc[0] / m; cfg.uy = upAcc[1] / m; cfg.uz = upAcc[2] / m; cfg.upSet = true; }
+        }
+      }
       float own[3] = { x[0], x[1], x[2] };
       char b[128]; snprintf(b, sizeof b, "{\"learn\":\"%s %d/3 (tilt %+.0f deg, rise %.0f ms)\"}", learnTH == 1 ? "toe" : "heel", learnN, cfg.upSet ? prePitch(onsetT) : dropAngle(onsetT, own), x[9]); ws.textAll(b);
       if (learnN >= 3) {
@@ -391,7 +413,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   float lx = ax - gx, ly = ay - gy, lz = az - gz;               // linear accel, g
   float mag = sqrtf(lx * lx + ly * ly + lz * lz);
   float wm = sqrtf(wx * wx + wy * wy + wz * wz);               // rotation speed, deg/s
-  gH[gHi][0] = wx; gH[gHi][1] = wy; gH[gHi][2] = wz; gHT[gHi] = now; pH[gHi] = toeAngle; gHi = (gHi + 1) % GH;
+  gH[gHi][0] = wx; gH[gHi][1] = wy; gH[gHi][2] = wz; gHT[gHi] = now; pH[gHi] = toeAngle; qH[gHi][0] = qx; qH[gHi][1] = qy; qH[gHi][2] = qz; gHi = (gHi + 1) % GH;
   if (nMeter < 12) meterBuf[nMeter++] = mag;
 
   if (calibrating) {
