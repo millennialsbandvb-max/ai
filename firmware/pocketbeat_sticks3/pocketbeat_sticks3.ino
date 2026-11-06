@@ -101,6 +101,7 @@ const char* kindName[] = { "kick", "snare", "hat", "tap", "shaker", "hatOpen" };
 const char* lastKind = "";
 float hitAngle = -999;   // signed toe tilt (or toe drop angle) reported with the next hit (deg)
 char hitVotes[7] = "";  // per-measurement toe/heel votes reported with the next hit
+float hitToeUp = -1, hitHeelUp = -1;   // lifts before the hit, reported with it
 const uint8_t midiNote[] = { 36, 38, 42, 0, 82, 46 };   // GM drums: kick, snare, closed hat (tap: none), shaker (set per cfg.shk)
 const uint8_t shakeNote[] = { 82, 70, 54 };          // GM: Shaker, Maracas, Tambourine
 
@@ -152,10 +153,11 @@ void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
   sendMidi(k, vel);
   if (ws.count()) {
     const char* nm = k == SHAKE ? (cfg.shk == 2 ? "tamb" : "shaker") : kindName[k];
-    char buf[160]; int n = snprintf(buf, sizeof buf, "{\"hit\":\"%s\",\"v\":%.2f,\"g\":%.2f", nm, vel, g);
+    char buf[200]; int n = snprintf(buf, sizeof buf, "{\"hit\":\"%s\",\"v\":%.2f,\"g\":%.2f", nm, vel, g);
     if (sw >= 0) n += snprintf(buf + n, sizeof buf - n, ",\"sw\":%.1f", sw);
     if (lift >= 0) n += snprintf(buf + n, sizeof buf - n, ",\"lift\":%.0f", lift);
     if (hitAngle > -900 && k != HAT) { n += snprintf(buf + n, sizeof buf - n, ",\"ang\":%.0f", hitAngle); hitAngle = -999; }
+    if (hitToeUp >= 0 && k != HAT && k != OHAT) { n += snprintf(buf + n, sizeof buf - n, ",\"tu\":%.0f,\"hu\":%.0f", hitToeUp, hitHeelUp); hitToeUp = hitHeelUp = -1; }
     if (hitVotes[0] && k != HAT && k != OHAT) { n += snprintf(buf + n, sizeof buf - n, ",\"votes\":\"%s\"", hitVotes); hitVotes[0] = 0; }
     snprintf(buf + n, sizeof buf - n, "}");
     ws.textAll(buf);
@@ -230,15 +232,24 @@ static float dropAngle(uint32_t t0, const float* d) {
   }
   return sum;
 }
-// Signed tilt before an impact: the biggest nose-up (+) or nose-down (-) tilt in the 400 ms before it.
-static float prePitch(uint32_t t0) {
-  float best = 0;
+// How far the toe rose and how far the heel rose in the 400 ms before an impact, measured from where
+// the foot was at the start of that window. Only the lift counts; coming back down is ignored.
+static void preLift(uint32_t t0, float* toeUp, float* heelUp) {
+  float start = 0, hi = -999, lo = 999; uint32_t oldest = 0xFFFFFFFF;
   for (int i = 0; i < GH; i++) {
     int32_t age = (int32_t)(t0 - gHT[i]);
     if (age < 0 || age > 400) continue;
-    if (fabsf(pH[i]) > fabsf(best)) best = pH[i];
+    if (gHT[i] < oldest) { oldest = gHT[i]; start = pH[i]; }
+    hi = max(hi, pH[i]); lo = min(lo, pH[i]);
   }
-  return best;
+  if (hi < -900) { *toeUp = *heelUp = 0; return; }
+  // the reference is whichever is lower of "where it started" and "flat", so a foot that was already tipped still counts
+  *toeUp = max(0.0f, hi - min(start, 0.0f));
+  *heelUp = max(0.0f, max(start, 0.0f) - lo);
+}
+static float prePitch(uint32_t t0) {   // + toe lift / - heel lift, whichever was bigger
+  float tu, hu; preLift(t0, &tu, &hu);
+  return tu >= hu ? tu : -hu;
 }
 // Average rotation (deg/s, 3-D) over [t0+from, t0+to] ms.
 static void avgRotation(uint32_t t0, int from, int to, float* out) {
@@ -340,7 +351,10 @@ void fireStomp(float p, float now) {
         }
       }
       float own[3] = { x[0], x[1], x[2] };
-      char b[128]; snprintf(b, sizeof b, "{\"learn\":\"%s %d/3 (tilt %+.0f deg, rise %.0f ms)\"}", learnTH == 1 ? "toe" : "heel", learnN, cfg.upSet ? prePitch(onsetT) : dropAngle(onsetT, own), x[9]); ws.textAll(b);
+      char b[140];
+      if (cfg.upSet) { float tu, hu; preLift(onsetT, &tu, &hu); snprintf(b, sizeof b, "{\"learn\":\"%s %d/3 (toe up %.0f deg, heel up %.0f deg)\"}", learnTH == 1 ? "toe" : "heel", learnN, tu, hu); }
+      else snprintf(b, sizeof b, "{\"learn\":\"%s %d/3 (lift %.0f deg)\"}", learnTH == 1 ? "toe" : "heel", learnN, dropAngle(onsetT, own));
+      ws.textAll(b);
       if (learnN >= 3) {
         float* dst = learnTH == 1 ? cfg.toeSig : cfg.heelSig;
         for (int i = 0; i < 11; i++) dst[i] = learnSig[i] / 3;
@@ -352,20 +366,21 @@ void fireStomp(float p, float now) {
     // Score against each learned strike; each measurement votes, the totals decide.
     float vt[5], vh[5];
     float st = cfg.lcal ? sigScore(x, cfg.toeSig, vt) : -99, sh = cfg.rcal ? sigScore(x, cfg.heelSig, vh) : -99;
-    float pp = cfg.upSet ? prePitch(onsetT) : 0;   // + toe went up first, - heel went up first
+    float toeUp = 0, heelUp = 0; if (cfg.upSet) preLift(onsetT, &toeUp, &heelUp);
+    float pp = toeUp >= heelUp ? toeUp : -heelUp;   // + toe lifted more, - heel lifted more
     char votes[7] = "------";
     if (cfg.lcal && cfg.rcal) for (int i = 0; i < 5; i++) votes[i] = vt[i] > vh[i] + 0.05f ? 'T' : vh[i] > vt[i] + 0.05f ? 'H' : '=';
-    if (cfg.upSet) votes[5] = pp >= cfg.tthr ? 'T' : pp <= -4 ? 'H' : '=';
+    if (cfg.upSet) votes[5] = (toeUp >= cfg.tthr && toeUp > heelUp) ? 'T' : (heelUp >= 4 && heelUp > toeUp) ? 'H' : '=';
     strcpy(hitVotes, votes);
     // a toe also has to have dropped far enough
     float tn = sqrtf(cfg.toeSig[0] * cfg.toeSig[0] + cfg.toeSig[1] * cfg.toeSig[1] + cfg.toeSig[2] * cfg.toeSig[2]);
     float td[3] = { tn > 0 ? cfg.toeSig[0] / tn : 0, tn > 0 ? cfg.toeSig[1] / tn : 0, tn > 0 ? cfg.toeSig[2] / tn : 0 };
     float ang = tn > 0 ? dropAngle(onsetT, td) : 0;
     bool toe;
-    if (cfg.upSet && pp >= cfg.tthr) toe = true;          // toe came up at least the Toe lift angle: toe
-    else if (cfg.upSet && pp <= -4) toe = false;          // front of the foot tipped down (heel came up): heel
+    if (cfg.upSet && toeUp >= cfg.tthr && toeUp > heelUp) toe = true;   // toe lifted at least the Toe lift angle, more than the heel
+    else if (cfg.upSet && heelUp >= 4 && heelUp > toeUp) toe = false;  // heel lifted more: heel
     else toe = st >= sh && ang >= cfg.tthr;               // unclear tilt: the five measurements decide
-    hitAngle = cfg.upSet ? pp : ang;
+    hitAngle = cfg.upSet ? pp : ang; hitToeUp = toeUp; hitHeelUp = heelUp;
     Kind k = (toe == (cfg.snare == 7)) ? KICK : SNARE;
     if (p < (k == KICK ? cfg.klvl : cfg.slvl)) return;   // not hard enough for that drum
     onHit(k, constrain(0.6f + 0.4f * (p / ((k == KICK ? cfg.klvl : cfg.slvl) * 2.5f)), 0, 1), p, -1, now, fabsf(st - sh) * 30);
