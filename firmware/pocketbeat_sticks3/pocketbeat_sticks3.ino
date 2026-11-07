@@ -71,6 +71,8 @@ struct Cfg {
   float krange = 36.0f;                            // foot keyboard: degrees of swivel left / right of centre for the ends of the range
   int kflip = 0;                                   // foot keyboard: swap which way is up
   float kflat = 10.0f;                             // foot keyboard: tilt from flat that releases the note (deg)
+  int kspan = 18;                                  // foot keyboard: semitones from lowest to highest note (18 = 1.5 octaves)
+  float kdeg = 4.0f;                               // foot keyboard: degrees of swivel per note
 } cfg;
 Preferences prefs;
 
@@ -169,11 +171,11 @@ void keyOn(int note, float vel, float tilt) {
   char nm[8]; keyName(note, nm);
   char b[96]; snprintf(b, sizeof b, "{\"key\":%d,\"on\":1,\"v\":%.2f,\"name\":\"%s\",\"tilt\":%.0f}", note, vel, nm, tilt); ws.textAll(b);
 }
-// Which note a swivel picks: krange degrees one way = lowest note, krange the other way = 1.5 octaves up.
-const int KEY_SPAN = 18;   // semitones (1.5 octaves, 19 notes)
+// Which note a swivel picks: the range is centred on the middle position; each note is kdeg degrees wide.
+float keyHalf() { return cfg.kspan * cfg.kdeg / 2; }   // degrees from centre to either end
 int keyForTilt(float a) {
-  float t = constrain(a, -cfg.krange, cfg.krange);
-  return cfg.kroot + (int)roundf((t + cfg.krange) / (2 * cfg.krange) * KEY_SPAN);
+  float h = keyHalf(), t = constrain(a, -h, h);
+  return cfg.kroot + (int)roundf((t + h) / cfg.kdeg);
 }
 
 void sendMidi(Kind k, float vel) {
@@ -493,7 +495,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
     }
     float yr = (wx - bwx) * qx + (wy - bwy) * qy + (wz - bwz) * qz;   // deg/s about vertical
     if (fabsf(yr) > 1.5f) yawDeg += (cfg.kflip ? -yr : yr) * dts;      // ignore sub-noise creep
-    yawDeg = constrain(yawDeg, -cfg.krange - 15, cfg.krange + 15);
+    yawDeg = constrain(yawDeg, -keyHalf() - 15, keyHalf() + 15);
   }
   gH[gHi][0] = wx; gH[gHi][1] = wy; gH[gHi][2] = wz; gHT[gHi] = now; pH[gHi] = toeAngle; qH[gHi][0] = qx; qH[gHi][1] = qy; qH[gHi][2] = qz; yH[gHi] = yawDeg; gHi = (gHi + 1) % GH;
   if (nMeter < 12) meterBuf[nMeter++] = mag;
@@ -557,9 +559,9 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
-  char b[720];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  char b[800];
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -593,6 +595,8 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "krange", &f); if (f) cfg.krange = constrain(v, 8.0f, 80.0f);
   v = jsonNum(s, "kflip", &f); if (f) cfg.kflip = (int)v ? 1 : 0;
   v = jsonNum(s, "kflat", &f); if (f) cfg.kflat = constrain(v, 3.0f, 40.0f);
+  v = jsonNum(s, "kspan", &f); if (f) cfg.kspan = constrain((int)v, 2, 48);
+  v = jsonNum(s, "kdeg", &f); if (f) cfg.kdeg = constrain(v, 1.0f, 15.0f);
   v = jsonNum(s, "tthr", &f); if (f) cfg.tthr = v;
   v = jsonNum(s, "tlock", &f); if (f) cfg.tlock = (int)v ? 1 : 0;
   v = jsonNum(s, "lthr", &f); if (f) cfg.lthr = v;
