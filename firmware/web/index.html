@@ -258,7 +258,6 @@
     modeUi(+c.snare);
     const ed = +c.kEdge;
     $('edgeState').textContent = (ed ? 'edges set · ' : 'no edges · ') + Math.round(+c.kspan * +c.kdeg) + '° wide, ' + (+c.kdeg).toFixed(1) + '° per note';
-    $('kflipSeg').hidden = ed;
     $('ohatBox').hidden = !+c.ohat;
     if (!c.flat) $('hatState').textContent = 'set flat';
     $('calState').textContent = c.cal ? 'learned ✓' : 'not set yet';
@@ -282,7 +281,7 @@
   });
   $('flatBtn').addEventListener('click', () => { send({ setFlat: 1 }); $('flatBtn').textContent = 'Now raise your toe…'; });
   function keyForTilt(t) {
-    const ed = +cfg.kEdge, dir = ed ? (cfg.kHi >= cfg.kLo ? 1 : -1) : 1, mid = ed ? (cfg.kLo + cfg.kHi) / 2 : 0;
+    const ed = +cfg.kEdge, dir = (ed ? (cfg.kHi >= cfg.kLo ? 1 : -1) : 1) * (+cfg.kflip ? -1 : 1), mid = ed ? (cfg.kLo + cfg.kHi) / 2 : 0;
     const d = +$('kdeg').value, h = +$('kspan').value * d / 2, c = Math.max(-h, Math.min(h, (t - mid) * dir)); return +$('kroot').value + Math.round((c + h) / d);
   }
   function keyRangeText() { $('keyRange').textContent = noteName(+$('kroot').value) + '–' + noteName(+$('kroot').value + +$('kspan').value); $('kdegOut').textContent = fmt.kdeg($('kdeg').value); }

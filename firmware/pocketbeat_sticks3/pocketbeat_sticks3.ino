@@ -182,7 +182,7 @@ void keyOn(int note, float vel, float tilt) {
 float keyHalf() { return cfg.kspan * cfg.kdeg / 2; }
 float keyMid() { return cfg.kEdge ? (cfg.kLo + cfg.kHi) / 2 : 0; }
 int keyForTilt(float a) {
-  float dir = cfg.kEdge ? (cfg.kHi >= cfg.kLo ? 1.0f : -1.0f) : 1.0f;
+  float dir = (cfg.kEdge ? (cfg.kHi >= cfg.kLo ? 1.0f : -1.0f) : 1.0f) * (cfg.kflip ? -1.0f : 1.0f);   // swap works with or without edges
   float h = keyHalf(), t = constrain((a - keyMid()) * dir, -h, h);
   return cfg.kroot + (int)roundf((t + h) / cfg.kdeg);
 }
@@ -506,7 +506,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
       const float b = 0.01f; bwx += b * (wx - bwx); bwy += b * (wy - bwy); bwz += b * (wz - bwz);
     }
     float yr = (wx - bwx) * qx + (wy - bwy) * qy + (wz - bwz) * qz;   // deg/s about vertical
-    if (fabsf(yr) > 1.5f) yawDeg += (cfg.kflip && !cfg.kEdge ? -yr : yr) * dts;   // ignore sub-noise creep
+    if (fabsf(yr) > 1.5f) yawDeg += yr * dts;   // ignore sub-noise creep
     yawDeg = constrain(yawDeg, keyMid() - keyHalf() - 15, keyMid() + keyHalf() + 15);
   }
   gH[gHi][0] = wx; gH[gHi][1] = wy; gH[gHi][2] = wz; gHT[gHi] = now; pH[gHi] = toeAngle; qH[gHi][0] = qx; qH[gHi][1] = qy; qH[gHi][2] = qz; yH[gHi] = yawDeg; gHi = (gHi + 1) % GH;
