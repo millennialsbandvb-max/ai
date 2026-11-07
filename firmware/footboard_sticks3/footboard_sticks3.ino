@@ -30,6 +30,8 @@ USBMIDI usbMidi;
 
 static const char* OTA_URL = "https://raw.githubusercontent.com/millennialsbandvb-max/ai/main/firmware/bin/footboard_sticks3.app.bin";
 static const char* OTA_VER_URL = "https://raw.githubusercontent.com/millennialsbandvb-max/ai/main/firmware/bin/footboard_version.txt";
+static const char* OTHER_URL = "https://raw.githubusercontent.com/millennialsbandvb-max/ai/main/firmware/bin/pocketbeat_sticks3.app.bin";   // "Switch to PocketBeat drums"
+static const char* OTHER_VER_URL = "https://raw.githubusercontent.com/millennialsbandvb-max/ai/main/firmware/bin/version.txt";
 
 // ---------------- Settings (persisted; append new fields at the end) ----------------
 struct Cfg {
@@ -215,6 +217,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   }
   if (strstr(s, "\"keyClear\"")) { cfg.kEdge = false; cfg.kLo = cfg.kHi = 0; loSet = hiSet = false; yawDeg = 0; saveCfg(); sendCfg(nullptr); return; }
   if (strstr(s, "\"allOff\"")) { keyTip = -1; notesOff(); return; }
+  if (strstr(s, "\"switchFw\"")) { otaRequest = 2; return; }
   if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }
   if (const char* q = strstr(s, "\"ssid\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t m = min((size_t)(e - q), sizeof(cfg.ssid) - 1); memcpy(cfg.ssid, q, m); cfg.ssid[m] = 0; } }
   if (const char* q = strstr(s, "\"pass\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t m = min((size_t)(e - q), sizeof(cfg.pass) - 1); memcpy(cfg.pass, q, m); cfg.pass[m] = 0; } }
@@ -244,18 +247,19 @@ bool joinHomeWifi() {
   if (WiFi.status() != WL_CONNECTED) { otaStatus("Could not join home Wi-Fi (check name/password)."); return false; }
   return true;
 }
-void doOtaFromGithub() {
+// url/verUrl: which firmware to fetch. force: install even if the version matches (switching firmware).
+void doOtaFromGithub(const char* url, const char* verUrl, bool force) {
   otaStatus("Joining home Wi-Fi…");
   if (!joinHomeWifi()) return;
   WiFiClientSecure client; client.setInsecure();
   HTTPClient http;
   otaStatus("Checking latest version…");
-  http.begin(client, OTA_VER_URL); int code = http.GET();
+  http.begin(client, verUrl); int code = http.GET();
   String remote = code == 200 ? http.getString() : ""; remote.trim(); http.end();
   if (code != 200) { otaStatus("Could not reach GitHub."); return; }
-  if (remote == FW_VERSION) { char b[96]; snprintf(b, sizeof b, "Already up to date (%s).", FW_VERSION); otaStatus(b); return; }
+  if (!force && remote == FW_VERSION) { char b[96]; snprintf(b, sizeof b, "Already up to date (%s).", FW_VERSION); otaStatus(b); return; }
   otaStatus("Downloading update…");
-  http.begin(client, OTA_URL); code = http.GET();
+  http.begin(client, url); code = http.GET();
   if (code != 200) { otaStatus("Download failed."); http.end(); return; }
   int len = http.getSize();
   if (!Update.begin(len > 0 ? len : UPDATE_SIZE_UNKNOWN)) { otaStatus("Not enough space for update."); http.end(); return; }
@@ -360,7 +364,7 @@ void loop() {
   float ax, ay, az, wx = 0, wy = 0, wz = 0;
   if (M5.Imu.update() && M5.Imu.getAccel(&ax, &ay, &az)) { M5.Imu.getGyro(&wx, &wy, &wz); processMotion(ax, ay, az, wx, wy, wz, now); }
 
-  if (otaRequest) { otaRequest = 0; doOtaFromGithub(); WiFi.mode(WIFI_AP); }
+  if (otaRequest) { int r = otaRequest; otaRequest = 0; if (r == 2) doOtaFromGithub(OTHER_URL, OTHER_VER_URL, true); else doOtaFromGithub(OTA_URL, OTA_VER_URL, false); WiFi.mode(WIFI_AP); }
 
   if (ws.count() && nMeter >= 12 && now - lastMeterSend > 25) {
     char b[240]; int p = snprintf(b, sizeof b, "{\"m\":[");

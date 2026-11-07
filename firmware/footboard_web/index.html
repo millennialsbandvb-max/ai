@@ -172,8 +172,9 @@
   <div class="ctl"><label for="ssid">Home Wi-Fi name</label><output></output><input type="text" id="ssid" placeholder="your Wi-Fi network"></div>
   <div class="ctl"><label for="pass">Home Wi-Fi password</label><output></output><input type="password" id="pass" placeholder="password"></div>
   <div class="row"><button type="button" id="saveWifi">Save Wi-Fi</button><button type="button" id="otaBtn" class="go">Check for update</button></div>
+  <div class="row"><button type="button" id="switchFw">Switch to PocketBeat drums</button></div>
   <div class="row"><input type="file" id="fwFile" accept=".bin" hidden><button type="button" id="pickFw">Upload a .app.bin from this phone</button></div>
-  <p class="hint" id="otaMsg">Check for update joins your home Wi-Fi, gets the newest Footboard build and installs it (about a minute). To go back to the drum firmware, upload its saved .app.bin here.</p>
+  <p class="hint" id="otaMsg">Check for update joins your home Wi-Fi, gets the newest Footboard build and installs it (about a minute). "Switch to PocketBeat drums" installs the drum firmware the same way; its settings are kept.</p>
 </section>
 <div class="foot"><span>Board battery <b id="batt">—</b></span><span>Front button = center · side button = octave up</span></div>
 
@@ -324,6 +325,8 @@
     };
   }
   $('saveWifi').onclick = () => { send({ set: { ssid: $('ssid').value, pass: $('pass').value } }); $('otaMsg').textContent = 'Wi-Fi saved on the board.'; };
+  let confirmSwitch = false; const SWITCH_LABEL = 'Switch to PocketBeat drums';
+  $('switchFw').addEventListener('click', () => { if (!confirmSwitch) { confirmSwitch = true; $('switchFw').textContent = 'Tap again to switch'; setTimeout(() => { confirmSwitch = false; $('switchFw').textContent = SWITCH_LABEL; }, 4000); return; } send({ switchFw: 1 }); $('otaMsg').textContent = 'Switching… keep this page open, the board restarts when done.'; });
   $('otaBtn').onclick = () => { send({ ota: 1 }); $('otaMsg').textContent = 'Starting…'; };
   $('pickFw').onclick = () => $('fwFile').click();
   $('fwFile').onchange = async () => {
