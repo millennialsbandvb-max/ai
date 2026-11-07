@@ -69,7 +69,7 @@ struct Cfg {
   float ux = 0, uy = 0, uz = 0; bool upSet = false; // which way gravity moves when the toe is raised (learned after Set flat)
   int kroot = 48;                                  // foot keyboard: lowest note (MIDI number, 48 = C3)
   float krange = 36.0f;                            // foot keyboard: degrees of swivel left / right of centre for the ends of the range
-  int kflip = 0;                                   // foot keyboard: swap which way is up
+  int kflip = 1;                                   // foot keyboard: swap which way is up
   float kflat = 10.0f;                             // foot keyboard: tilt from flat that releases the note (deg)
   int kspan = 18;                                  // foot keyboard: semitones from lowest to highest note (18 = 1.5 octaves)
   float kdeg = 4.0f;                               // foot keyboard: degrees of swivel per note
@@ -92,6 +92,7 @@ void loadCfg() {
   if (cfg.sigVer < 4) { cfg.lcal = false; cfg.rcal = false; cfg.sigVer = 4; cfg.snare = 8; cfg.thr = 1.2f; }
   if (cfg.sigVer < 5) { cfg.tthr = 15.0f; cfg.sigVer = 5; }
   if (cfg.sigVer < 6) { cfg.lcal = false; cfg.rcal = false; cfg.sigVer = 6; }   // toe/heel now learn five measurements   // lf/rf now hold toe/heel signatures; start in heel/toe mode
+  if (cfg.sigVer < 7) { if (n > 0) cfg.kflip = cfg.kflip ? 0 : 1; cfg.sigVer = 7; }   // keyboard pitch direction was backwards: flip whatever was set
   if (cfg.snare != 1 && cfg.snare != 2 && cfg.snare != 6 && cfg.snare != 7 && cfg.snare != 8 && cfg.snare != 9 && cfg.snare != 10) cfg.snare = 8;
   prefs.end();
 }
@@ -771,7 +772,7 @@ void loop() {
   }
   if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else if (!resetHeld && cfg.snare == 6) startSwingCal(); else if (!resetHeld && cfg.snare == 10) yawDeg = keyMid(); resetHeld = false; }
   if (M5.BtnA.pressedFor(2000) && !resetHeld) {   // reset settings, keep Wi-Fi
-    resetHeld = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.sigVer = 6; cfg = d; saveCfg(); sendCfg(nullptr);
+    resetHeld = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.sigVer = 7; cfg = d; saveCfg(); sendCfg(nullptr);
   }
 
   float ax, ay, az;
