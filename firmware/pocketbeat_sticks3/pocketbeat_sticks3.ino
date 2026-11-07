@@ -139,6 +139,9 @@ void playBoard(Kind k, float vel) {
 }
 // ---------------- Foot keyboard ----------------
 int keyNote = -1;            // note currently held (MIDI number), -1 = none
+float keyQx = 0, keyQy = 0, keyQz = 1;   // foot orientation (gravity direction) when the note started
+uint32_t keyOnAt = 0;                    // when the note started
+float keyTip = 0;                        // how far the foot has tipped from that position (deg)
 uint32_t keyLiftSince = 0;   // when the foot started to leave flat
 static const char* NOTE_NAMES[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 void keyName(int n, char* out) { sprintf(out, "%s%d", NOTE_NAMES[n % 12], n / 12 - 1); }
@@ -151,11 +154,11 @@ void keyOff() {
 #ifndef PB_LITE
   M5.Speaker.stop(5);
 #endif
-  char b[40]; snprintf(b, sizeof b, "{\"key\":%d,\"on\":0}", keyNote); ws.textAll(b);
+  char b[64]; snprintf(b, sizeof b, "{\"key\":%d,\"on\":0,\"tip\":%.0f}", keyNote, keyTip); ws.textAll(b);
   keyNote = -1;
 }
 void keyOn(int note, float vel, float tilt) {
-  keyOff();
+  if (keyNote >= 0) { keyTip = -1; keyOff(); }   // replaced by the new note
   keyNote = note;
   uint8_t v = (uint8_t)constrain(20 + vel * 107, 1, 127);
   if (bleConnected) MIDI.sendNoteOn(note, v, 1);
@@ -373,9 +376,12 @@ void finishSwingCal() {
 void fireStomp(float p, float now) {
   if (cfg.snare == 10) {   // Foot keyboard: a tap plays the note the foot is swivelled to; it holds until the foot leaves flat
     // read the swivel from just before the tap: the tap's own jolt makes the gyro twitch
-    float a = yawDeg; int32_t bestAge = 1 << 30;
-    for (int i = 0; i < GH; i++) { int32_t age = (int32_t)(onsetT - gHT[i]); if (age >= 10 && age < bestAge) { bestAge = age; a = yH[i]; } }
+    float a = yawDeg; int32_t bestAge = 1 << 30; int bi = -1;
+    for (int i = 0; i < GH; i++) { int32_t age = (int32_t)(onsetT - gHT[i]); if (age >= 10 && age < bestAge) { bestAge = age; a = yH[i]; bi = i; } }
     keyOn(keyForTilt(a), constrain((p - cfg.thr) / (cfg.thr * 3), 0.0f, 1.0f), a);
+    // "flat" for this note = how the foot sat just before the tap
+    if (bi >= 0) { keyQx = qH[bi][0]; keyQy = qH[bi][1]; keyQz = qH[bi][2]; } else { keyQx = qx; keyQy = qy; keyQz = qz; }
+    keyOnAt = now; keyTip = 0;
     keyLiftSince = 0;
     return;
   }
@@ -541,14 +547,16 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 
   // ---- foot keyboard: lifting off flat releases the note ----
   if (cfg.snare == 10 && keyNote >= 0) {
-    if (flatTilt > cfg.kflat) { if (!keyLiftSince) keyLiftSince = now; else if (now - keyLiftSince > 40) keyOff(); }
+    keyTip = acosf(constrain(qx * keyQx + qy * keyQy + qz * keyQz, -1.0f, 1.0f)) * 57.2958f;
+    bool settled = now - keyOnAt > 250;                       // the tap's own jolt can't release the note
+    if (settled && keyTip > cfg.kflat) { if (!keyLiftSince) keyLiftSince = now; else if (now - keyLiftSince > 100) keyOff(); }
     else keyLiftSince = 0;
   }
 
   // ---- kick: impact spike; not right after a swing (the foot landing from a swing isn't a stomp) ----
   float gate = (cfg.snare == 7 || cfg.snare == 8) ? min(cfg.klvl, cfg.slvl) : cfg.thr;
   if (mag > gate) {
-    uint32_t gapMs = cfg.snare == 9 ? 55 : (uint32_t)cfg.gap;   // shakers retrigger fast
+    uint32_t gapMs = cfg.snare == 9 ? 55 : cfg.snare == 10 ? max((uint32_t)cfg.gap, (uint32_t)200) : (uint32_t)cfg.gap;   // shakers retrigger fast; keyboard ignores the tap's bounce
     if (now - lastStompT > gapMs && now - lastSwingT > 250) {
       if (!peakT) onsetAngle = toeAngle;
       if (mag > peak) { peak = mag; pkx = lx; pky = ly; pkz = lz; peakAt = now; if (!peakT) peakT = now; }

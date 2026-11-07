@@ -92,7 +92,7 @@
   <div class="tile"><b id="keyNow">—</b><span>playing</span></div>
   <div class="tile"><b id="keyRange">—</b><span>range</span></div>
 </div>
-<p class="hint">Lay the board flat on your foot and tap "Set flat" once (open-hat section). Swivel your foot left / right to pick a note (chromatic; set how many notes and how wide each one is below); the left tile shows the note you're pointing at. Tap to play it (harder = louder); it holds until your foot tips away from flat by the release angle. "Center here" or the board's front button makes where your foot is now the middle note; the board's side button steps up an octave. Sends MIDI on channel 1; the board speaker plays a tone.</p>
+<p class="hint">Lay the board flat on your foot and tap "Set flat" once (open-hat section). Swivel your foot left / right to pick a note (chromatic; set how many notes and how wide each one is below); the left tile shows the note you're pointing at. Tap to play it (harder = louder); it holds until your foot tips away from where it was when you tapped by more than the release angle. "Center here" or the board's front button makes where your foot is now the middle note; the board's side button steps up an octave. Sends MIDI on channel 1; the board speaker plays a tone.</p>
 <div class="row"><button type="button" id="octDown">Octave −</button><button type="button" id="keyCenter">Center here</button><button type="button" id="octUp">Octave +</button></div>
 <div class="seg" data-key="kflip">
   <button type="button" data-v="0">Normal</button>
@@ -104,7 +104,7 @@
   <input type="range" id="kspan" data-key="kspan" min="2" max="48" step="1" value="18"></div>
 <div class="ctl"><label for="kdeg">Degrees of swivel per note</label><output id="kdegOut"></output>
   <input type="range" id="kdeg" data-key="kdeg" min="1" max="15" step="0.5" value="4"></div>
-<div class="ctl"><label for="kflat">Release when tipped more than</label><output id="kflatOut"></output>
+<div class="ctl"><label for="kflat">Release when tipped more than (from where you tapped)</label><output id="kflatOut"></output>
   <input type="range" id="kflat" data-key="kflat" min="3" max="40" step="1" value="10"></div>
 </div>
 <div id="shkBox">
@@ -332,7 +332,7 @@
           $('keyNow').textContent = m.name; show('kick'); $('last').textContent = m.name;
           logRows.unshift((m.name + '     ').slice(0, 5) + '  vel ' + Math.round(20 + m.v * 107) + '  swivel ' + (m.tilt > 0 ? '+' : '') + m.tilt + '°'); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n');
           const out = +(cfg.out || 0); if (phoneSound && (out === 1 || out === 2)) phoneKeyOn(m.key, m.v);
-        } else { $('keyNow').textContent = '—'; phoneKeyOff(); }
+        } else { $('keyNow').textContent = '—'; phoneKeyOff(); if (m.tip >= 0) logRows.unshift('      released (tipped ' + Math.round(m.tip) + '°)'); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); }
       }
       if (m.toe !== undefined) { $('toeAng').textContent = (m.toe > 0 ? '+' : '') + m.toe + '°'; $('hatState').textContent = m.open ? 'open' : 'closed'; }
       if (m.flat === 2) { $('flatBtn').textContent = 'Flat + toe-up set ✓'; $('upState').textContent = 'toe-up learned ✓'; }
