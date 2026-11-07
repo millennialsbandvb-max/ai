@@ -68,7 +68,9 @@ struct Cfg {
   float swang = 25.0f;                             // stomp/swing mode: degrees the foot must swing to play the snare
   float ux = 0, uy = 0, uz = 0; bool upSet = false; // which way gravity moves when the toe is raised (learned after Set flat)
   int kroot = 48;                                  // foot keyboard: lowest note (MIDI number, 48 = C3)
-  float krange = 36.0f;                            // foot keyboard: degrees of heel-up (bottom) and toe-up (top) for the two octaves
+  float krange = 36.0f;                            // foot keyboard: degrees of swivel left / right of centre for the ends of the range
+  int kflip = 0;                                   // foot keyboard: swap which way is up
+  float kflat = 10.0f;                             // foot keyboard: tilt from flat that releases the note (deg)
 } cfg;
 Preferences prefs;
 
@@ -167,10 +169,11 @@ void keyOn(int note, float vel, float tilt) {
   char nm[8]; keyName(note, nm);
   char b[96]; snprintf(b, sizeof b, "{\"key\":%d,\"on\":1,\"v\":%.2f,\"name\":\"%s\",\"tilt\":%.0f}", note, vel, nm, tilt); ws.textAll(b);
 }
-// Which note a tilt picks: heel-up krange degrees = lowest note, toe-up krange degrees = two octaves up.
-int keyForTilt(float tilt) {
-  float t = constrain(tilt, -cfg.krange, cfg.krange);
-  return cfg.kroot + (int)roundf((t + cfg.krange) / (2 * cfg.krange) * 24);
+// Which note a swivel picks: krange degrees one way = lowest note, krange the other way = 1.5 octaves up.
+const int KEY_SPAN = 18;   // semitones (1.5 octaves, 19 notes)
+int keyForTilt(float a) {
+  float t = constrain(a, -cfg.krange, cfg.krange);
+  return cfg.kroot + (int)roundf((t + cfg.krange) / (2 * cfg.krange) * KEY_SPAN);
 }
 
 void sendMidi(Kind k, float vel) {
@@ -207,6 +210,9 @@ void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
 }
 
 float toeAngle = 0; bool hatIsOpen = false;   // degrees the foot is tilted away from flat; open-hat state
+float yawDeg = 0;                                 // foot keyboard: swivel left/right from centre (deg)
+float bwx = 0, bwy = 0, bwz = 0;                  // gyro bias, re-measured whenever the foot is still
+float flatTilt = 0;                               // degrees away from flat in any direction
 float qx = 0, qy = 0, qz = 0; bool qInit = false;   // gravity direction tracked with the gyro (instant), corrected slowly by the accelerometer
 #include "pb_clock.h"
 
@@ -252,6 +258,7 @@ float pitchNow() {
 const int GH = 512; float gH[GH][3]; uint32_t gHT[GH]; int gHi = 0;
 float pH[GH];                              // signed toe angle at each of those samples
 float qH[GH][3];                           // gravity direction at each of those samples
+float yH[GH];                              // swivel (foot keyboard) at each of those samples
 float upAcc[3]; int upN = 0;               // toe-up direction gathered from Set toe stomps
 uint32_t onsetT = 0;                       // when the current impact started
 float pkx = 0, pky = 0, pkz = 0;           // jolt direction at the impact's peak (linear accel)
@@ -362,11 +369,11 @@ void finishSwingCal() {
 }
 
 void fireStomp(float p, float now) {
-  if (cfg.snare == 10) {   // Foot keyboard: the landing plays the note for the angle the foot came down from
-    // the most-tilted moment (signed, from flat) in the 600 ms before landing = the angle you were holding
-    float tilt = 0;
-    for (int i = 0; i < GH; i++) { int32_t age = (int32_t)(onsetT - gHT[i]); if (age >= 0 && age <= 600 && fabsf(pH[i]) > fabsf(tilt)) tilt = pH[i]; }
-    keyOn(keyForTilt(tilt), constrain((p - cfg.thr) / (cfg.thr * 3), 0.0f, 1.0f), tilt);
+  if (cfg.snare == 10) {   // Foot keyboard: a tap plays the note the foot is swivelled to; it holds until the foot leaves flat
+    // read the swivel from just before the tap: the tap's own jolt makes the gyro twitch
+    float a = yawDeg; int32_t bestAge = 1 << 30;
+    for (int i = 0; i < GH; i++) { int32_t age = (int32_t)(onsetT - gHT[i]); if (age >= 10 && age < bestAge) { bestAge = age; a = yH[i]; } }
+    keyOn(keyForTilt(a), constrain((p - cfg.thr) / (cfg.thr * 3), 0.0f, 1.0f), a);
     keyLiftSince = 0;
     return;
   }
@@ -467,6 +474,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
         if (now > upLearnEnd || (upBest > 15 && a < upBest * 0.5f)) finishUpLearn();   // done once the toe comes back down
       }
       toeAngle = pitchNow();
+      flatTilt = acosf(constrain(qx * cfg.fx + qy * cfg.fy + qz * cfg.fz, -1.0f, 1.0f)) * 57.2958f;
       if (!hatIsOpen && toeAngle > cfg.othr) hatIsOpen = true;            // a few degrees of hysteresis
       else if (hatIsOpen && toeAngle < cfg.othr - 4) hatIsOpen = false;   // so it doesn't flutter at the line
     } else if (!cfg.flatSet) {
@@ -478,7 +486,16 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   float lx = ax - gx, ly = ay - gy, lz = az - gz;               // linear accel, g
   float mag = sqrtf(lx * lx + ly * ly + lz * lz);
   float wm = sqrtf(wx * wx + wy * wy + wz * wz);               // rotation speed, deg/s
-  gH[gHi][0] = wx; gH[gHi][1] = wy; gH[gHi][2] = wz; gHT[gHi] = now; pH[gHi] = toeAngle; qH[gHi][0] = qx; qH[gHi][1] = qy; qH[gHi][2] = qz; gHi = (gHi + 1) % GH;
+  // Swivel: rotation about the vertical (gravity) axis, minus the gyro's own small error, added up.
+  if (qInit) {
+    if (wm < 6 && fabsf(sqrtf(ax * ax + ay * ay + az * az) - 1.0f) < 0.03f) {   // still: whatever the gyro reads is its error
+      const float b = 0.01f; bwx += b * (wx - bwx); bwy += b * (wy - bwy); bwz += b * (wz - bwz);
+    }
+    float yr = (wx - bwx) * qx + (wy - bwy) * qy + (wz - bwz) * qz;   // deg/s about vertical
+    if (fabsf(yr) > 1.5f) yawDeg += (cfg.kflip ? -yr : yr) * dts;      // ignore sub-noise creep
+    yawDeg = constrain(yawDeg, -cfg.krange - 15, cfg.krange + 15);
+  }
+  gH[gHi][0] = wx; gH[gHi][1] = wy; gH[gHi][2] = wz; gHT[gHi] = now; pH[gHi] = toeAngle; qH[gHi][0] = qx; qH[gHi][1] = qy; qH[gHi][2] = qz; yH[gHi] = yawDeg; gHi = (gHi + 1) % GH;
   if (nMeter < 12) meterBuf[nMeter++] = mag;
 
   if (calibrating) {
@@ -522,7 +539,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 
   // ---- foot keyboard: lifting off flat releases the note ----
   if (cfg.snare == 10 && keyNote >= 0) {
-    if (fabsf(toeAngle) > 5) { if (!keyLiftSince) keyLiftSince = now; else if (now - keyLiftSince > 40) keyOff(); }
+    if (flatTilt > cfg.kflat) { if (!keyLiftSince) keyLiftSince = now; else if (now - keyLiftSince > 40) keyOff(); }
     else keyLiftSince = 0;
   }
 
@@ -541,8 +558,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[720];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -562,6 +579,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   if (strstr(s, "\"learnToe\"")) { learnTH = 1; learnN = 0; memset(learnSig, 0, sizeof learnSig); ws.textAll("{\"learn\":\"toe 0/3\"}"); return; }
   if (strstr(s, "\"learnHeel\"")) { learnTH = 2; learnN = 0; memset(learnSig, 0, sizeof learnSig); ws.textAll("{\"learn\":\"heel 0/3\"}"); return; }
   if (strstr(s, "\"setFlat\"")) { setFlat(); return; }
+  if (strstr(s, "\"keyCenter\"")) { yawDeg = 0; return; }
   if (strstr(s, "\"flipSwing\"")) { cfg.rx = -cfg.rx; cfg.ry = -cfg.ry; cfg.rz = -cfg.rz; saveCfg(); ws.textAll("{\"learn\":\"flipped ✓\"}"); return; }
   if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }
   if (const char* q = strstr(s, "\"ssid\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.ssid) - 1); memcpy(cfg.ssid, q, n); cfg.ssid[n] = 0; } }
@@ -573,6 +591,8 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "swang", &f); if (f) cfg.swang = constrain(v, 3.0f, 120.0f);
   v = jsonNum(s, "kroot", &f); if (f) cfg.kroot = constrain((int)v, 24, 96);
   v = jsonNum(s, "krange", &f); if (f) cfg.krange = constrain(v, 8.0f, 80.0f);
+  v = jsonNum(s, "kflip", &f); if (f) cfg.kflip = (int)v ? 1 : 0;
+  v = jsonNum(s, "kflat", &f); if (f) cfg.kflat = constrain(v, 3.0f, 40.0f);
   v = jsonNum(s, "tthr", &f); if (f) cfg.tthr = v;
   v = jsonNum(s, "tlock", &f); if (f) cfg.tlock = (int)v ? 1 : 0;
   v = jsonNum(s, "lthr", &f); if (f) cfg.lthr = v;
@@ -680,7 +700,7 @@ void drawScreen() {
   d.setTextSize(1); d.setTextColor(TFT_DARKGREY);
   d.setCursor(4, 60); d.printf("BLE %s  WiFi %d", bleConnected ? "on" : "--", WiFi.softAPgetStationNum());
   d.setCursor(4, 72); d.printf("batt %d%%  v%s", M5.Power.getBatteryLevel(), FW_VERSION);
-  d.setCursor(4, 84); d.print(calibrating ? "swing foot 3x..." : cfg.snare == 10 ? "foot keyboard" : cfg.snare == 9 ? (cfg.shk == 2 ? "tambourine" : cfg.shk == 1 ? "maracas" : "shaker") : cfg.snare == 7 ? (cfg.lcal && cfg.rcal ? "toe=kick heel=snare" : "SET TOE/HEEL") : cfg.snare == 8 ? (cfg.lcal && cfg.rcal ? "heel=kick toe=snare" : "SET TOE/HEEL") : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A");
+  d.setCursor(4, 84); d.print(calibrating ? "swing foot 3x..." : cfg.snare == 10 ? "keys: A = centre" : cfg.snare == 9 ? (cfg.shk == 2 ? "tambourine" : cfg.shk == 1 ? "maracas" : "shaker") : cfg.snare == 7 ? (cfg.lcal && cfg.rcal ? "toe=kick heel=snare" : "SET TOE/HEEL") : cfg.snare == 8 ? (cfg.lcal && cfg.rcal ? "heel=kick toe=snare" : "SET TOE/HEEL") : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A");
   d.endWrite();
 }
 
@@ -718,7 +738,11 @@ void loop() {
   }
   if (screenOn && now - lastButtonMs > SCREEN_TIMEOUT_MS) screenSet(false);
   // Button A: calibrate the "right" direction. Hold 2 s: factory reset.
-  if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else if (!resetHeld && cfg.snare == 6) startSwingCal(); resetHeld = false; }
+  if (M5.BtnB.wasReleased() && cfg.snare == 10) {   // side button: next octave up (wraps to the bottom)
+    cfg.kroot += 12; if (cfg.kroot > 84) cfg.kroot -= 48; if (cfg.kroot < 24) cfg.kroot = 24;
+    keyOff(); saveCfg(); sendCfg(nullptr);
+  }
+  if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else if (!resetHeld && cfg.snare == 6) startSwingCal(); else if (!resetHeld && cfg.snare == 10) yawDeg = 0; resetHeld = false; }
   if (M5.BtnA.pressedFor(2000) && !resetHeld) {   // reset settings, keep Wi-Fi
     resetHeld = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.sigVer = 6; cfg = d; saveCfg(); sendCfg(nullptr);
   }
@@ -733,9 +757,9 @@ void loop() {
 
   // meter stream to the page, ~40 Hz, a dozen samples per message
   if (ws.count() && nMeter >= 12 && now - lastMeterSend > 25) {
-    char b[200]; int p = snprintf(b, sizeof b, "{\"m\":[");
+    char b[240]; int p = snprintf(b, sizeof b, "{\"m\":[");
     for (int i = 0; i < nMeter; i++) p += snprintf(b + p, sizeof b - p, "%s%.2f", i ? "," : "", meterBuf[i]);
-    snprintf(b + p, sizeof b - p, "],\"toe\":%.0f,\"open\":%d}", toeAngle, hatIsOpen ? 1 : 0); ws.textAll(b); nMeter = 0; lastMeterSend = now;
+    snprintf(b + p, sizeof b - p, "],\"toe\":%.0f,\"open\":%d,\"yaw\":%.0f,\"flatT\":%.0f}", toeAngle, hatIsOpen ? 1 : 0, yawDeg, flatTilt); ws.textAll(b); nMeter = 0; lastMeterSend = now;
   } else if (nMeter >= 12) nMeter = 0;
 
   if (now - lastDraw > 500) {

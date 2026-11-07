@@ -88,14 +88,22 @@
 </div>
 <div id="keyBox" style="display:flex;flex-direction:column;gap:10px">
 <div class="tiles">
-  <div class="tile"><b id="keyAim">—</b><span>note at this angle</span></div>
+  <div class="tile"><b id="keyAim">—</b><span>pointing at</span></div>
   <div class="tile"><b id="keyNow">—</b><span>playing</span></div>
   <div class="tile"><b id="keyRange">—</b><span>range</span></div>
 </div>
-<div class="ctl"><label for="kroot">Lowest note (heel all the way up)</label><output id="krootOut"></output>
+<p class="hint">Lay the board flat on your foot and tap "Set flat" once (open-hat section). Swivel your foot left / right to pick a note, 1.5 octaves chromatic (19 notes); the left tile shows the note you're pointing at. Tap to play it (harder = louder); it holds until your foot tips away from flat by the release angle. "Center here" or the board's front button makes where your foot is now the middle note; the board's side button steps up an octave. Sends MIDI on channel 1; the board speaker plays a tone.</p>
+<div class="row"><button type="button" id="octDown">Octave −</button><button type="button" id="keyCenter">Center here</button><button type="button" id="octUp">Octave +</button></div>
+<div class="seg" data-key="kflip">
+  <button type="button" data-v="0">Normal</button>
+  <button type="button" data-v="1">Swap left / right</button>
+</div>
+<div class="ctl"><label for="kroot">Lowest note</label><output id="krootOut"></output>
   <input type="range" id="kroot" data-key="kroot" min="24" max="84" step="1" value="48"></div>
-<div class="ctl"><label for="krange">Tilt for the ends (heel-up = bottom, toe-up = top)</label><output id="krangeOut"></output>
+<div class="ctl"><label for="krange">Swivel for the ends (each side of centre)</label><output id="krangeOut"></output>
   <input type="range" id="krange" data-key="krange" min="8" max="70" step="1" value="36"></div>
+<div class="ctl"><label for="kflat">Release when tipped more than</label><output id="kflatOut"></output>
+  <input type="range" id="kflat" data-key="kflat" min="3" max="40" step="1" value="10"></div>
 </div>
 <div id="shkBox">
 <div class="seg" data-key="shk">
@@ -236,7 +244,7 @@
   }
 
   // ---------- Settings UI ----------
-  const fmt = { thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', swang: v => v + '°', kroot: v => noteName(+v), krange: v => '±' + v + '° (' + (2 * v / 24).toFixed(1) + '° per note)', tthr: v => v + '°', othr: v => v + '°', klvl: v => (+v).toFixed(2) + ' g', slvl: v => (+v).toFixed(2) + ' g', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
+  const fmt = { thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', swang: v => v + '°', kroot: v => noteName(+v), krange: v => '±' + v + '° (' + (2 * v / 18).toFixed(1) + '° per note)', kflat: v => v + '°', tthr: v => v + '°', othr: v => v + '°', klvl: v => (+v).toFixed(2) + ' g', slvl: v => (+v).toFixed(2) + ' g', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
   function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function applyCfg(c) {
     cfg = c;
@@ -266,8 +274,11 @@
     send({ set: { [seg.dataset.key]: +b.dataset.v } });
   });
   $('flatBtn').addEventListener('click', () => { send({ setFlat: 1 }); $('flatBtn').textContent = 'Now raise your toe…'; });
-  function keyForTilt(t) { const r = +$('krange').value, c = Math.max(-r, Math.min(r, t)); return +$('kroot').value + Math.round((c + r) / (2 * r) * 24); }
-  function keyRangeText() { $('keyRange').textContent = noteName(+$('kroot').value) + '–' + noteName(+$('kroot').value + 24); }
+  function keyForTilt(t) { const r = +$('krange').value, c = Math.max(-r, Math.min(r, t)); return +$('kroot').value + Math.round((c + r) / (2 * r) * 18); }
+  function keyRangeText() { $('keyRange').textContent = noteName(+$('kroot').value) + '–' + noteName(+$('kroot').value + 18); }
+  $('keyCenter').addEventListener('click', () => send({ keyCenter: 1 }));
+  const octStep = d => { const r = $('kroot'), v = Math.max(+r.min, Math.min(+r.max, +r.value + 12 * d)); r.value = v; $('krootOut').textContent = noteName(v); keyRangeText(); send({ set: { kroot: v } }); };
+  $('octDown').addEventListener('click', () => octStep(-1)); $('octUp').addEventListener('click', () => octStep(1));
   $('kroot').addEventListener('input', keyRangeText); $('krange').addEventListener('input', keyRangeText);
   let osc = null, oscGain = null;
   function phoneKeyOn(n, v) {
@@ -313,11 +324,11 @@
       const m = JSON.parse(ev.data);
       if (m.cfg) applyCfg(m.cfg);
       if (m.m) { for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; } }
-      if (m.toe !== undefined && +(cfg.snare) === 10) $('keyAim').textContent = noteName(keyForTilt(m.toe));
+      if (m.yaw !== undefined && +(cfg.snare) === 10) $('keyAim').textContent = noteName(keyForTilt(m.yaw)) + (m.flatT > +$('kflat').value ? ' ·' : '');
       if (m.key !== undefined) {
         if (m.on) {
           $('keyNow').textContent = m.name; show('kick'); $('last').textContent = m.name;
-          logRows.unshift((m.name + '     ').slice(0, 5) + '  vel ' + Math.round(20 + m.v * 107) + '  tilt ' + (m.tilt > 0 ? '+' : '') + m.tilt + '°'); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n');
+          logRows.unshift((m.name + '     ').slice(0, 5) + '  vel ' + Math.round(20 + m.v * 107) + '  swivel ' + (m.tilt > 0 ? '+' : '') + m.tilt + '°'); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n');
           const out = +(cfg.out || 0); if (phoneSound && (out === 1 || out === 2)) phoneKeyOn(m.key, m.v);
         } else { $('keyNow').textContent = '—'; phoneKeyOff(); }
       }
