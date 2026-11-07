@@ -176,16 +176,14 @@ void keyOn(int note, float vel, float tilt) {
   char nm[8]; keyName(note, nm);
   char b[96]; snprintf(b, sizeof b, "{\"key\":%d,\"on\":1,\"v\":%.2f,\"name\":\"%s\",\"tilt\":%.0f}", note, vel, nm, tilt); ws.textAll(b);
 }
-// Which note a swivel picks. With edges set, the notes spread evenly from the low-end position to the
-// high-end position; otherwise the range is centred on 0 with each note kdeg degrees wide.
-float keyHalf() { return cfg.kEdge ? fabsf(cfg.kHi - cfg.kLo) / 2 : cfg.kspan * cfg.kdeg / 2; }
+// Which note a swivel picks. Each note is kdeg degrees wide and the range is centred on keyMid().
+// Setting the edges fixes the centre (their midpoint), the direction (low end -> high end) and an
+// initial kdeg that fits between them; kdeg and kspan can still be changed afterwards.
+float keyHalf() { return cfg.kspan * cfg.kdeg / 2; }
 float keyMid() { return cfg.kEdge ? (cfg.kLo + cfg.kHi) / 2 : 0; }
 int keyForTilt(float a) {
-  if (cfg.kEdge) {
-    float f = constrain((a - cfg.kLo) / (cfg.kHi - cfg.kLo), 0.0f, 1.0f);
-    return cfg.kroot + (int)roundf(f * cfg.kspan);
-  }
-  float h = keyHalf(), t = constrain(a, -h, h);
+  float dir = cfg.kEdge ? (cfg.kHi >= cfg.kLo ? 1.0f : -1.0f) : 1.0f;
+  float h = keyHalf(), t = constrain((a - keyMid()) * dir, -h, h);
   return cfg.kroot + (int)roundf((t + h) / cfg.kdeg);
 }
 
@@ -508,7 +506,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
       const float b = 0.01f; bwx += b * (wx - bwx); bwy += b * (wy - bwy); bwz += b * (wz - bwz);
     }
     float yr = (wx - bwx) * qx + (wy - bwy) * qy + (wz - bwz) * qz;   // deg/s about vertical
-    if (fabsf(yr) > 1.5f) yawDeg += (cfg.kflip ? -yr : yr) * dts;      // ignore sub-noise creep
+    if (fabsf(yr) > 1.5f) yawDeg += (cfg.kflip && !cfg.kEdge ? -yr : yr) * dts;   // ignore sub-noise creep
     yawDeg = constrain(yawDeg, keyMid() - keyHalf() - 15, keyMid() + keyHalf() + 15);
   }
   gH[gHi][0] = wx; gH[gHi][1] = wy; gH[gHi][2] = wz; gHT[gHi] = now; pH[gHi] = toeAngle; qH[gHi][0] = qx; qH[gHi][1] = qy; qH[gHi][2] = qz; yH[gHi] = yawDeg; gHi = (gHi + 1) % GH;
@@ -599,8 +597,13 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   if (strstr(s, "\"setFlat\"")) { setFlat(); return; }
   if (strstr(s, "\"keyCenter\"")) { yawDeg = keyMid(); return; }
   // Edges: both must be set (since the last clear) and at least 6 degrees apart before they're used.
-  if (strstr(s, "\"keyLo\"")) { cfg.kLo = yawDeg; loSet = true; cfg.kEdge = (loSet || cfg.kEdge) && (hiSet || cfg.kEdge) && fabsf(cfg.kHi - cfg.kLo) >= 6; saveCfg(); sendCfg(nullptr); ws.textAll("{\"edge\":\"lo\"}"); return; }
-  if (strstr(s, "\"keyHi\"")) { cfg.kHi = yawDeg; hiSet = true; cfg.kEdge = (loSet || cfg.kEdge) && (hiSet || cfg.kEdge) && fabsf(cfg.kHi - cfg.kLo) >= 6; saveCfg(); sendCfg(nullptr); ws.textAll("{\"edge\":\"hi\"}"); return; }
+  if (strstr(s, "\"keyLo\"") || strstr(s, "\"keyHi\"")) {
+    bool lo = strstr(s, "\"keyLo\"") != nullptr;
+    if (lo) { cfg.kLo = yawDeg; loSet = true; } else { cfg.kHi = yawDeg; hiSet = true; }
+    cfg.kEdge = (loSet || cfg.kEdge) && (hiSet || cfg.kEdge) && fabsf(cfg.kHi - cfg.kLo) >= 6;
+    if (cfg.kEdge) cfg.kdeg = constrain(fabsf(cfg.kHi - cfg.kLo) / max(1, cfg.kspan), 1.0f, 15.0f);   // fit the notes between the edges
+    saveCfg(); sendCfg(nullptr); ws.textAll(lo ? "{\"edge\":\"lo\"}" : "{\"edge\":\"hi\"}"); return;
+  }
   if (strstr(s, "\"keyClear\"")) { cfg.kEdge = false; cfg.kLo = cfg.kHi = 0; loSet = hiSet = false; yawDeg = 0; saveCfg(); sendCfg(nullptr); return; }
   if (strstr(s, "\"flipSwing\"")) { cfg.rx = -cfg.rx; cfg.ry = -cfg.ry; cfg.rz = -cfg.rz; saveCfg(); ws.textAll("{\"learn\":\"flipped ✓\"}"); return; }
   if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }

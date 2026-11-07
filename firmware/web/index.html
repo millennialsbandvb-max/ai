@@ -92,7 +92,7 @@
   <div class="tile"><b id="keyNow">—</b><span>playing</span></div>
   <div class="tile"><b id="keyRange">—</b><span>range</span></div>
 </div>
-<p class="hint">Lay the board flat on your foot and tap "Set flat" once (open-hat section). Swivel your foot left / right to pick a note (chromatic; set how many notes and how wide each one is below); the left tile shows the note you're pointing at. Tap to play it (harder = louder); it holds until your foot tips away from where it was when you tapped by more than the release angle. Set the edges: swivel to where you want the lowest note and tap "Set low end here", then to the highest and tap "Set high end here"; the notes spread evenly between them. "Center here" or the board's front button re-centres on the middle of the range if it drifts; the board's side button steps up an octave. Sends MIDI on channel 1; the board speaker plays a tone.</p>
+<p class="hint">Lay the board flat on your foot and tap "Set flat" once (open-hat section). Swivel your foot left / right to pick a note (chromatic; set how many notes and how wide each one is below); the left tile shows the note you're pointing at. Tap to play it (harder = louder); it holds until your foot tips away from where it was when you tapped by more than the release angle. Set the edges: swivel to where you want the lowest note and tap "Set low end here", then to the highest and tap "Set high end here"; the notes spread evenly between them, and you can still widen or narrow the range with Degrees per note or add/remove notes (it stays centred). "Center here" or the board's front button re-centres on the middle of the range if it drifts; the board's side button steps up an octave. Sends MIDI on channel 1; the board speaker plays a tone.</p>
 <div class="row"><button type="button" id="octDown">Octave −</button><button type="button" id="keyCenter">Center here</button><button type="button" id="octUp">Octave +</button></div>
 <div class="row"><button type="button" id="keyLo">Set low end here</button><button type="button" id="keyHi">Set high end here</button><button type="button" id="keyClear">Clear edges</button></div>
 <div class="tile" style="flex:none"><b id="edgeState">—</b><span>playable range</span></div>
@@ -257,8 +257,8 @@
     kit = +(c.kit || 0);
     modeUi(+c.snare);
     const ed = +c.kEdge;
-    $('edgeState').textContent = ed ? 'edges set: ' + Math.round(Math.abs(c.kHi - c.kLo)) + '° wide, ' + (Math.abs(c.kHi - c.kLo) / Math.max(1, +c.kspan)).toFixed(1) + '° per note' : 'no edges: centred, ' + c.kdeg + '° per note';
-    $('kdeg').closest('.ctl').hidden = ed; $('kflipSeg').hidden = ed;
+    $('edgeState').textContent = (ed ? 'edges set · ' : 'no edges · ') + Math.round(+c.kspan * +c.kdeg) + '° wide, ' + (+c.kdeg).toFixed(1) + '° per note';
+    $('kflipSeg').hidden = ed;
     $('ohatBox').hidden = !+c.ohat;
     if (!c.flat) $('hatState').textContent = 'set flat';
     $('calState').textContent = c.cal ? 'learned ✓' : 'not set yet';
@@ -282,8 +282,8 @@
   });
   $('flatBtn').addEventListener('click', () => { send({ setFlat: 1 }); $('flatBtn').textContent = 'Now raise your toe…'; });
   function keyForTilt(t) {
-    if (+cfg.kEdge) { const f = Math.max(0, Math.min(1, (t - cfg.kLo) / (cfg.kHi - cfg.kLo))); return +$('kroot').value + Math.round(f * +$('kspan').value); }
-    const d = +$('kdeg').value, h = +$('kspan').value * d / 2, c = Math.max(-h, Math.min(h, t)); return +$('kroot').value + Math.round((c + h) / d);
+    const ed = +cfg.kEdge, dir = ed ? (cfg.kHi >= cfg.kLo ? 1 : -1) : 1, mid = ed ? (cfg.kLo + cfg.kHi) / 2 : 0;
+    const d = +$('kdeg').value, h = +$('kspan').value * d / 2, c = Math.max(-h, Math.min(h, (t - mid) * dir)); return +$('kroot').value + Math.round((c + h) / d);
   }
   function keyRangeText() { $('keyRange').textContent = noteName(+$('kroot').value) + '–' + noteName(+$('kroot').value + +$('kspan').value); $('kdegOut').textContent = fmt.kdeg($('kdeg').value); }
   $('keyCenter').addEventListener('click', () => send({ keyCenter: 1 }));
