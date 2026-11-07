@@ -46,3 +46,18 @@ Arduino IDE 2.x, ESP32 board package 3.x, libraries: M5Unified, ESP Async WebSer
 Board: ESP32S3 Dev Module · Flash 8MB · Partition "8M with spiffs" · PSRAM "QSPI PSRAM" · USB CDC On Boot "Enabled".
 
 `web/` holds the tuning page source; `web_assets.h` and `samples.h` are generated from it (see `make_samples_h.py` and the gzip step in the repo root).
+
+---
+
+# Footboard (keyboard-only firmware)
+
+Source: `footboard_sticks3/` (page: `footboard_web/index.html`, regenerate `fb_web.h` with `python3 make_footboard_web.py`).
+Builds: `bin/footboard_sticks3.app.bin` (install from a tuning page upload, or later via Check for update) and `bin/footboard_sticks3.bin` (web flasher, address 0x0).
+
+- Wi-Fi network **Footboard**, page at http://192.168.4.1. Bluetooth MIDI and USB MIDI are named "Footboard".
+- Board flat on the foot. Swivel to pick a note, tap to play it, it holds until the foot tips away by the release angle.
+- Harmony buttons m3, M3, 4, 5, 8 stack on top of the note (e.g. M3 + 5 = major triad).
+- Front button: center. Side button: octave up. Hold front 2 s: reset settings (keeps Wi-Fi).
+- Settings live in their own storage, separate from PocketBeat's, so switching between the two firmwares keeps both sets.
+
+The drum firmware as of the split is saved in `saved/pocketbeat_drums_8546ce0/` (git tag `pocketbeat-drums-8546ce0`).

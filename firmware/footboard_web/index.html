@@ -1,0 +1,340 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Footboard</title>
+<style>
+  :root {
+    --bg: #101113; --panel: #1a1b1f; --panel2: #23252b; --fg: #f3efe4; --muted: #8d909a; --line: #2c2e35;
+    --accent: #ffb547; --hold: #ff6a3d; --ok: #7bf2a8; --sharp: #2a2c33; --nat: #3a3d46;
+    --display: "Avenir Next Condensed", "Helvetica Neue", "Arial Narrow", sans-serif;
+    --body: -apple-system, "Helvetica Neue", Arial, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; background: var(--bg); }
+  body { color: var(--fg); font-family: var(--body); -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
+    padding: env(safe-area-inset-top, 0px) max(16px, env(safe-area-inset-right, 0px)) calc(24px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+    display: flex; flex-direction: column; gap: 14px; max-width: 560px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; justify-content: space-between; padding-top: 12px; }
+  h1 { font-family: var(--display); font-size: 28px; margin: 0; letter-spacing: .03em; }
+  .status { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .1em; }
+  .status.on { color: var(--ok); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  h2 { margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); font-weight: 600; }
+
+  /* stage: big note + strip */
+  .stage { padding: 16px 14px 14px; }
+  .now { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
+  .note { font-family: var(--display); font-weight: 700; font-size: 84px; line-height: .9; letter-spacing: .01em; font-variant-numeric: tabular-nums; min-width: 3ch; }
+  .note.held { color: var(--hold); }
+  .chord { text-align: right; font-size: 13px; color: var(--muted); line-height: 1.5; }
+  .chord b { color: var(--fg); font-weight: 600; font-size: 15px; }
+  .strip { position: relative; height: 64px; display: flex; gap: 2px; touch-action: none; }
+  .strip .k { flex: 1; border-radius: 5px; background: var(--nat); position: relative; transition: background .08s; }
+  .strip .k.s { background: var(--sharp); height: 72%; align-self: flex-start; }
+  .strip .k.aim { background: var(--fg); }
+  .strip .k.on { background: var(--hold); }
+  .strip .k.har { background: var(--accent); }
+  .strip .k span { position: absolute; bottom: 3px; left: 0; right: 0; text-align: center; font-size: 9px; color: var(--muted); }
+  .strip .k.aim span, .strip .k.on span, .strip .k.har span { color: #111; font-weight: 700; }
+  .cursor { position: absolute; top: -6px; bottom: -6px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: var(--accent); pointer-events: none; box-shadow: 0 0 10px var(--accent); }
+  .ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+  .tipbar { height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; }
+  .tipbar i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .05s linear; }
+  .tipbar.over i { background: var(--hold); }
+
+  /* buttons */
+  .ints { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .ints button { height: 58px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel2); color: var(--fg);
+    font-family: var(--display); font-size: 24px; font-weight: 700; cursor: pointer; }
+  .ints button small { display: block; font-family: var(--body); font-size: 9px; font-weight: 500; color: var(--muted); letter-spacing: .04em; }
+  .ints button.on { background: var(--accent); color: #1d1300; border-color: var(--accent); }
+  .ints button.on small { color: #3d2a00; }
+  .row { display: flex; gap: 8px; }
+  .row button, .btn { flex: 1; min-height: 46px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel2); color: var(--fg); font-size: 14px; cursor: pointer; padding: 8px; }
+  .row button.go { background: var(--fg); color: var(--bg); font-weight: 600; }
+  .oct { font-family: var(--display); font-size: 22px; font-weight: 700; }
+  .seg { display: flex; background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .seg button { flex: 1; background: none; border: 0; color: var(--muted); padding: 11px 4px; font-size: 13px; cursor: pointer; }
+  .seg button.on { background: var(--fg); color: var(--bg); font-weight: 600; }
+  .ctl { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 4px 6px; }
+  .ctl label { font-size: 14px; }
+  .ctl output { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .ctl .nud { display: inline-flex; gap: 4px; }
+  .ctl .nud button { width: 34px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel2); color: var(--fg); font-size: 17px; line-height: 1; cursor: pointer; padding: 0; }
+  .ctl input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+  .ctl input[type=text], .ctl input[type=password] { grid-column: 1 / -1; background: var(--panel2); color: var(--fg); border: 1px solid var(--line); border-radius: 10px; padding: 11px; font-size: 15px; }
+  .hint { font-size: 12px; color: var(--muted); line-height: 1.5; margin: 0; }
+  .pill { font-size: 12px; color: var(--fg); background: var(--panel2); border-radius: 999px; padding: 6px 10px; align-self: flex-start; }
+  .meter { height: 70px; border-radius: 12px; background: var(--panel2); overflow: hidden; }
+  .meter canvas { width: 100%; height: 100%; display: block; }
+  .log { font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.6; white-space: pre; min-height: 40px; color: var(--fg); overflow-x: auto; }
+  .soundBtn { min-height: 52px; border-radius: 14px; border: 0; background: var(--fg); color: var(--bg); font-family: var(--display); font-size: 20px; font-weight: 700; letter-spacing: .03em; cursor: pointer; }
+  .soundBtn.live { background: var(--hold); color: #1a0b05; }
+  .foot { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Footboard</h1>
+  <div class="status" id="status">connecting…</div>
+</header>
+
+<section class="card stage">
+  <div class="now">
+    <div class="note" id="note">—</div>
+    <div class="chord"><div id="nowLabel">pointing at</div><b id="chordNames">—</b></div>
+  </div>
+  <div class="strip" id="strip"><div class="cursor" id="cursor"></div></div>
+  <div class="ends"><span id="endLo">—</span><span id="width">—</span><span id="endHi">—</span></div>
+  <div class="tipbar" id="tipbar"><i id="tipfill"></i></div>
+  <div class="row">
+    <button type="button" id="octDown" class="oct">Oct −</button>
+    <button type="button" id="center">Center here</button>
+    <button type="button" id="octUp" class="oct">Oct +</button>
+  </div>
+</section>
+
+<section class="card">
+  <h2>Harmony · tap to stack</h2>
+  <div class="ints" id="ints">
+    <button type="button" data-b="0">m3<small>minor 3rd</small></button>
+    <button type="button" data-b="1">M3<small>major 3rd</small></button>
+    <button type="button" data-b="2">4<small>4th</small></button>
+    <button type="button" data-b="3">5<small>5th</small></button>
+    <button type="button" data-b="4">8<small>octave</small></button>
+  </div>
+  <p class="hint" id="intHint">Off: single notes. Each one you turn on adds that interval above the note you play, e.g. M3 + 5 = major chord, m3 + 5 = minor chord.</p>
+</section>
+
+<section class="card">
+  <h2>Playing range</h2>
+  <div class="row">
+    <button type="button" id="keyLo">Set low end here</button>
+    <button type="button" id="keyHi">Set high end here</button>
+  </div>
+  <div class="row"><button type="button" id="keyClear">Clear edges</button></div>
+  <span class="pill" id="edgeState">—</span>
+  <div class="seg" data-key="kflip">
+    <button type="button" data-v="0">Normal</button>
+    <button type="button" data-v="1">Swap left / right</button>
+  </div>
+  <div class="ctl"><label for="kroot">Lowest note</label><output id="krootOut"></output>
+    <input type="range" id="kroot" data-key="kroot" min="24" max="84" step="1" value="48"></div>
+  <div class="ctl"><label for="kspan">Notes in range</label><output id="kspanOut"></output>
+    <input type="range" id="kspan" data-key="kspan" min="2" max="48" step="1" value="18"></div>
+  <div class="ctl"><label for="kdeg">Degrees of swivel per note</label><output id="kdegOut"></output>
+    <input type="range" id="kdeg" data-key="kdeg" min="1" max="15" step="0.5" value="4"></div>
+  <p class="hint">Swivel to where you want your lowest note and tap "Set low end here", then to the highest and tap "Set high end here". The notes spread evenly between them. Degrees per note and Notes in range still widen or narrow it around the same centre. Swap reverses which end is low.</p>
+</section>
+
+<section class="card">
+  <h2>Feel</h2>
+  <div class="meter"><canvas id="scope" width="800" height="140"></canvas></div>
+  <div class="ctl"><label for="thr">Lightest tap that plays</label><output id="thrOut"></output>
+    <input type="range" id="thr" data-key="thr" min="0.05" max="6" step="0.01" value="1.2"></div>
+  <div class="ctl"><label for="kflat">Release when the foot tips more than</label><output id="kflatOut"></output>
+    <input type="range" id="kflat" data-key="kflat" min="3" max="40" step="1" value="10"></div>
+  <div class="ctl"><label for="gap">Wait before the next tap</label><output id="gapOut"></output>
+    <input type="range" id="gap" data-key="gap" min="60" max="600" step="10" value="200"></div>
+  <p class="hint">Tap harder for louder. A note holds while your foot stays where it was when you tapped; the green bar under the keys fills as you tip and turns red when the note will let go.</p>
+</section>
+
+<section class="card">
+  <h2>Sound</h2>
+  <div class="seg" data-key="out">
+    <button type="button" data-v="0">Board speaker</button>
+    <button type="button" data-v="1">This phone</button>
+    <button type="button" data-v="2">Both</button>
+  </div>
+  <button type="button" class="soundBtn" id="go">Enable sound on this phone</button>
+  <div class="ctl"><label for="vol">Board speaker volume</label><output id="volOut"></output>
+    <input type="range" id="vol" data-key="vol" min="0" max="255" step="1" value="200"></div>
+  <div class="ctl"><label for="pvol">Phone volume</label><output id="pvolOut"></output>
+    <input type="range" id="pvol" min="0" max="100" step="1" value="70"></div>
+  <div class="ctl"><label for="chan">MIDI channel</label><output id="chanOut"></output>
+    <input type="range" id="chan" data-key="chan" min="1" max="16" step="1" value="1"></div>
+  <div class="row"><button type="button" id="allOff">Stop all notes</button></div>
+  <p class="hint">Bluetooth MIDI ("Footboard") and USB MIDI are always on.</p>
+</section>
+
+<section class="card">
+  <h2>Recent notes</h2>
+  <div class="log" id="log">—</div>
+</section>
+
+<section class="card">
+  <h2>Firmware · installed <span id="ver">?</span></h2>
+  <div class="ctl"><label for="ssid">Home Wi-Fi name</label><output></output><input type="text" id="ssid" placeholder="your Wi-Fi network"></div>
+  <div class="ctl"><label for="pass">Home Wi-Fi password</label><output></output><input type="password" id="pass" placeholder="password"></div>
+  <div class="row"><button type="button" id="saveWifi">Save Wi-Fi</button><button type="button" id="otaBtn" class="go">Check for update</button></div>
+  <div class="row"><input type="file" id="fwFile" accept=".bin" hidden><button type="button" id="pickFw">Upload a .app.bin from this phone</button></div>
+  <p class="hint" id="otaMsg">Check for update joins your home Wi-Fi, gets the newest Footboard build and installs it (about a minute). To go back to the drum firmware, upload its saved .app.bin here.</p>
+</section>
+<div class="foot"><span>Board battery <b id="batt">—</b></span><span>Front button = center · side button = octave up</span></div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const NN = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  const noteName = n => NN[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1);
+  const INT = [3, 4, 5, 7, 12], INTN = ['m3', 'M3', '4', '5', '8'];
+  let cfg = { kroot: 48, kspan: 18, kdeg: 4, kflip: 1, kEdge: 0, kLo: 0, kHi: 0, ints: 0, out: 0 };
+  let ws = null, yaw = 0, held = [], phone = false;
+  const logRows = [];
+  const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
+
+  // ---------- note mapping (same as the board) ----------
+  function geom() {
+    const ed = +cfg.kEdge, dir = (ed ? (cfg.kHi >= cfg.kLo ? 1 : -1) : 1) * (+cfg.kflip ? -1 : 1), mid = ed ? (cfg.kLo + cfg.kHi) / 2 : 0;
+    const d = +$('kdeg').value, h = +$('kspan').value * d / 2; return { dir, mid, d, h };
+  }
+  function keyForTilt(t) { const g = geom(), c = Math.max(-g.h, Math.min(g.h, (t - g.mid) * g.dir)); return +$('kroot').value + Math.round((c + g.h) / g.d); }
+  function cursorFrac(t) { const g = geom(), c = Math.max(-g.h, Math.min(g.h, (t - g.mid) * g.dir)); return g.h ? (c + g.h) / (2 * g.h) : .5; }
+  const chordOf = r => [r, ...INT.filter((_, i) => cfg.ints & (1 << i)).map(s => r + s)];
+
+  // ---------- strip ----------
+  let cells = [];
+  function buildStrip() {
+    const s = $('strip'), root = +$('kroot').value, span = +$('kspan').value;
+    cells.forEach(c => c.remove()); cells = [];
+    for (let n = root; n <= root + span; n++) {
+      const k = document.createElement('div'); k.className = 'k' + (NN[n % 12].includes('#') ? ' s' : ''); k.dataset.n = n;
+      if (n % 12 === 0 || n === root || n === root + span || span <= 14) { const l = document.createElement('span'); l.textContent = span <= 14 || n % 12 === 0 ? noteName(n) : ''; k.appendChild(l); }
+      s.insertBefore(k, $('cursor')); cells.push(k);
+    }
+    $('endLo').textContent = noteName(root); $('endHi').textContent = noteName(root + span);
+    $('width').textContent = Math.round(span * +$('kdeg').value) + '° wide · ' + (+$('kdeg').value).toFixed(1) + '° per note';
+    $('edgeState').textContent = (+cfg.kEdge ? 'Edges set · ' : 'No edges, centred · ') + Math.round(span * +$('kdeg').value) + '° wide';
+    paint();
+  }
+  function paint() {
+    const aim = keyForTilt(yaw), har = held.slice(1);
+    for (const k of cells) { const n = +k.dataset.n; k.classList.toggle('on', n === held[0]); k.classList.toggle('har', har.includes(n)); k.classList.toggle('aim', !held.length && n === aim); }
+    $('cursor').style.left = (cursorFrac(yaw) * 100) + '%';
+    if (held.length) { $('note').textContent = noteName(held[0]); $('note').classList.add('held'); $('nowLabel').textContent = 'playing'; $('chordNames').textContent = held.map(noteName).join(' · '); }
+    else { $('note').textContent = noteName(aim); $('note').classList.remove('held'); $('nowLabel').textContent = 'pointing at'; $('chordNames').textContent = chordOf(aim).map(noteName).join(' · '); }
+  }
+
+  // ---------- harmony buttons ----------
+  function paintInts() {
+    for (const b of $('ints').children) b.classList.toggle('on', !!(cfg.ints & (1 << +b.dataset.b)));
+    const on = INTN.filter((_, i) => cfg.ints & (1 << i));
+    $('intHint').textContent = on.length ? 'Adds ' + on.join(' + ') + ' above each note you play.' : 'Off: single notes. Each one you turn on adds that interval above the note you play, e.g. M3 + 5 = major chord, m3 + 5 = minor chord.';
+  }
+  $('ints').addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    cfg.ints ^= 1 << +b.dataset.b; paintInts(); paint(); send({ set: { ints: cfg.ints } });
+  });
+
+  // ---------- controls ----------
+  const fmt = { thr: v => (+v).toFixed(2) + ' g', kroot: v => noteName(+v), kspan: v => (+v + 1) + ' notes', kdeg: v => (+v).toFixed(1) + '°', kflat: v => v + '°', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%', chan: v => 'ch ' + v };
+  for (const el of document.querySelectorAll('input[type=range][data-key]')) {
+    el.addEventListener('input', () => { $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); if (['kroot', 'kspan', 'kdeg'].includes(el.dataset.key)) buildStrip(); });
+    el.addEventListener('change', () => { cfg[el.dataset.key] = +el.value; send({ set: { [el.dataset.key]: +el.value } }); });
+    $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value);
+  }
+  for (const seg of document.querySelectorAll('.seg[data-key]')) seg.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    for (const x of seg.children) x.classList.toggle('on', x === b);
+    cfg[seg.dataset.key] = +b.dataset.v; send({ set: { [seg.dataset.key]: +b.dataset.v } }); paint();
+  });
+  const oct = d => { const r = $('kroot'), v = Math.max(+r.min, Math.min(+r.max, +r.value + 12 * d)); r.value = v; $('krootOut').textContent = noteName(v); cfg.kroot = v; buildStrip(); send({ set: { kroot: v } }); };
+  $('octDown').onclick = () => oct(-1); $('octUp').onclick = () => oct(1);
+  $('center').onclick = () => send({ keyCenter: 1 });
+  $('keyLo').onclick = () => send({ keyLo: 1 }); $('keyHi').onclick = () => send({ keyHi: 1 }); $('keyClear').onclick = () => send({ keyClear: 1 });
+  $('allOff').onclick = () => { send({ allOff: 1 }); phoneOff(); };
+  for (const r of document.querySelectorAll('.ctl input[type=range]')) {   // −/+ nudges
+    const out = $(r.id + 'Out'); if (!out) continue;
+    const w = document.createElement('span'); w.className = 'nud';
+    for (const [t, d] of [['−', -1], ['+', 1]]) { const b = document.createElement('button'); b.type = 'button'; b.textContent = t;
+      b.onclick = () => { r.value = (+r.value + d * +r.step).toFixed(3); r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); }; w.appendChild(b); }
+    out.after(w);
+  }
+  function applyCfg(c) {
+    cfg = Object.assign(cfg, c);
+    for (const el of document.querySelectorAll('input[type=range][data-key]')) if (c[el.dataset.key] !== undefined) { el.value = c[el.dataset.key]; $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); }
+    for (const seg of document.querySelectorAll('.seg[data-key]')) { const v = String(c[seg.dataset.key]); for (const b of seg.children) b.classList.toggle('on', b.dataset.v === v); }
+    if (c.ver) $('ver').textContent = c.ver;
+    if (c.ssid !== undefined && document.activeElement !== $('ssid')) $('ssid').value = c.ssid;
+    paintInts(); buildStrip();
+  }
+
+  // ---------- phone sound ----------
+  let ctx = null, master = null, voices = [];
+  $('pvol').addEventListener('input', () => { $('pvolOut').textContent = $('pvol').value + '%'; if (master) master.gain.value = $('pvol').value / 100; });
+  $('pvolOut').textContent = $('pvol').value + '%';
+  $('go').onclick = () => {
+    if (!ctx) { ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' }); master = ctx.createGain(); master.gain.value = $('pvol').value / 100; master.connect(ctx.destination); }
+    ctx.resume(); phone = true; $('go').textContent = 'Phone sound on'; $('go').classList.add('live');
+  };
+  function phoneOn(notes, v) {
+    if (!ctx || !phone) return; phoneOff();
+    const each = (0.25 + 0.45 * v) / Math.sqrt(notes.length), t = ctx.currentTime;
+    for (const n of notes) {
+      const o = ctx.createOscillator(), g = ctx.createGain(); o.type = 'triangle'; o.frequency.value = 440 * Math.pow(2, (n - 69) / 12);
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(each, t + 0.01); o.connect(g).connect(master); o.start(); voices.push([o, g]);
+    }
+  }
+  function phoneOff() { if (!ctx) return; const t = ctx.currentTime; for (const [o, g] of voices) { g.gain.setTargetAtTime(0, t, 0.05); o.stop(t + 0.3); } voices = []; }
+
+  // ---------- impact meter ----------
+  const trace = new Float32Array(200); let ti = 0; const cv = $('scope'), g2 = cv.getContext('2d');
+  (function draw() {
+    const w = cv.width, h = cv.height, thr = +$('thr').value, sc = Math.max(thr * 2.5, 0.2), y = v => h - Math.min(1, v / sc) * h;
+    g2.clearRect(0, 0, w, h); g2.setLineDash([10, 10]); g2.strokeStyle = '#ffb547'; g2.lineWidth = 2; g2.beginPath(); g2.moveTo(0, y(thr)); g2.lineTo(w, y(thr)); g2.stroke();
+    g2.setLineDash([]); g2.strokeStyle = '#f3efe4'; g2.lineWidth = 3; g2.beginPath();
+    for (let i = 0; i < trace.length; i++) { const v = trace[(ti + i) % trace.length], x = i / (trace.length - 1) * w; i ? g2.lineTo(x, y(v)) : g2.moveTo(x, y(v)); }
+    g2.stroke(); requestAnimationFrame(draw);
+  })();
+
+  function log(s) { logRows.unshift(s); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); }
+
+  // ---------- board connection ----------
+  function connect() {
+    ws = new WebSocket('ws://' + location.host + '/ws');
+    ws.onopen = () => { $('status').textContent = 'board connected'; $('status').classList.add('on'); send({ get: 1 }); };
+    ws.onclose = () => { $('status').textContent = 'reconnecting…'; $('status').classList.remove('on'); setTimeout(connect, 1000); };
+    ws.onmessage = ev => {
+      const m = JSON.parse(ev.data);
+      if (m.cfg) applyCfg(m.cfg);
+      if (m.m) for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; }
+      if (m.yaw !== undefined) {
+        yaw = m.yaw; paint();
+        const f = held.length ? Math.min(1, m.tip / +$('kflat').value) : 0;
+        $('tipfill').style.width = (f * 100) + '%'; $('tipbar').classList.toggle('over', f >= 1);
+      }
+      if (m.key !== undefined) {
+        if (m.on) {
+          held = m.notes || [m.key]; paint();
+          log((held.map(noteName).join('+') + '            ').slice(0, 14) + ' vel ' + Math.round(20 + m.v * 107) + '  swivel ' + (m.tilt > 0 ? '+' : '') + m.tilt + '°');
+          if (+cfg.out !== 0) phoneOn(held, m.v);
+        } else {
+          held = []; paint(); phoneOff(); $('tipfill').style.width = '0';
+          if (m.tip >= 0) log('   released (tipped ' + Math.round(m.tip) + '°)');
+        }
+      }
+      if (m.edge) $('edgeState').textContent = (m.edge === 'lo' ? 'Low end set' : 'High end set') + (+cfg.kEdge ? '' : ' · now set the other end');
+      if (m.batt !== undefined) $('batt').textContent = m.batt + '%';
+      if (m.ota) $('otaMsg').textContent = m.ota;
+    };
+  }
+  $('saveWifi').onclick = () => { send({ set: { ssid: $('ssid').value, pass: $('pass').value } }); $('otaMsg').textContent = 'Wi-Fi saved on the board.'; };
+  $('otaBtn').onclick = () => { send({ ota: 1 }); $('otaMsg').textContent = 'Starting…'; };
+  $('pickFw').onclick = () => $('fwFile').click();
+  $('fwFile').onchange = async () => {
+    const f = $('fwFile').files[0]; if (!f) return; $('otaMsg').textContent = 'Uploading ' + f.name + '…';
+    const fd = new FormData(); fd.append('fw', f, f.name);
+    try { const r = await fetch('/update', { method: 'POST', body: fd }); $('otaMsg').textContent = (await r.text()) === 'ok' ? 'Installed. Board is restarting…' : 'Upload failed.'; }
+    catch (e) { $('otaMsg').textContent = 'Upload ended (board may be restarting).'; }
+  };
+  applyCfg({});
+  connect();
+})();
+</script>
+</body>
+</html>
