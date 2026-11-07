@@ -51,13 +51,21 @@ struct Cfg {
   char ssid[33] = ""; char pass[65] = "";
 } cfg;
 Preferences prefs;
-void saveCfg() { prefs.begin("fb", false); prefs.putBytes("cfg", &cfg, sizeof(cfg)); prefs.end(); }
+// Home Wi-Fi is also kept in a shared "wifi" store, so PocketBeat and Footboard can each use it after a switch.
+void syncWifi() {
+  Preferences w; w.begin("wifi", false);
+  if (cfg.ssid[0]) { if (w.getString("ssid", "") != String(cfg.ssid) || w.getString("pass", "") != String(cfg.pass)) { w.putString("ssid", cfg.ssid); w.putString("pass", cfg.pass); } }
+  else { String s = w.getString("ssid", ""), p = w.getString("pass", ""); strlcpy(cfg.ssid, s.c_str(), sizeof cfg.ssid); strlcpy(cfg.pass, p.c_str(), sizeof cfg.pass); }
+  w.end();
+}
+void saveCfg() { prefs.begin("fb", false); prefs.putBytes("cfg", &cfg, sizeof(cfg)); prefs.end(); if (cfg.ssid[0]) syncWifi(); }
 void loadCfg() {
   prefs.begin("fb", true);
   size_t n = prefs.getBytesLength("cfg");
   if (n > 0 && n <= sizeof(cfg)) prefs.getBytes("cfg", &cfg, n);
   prefs.end();
   cfg.chan = constrain(cfg.chan, 1, 16);
+  syncWifi();
 }
 
 static const int INT_SEMIS[5] = { 3, 4, 5, 7, 12 };          // m3, M3, 4, 5, 8

@@ -79,10 +79,18 @@ struct Cfg {
 } cfg;
 Preferences prefs;
 
+// Home Wi-Fi is also kept in a shared "wifi" store, so PocketBeat and Footboard can each use it after a switch.
+void syncWifi() {
+  Preferences w; w.begin("wifi", false);
+  if (cfg.ssid[0]) { if (w.getString("ssid", "") != String(cfg.ssid) || w.getString("pass", "") != String(cfg.pass)) { w.putString("ssid", cfg.ssid); w.putString("pass", cfg.pass); } }
+  else { String s = w.getString("ssid", ""), p = w.getString("pass", ""); strlcpy(cfg.ssid, s.c_str(), sizeof cfg.ssid); strlcpy(cfg.pass, p.c_str(), sizeof cfg.pass); }
+  w.end();
+}
 void saveCfg() {
   prefs.begin("pb", false);
   prefs.putBytes("cfg", &cfg, sizeof(cfg));
   prefs.end();
+  if (cfg.ssid[0]) syncWifi();
 }
 void loadCfg() {
   prefs.begin("pb", true);
@@ -97,6 +105,7 @@ void loadCfg() {
   if (cfg.sigVer < 7) { if (n > 0) cfg.kflip = cfg.kflip ? 0 : 1; cfg.sigVer = 7; }   // keyboard pitch direction was backwards: flip whatever was set
   if (cfg.snare != 1 && cfg.snare != 2 && cfg.snare != 6 && cfg.snare != 7 && cfg.snare != 8 && cfg.snare != 9 && cfg.snare != 10) cfg.snare = 8;
   prefs.end();
+  syncWifi();
 }
 
 volatile int otaRequest = 0;   // 1 = check+update from GitHub (run from loop, not from the websocket task)
