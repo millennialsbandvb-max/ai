@@ -60,4 +60,4 @@ Builds: `bin/footboard_sticks3.app.bin` (install from a tuning page upload, or l
 - Front button: center. Side button: octave up. Hold front 2 s: reset settings (keeps Wi-Fi).
 - Settings live in their own storage, separate from PocketBeat's, so switching between the two firmwares keeps both sets.
 
-The drum firmware as of the split is saved in `saved/pocketbeat_drums_8546ce0/` (git tag `pocketbeat-drums-8546ce0`).
+The drum firmware as of the split is saved in `saved/pocketbeat_drums_8546ce0/` (source included).
