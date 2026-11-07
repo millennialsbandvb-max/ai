@@ -112,6 +112,14 @@
 </section>
 
 <section class="card">
+  <h2>Scale · key = lowest note</h2>
+  <div class="seg" data-key="scale" id="scaleSeg">
+    <button type="button" data-v="0">Chromatic</button>
+    <button type="button" data-v="1">Major</button>
+    <button type="button" data-v="2">Minor</button>
+    <button type="button" data-v="3">Major pent</button>
+    <button type="button" data-v="4">Minor pent</button>
+  </div>
   <h2>Playing range</h2>
   <div class="row">
     <button type="button" id="keyLo">Set low end here</button>
@@ -123,7 +131,7 @@
     <button type="button" data-v="0">Normal</button>
     <button type="button" data-v="1">Swap left / right</button>
   </div>
-  <div class="ctl"><label for="kroot">Lowest note</label><output id="krootOut"></output>
+  <div class="ctl"><label for="kroot">Lowest note (key)</label><output id="krootOut"></output>
     <input type="range" id="kroot" data-key="kroot" min="24" max="84" step="1" value="48"></div>
   <div class="ctl"><label for="kspan">Notes in range</label><output id="kspanOut"></output>
     <input type="range" id="kspan" data-key="kspan" min="2" max="48" step="1" value="18"></div>
@@ -194,8 +202,11 @@
     const ed = +cfg.kEdge, dir = (ed ? (cfg.kHi >= cfg.kLo ? 1 : -1) : 1) * (+cfg.kflip ? -1 : 1), mid = ed ? (cfg.kLo + cfg.kHi) / 2 : 0;
     const d = +$('kdeg').value, h = +$('kspan').value * d / 2; return { dir, mid, d, h };
   }
-  function keyForTilt(t) { const g = geom(), c = Math.max(-g.h, Math.min(g.h, (t - g.mid) * g.dir)); return +$('kroot').value + Math.round((c + g.h) / g.d); }
+  function keyForTilt(t) { const g = geom(), c = Math.max(-g.h, Math.min(g.h, (t - g.mid) * g.dir)); return stepToNote(Math.round((c + g.h) / g.d)); }
   function cursorFrac(t) { const g = geom(), c = Math.max(-g.h, Math.min(g.h, (t - g.mid) * g.dir)); return g.h ? (c + g.h) / (2 * g.h) : .5; }
+  const SC = [[0,1,2,3,4,5,6,7,8,9,10,11],[0,2,4,5,7,9,11],[0,2,3,5,7,8,10],[0,2,4,7,9],[0,3,5,7,10]];
+  const scl = () => SC[Math.max(0, Math.min(4, +cfg.scale || 0))];
+  const stepToNote = i => { const sc = scl(); return +$('kroot').value + 12 * Math.floor(i / sc.length) + sc[i % sc.length]; };
   const chordOf = r => [r, ...INT.filter((_, i) => cfg.ints & (1 << i)).map(s => r + s)];
 
   // ---------- strip ----------
@@ -203,12 +214,12 @@
   function buildStrip() {
     const s = $('strip'), root = +$('kroot').value, span = +$('kspan').value;
     cells.forEach(c => c.remove()); cells = [];
-    for (let n = root; n <= root + span; n++) {
+    for (let i = 0; i <= span; i++) { const n = stepToNote(i);
       const k = document.createElement('div'); k.className = 'k' + (NN[n % 12].includes('#') ? ' s' : ''); k.dataset.n = n;
-      if (n % 12 === 0 || n === root || n === root + span || span <= 14) { const l = document.createElement('span'); l.textContent = span <= 14 || n % 12 === 0 ? noteName(n) : ''; k.appendChild(l); }
+      if (span <= 14 || n % 12 === root % 12) { const l = document.createElement('span'); l.textContent = noteName(n); k.appendChild(l); }
       s.insertBefore(k, $('cursor')); cells.push(k);
     }
-    $('endLo').textContent = noteName(root); $('endHi').textContent = noteName(root + span);
+    $('endLo').textContent = noteName(root); $('endHi').textContent = noteName(stepToNote(span));
     $('width').textContent = Math.round(span * +$('kdeg').value) + '° wide · ' + (+$('kdeg').value).toFixed(1) + '° per note';
     $('edgeState').textContent = (+cfg.kEdge ? 'Edges set · ' : 'No edges, centred · ') + Math.round(span * +$('kdeg').value) + '° wide';
     paint();
@@ -242,7 +253,7 @@
   for (const seg of document.querySelectorAll('.seg[data-key]')) seg.addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
     for (const x of seg.children) x.classList.toggle('on', x === b);
-    cfg[seg.dataset.key] = +b.dataset.v; send({ set: { [seg.dataset.key]: +b.dataset.v } }); paint();
+    cfg[seg.dataset.key] = +b.dataset.v; send({ set: { [seg.dataset.key]: +b.dataset.v } }); if (seg.dataset.key === 'scale') buildStrip(); else paint();
   });
   const oct = d => { const r = $('kroot'), v = Math.max(+r.min, Math.min(+r.max, +r.value + 12 * d)); r.value = v; $('krootOut').textContent = noteName(v); cfg.kroot = v; buildStrip(); send({ set: { kroot: v } }); };
   $('octDown').onclick = () => oct(-1); $('octUp').onclick = () => oct(1);

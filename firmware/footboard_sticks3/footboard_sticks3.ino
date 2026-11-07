@@ -49,6 +49,7 @@ struct Cfg {
   int vol = 200;           // board speaker volume 0-255
   int chan = 1;            // MIDI channel 1-16
   char ssid[33] = ""; char pass[65] = "";
+  int scale = 0;           // 0 chromatic, 1 major, 2 minor, 3 major pentatonic, 4 minor pentatonic (key = lowest note)
 } cfg;
 Preferences prefs;
 // Home Wi-Fi is also kept in a shared "wifi" store, so PocketBeat and Footboard can each use it after a switch.
@@ -92,10 +93,14 @@ float keyHalf() { return cfg.kspan * cfg.kdeg / 2; }
 float keyMid() { return cfg.kEdge ? (cfg.kLo + cfg.kHi) / 2 : 0; }
 // Each note is kdeg degrees wide; the range is centred on keyMid(). Edges set the centre, the direction
 // (low end -> high end) and a starting kdeg; Swap reverses it either way.
+// Scales: semitones above the key for each step. "Notes in range" counts steps of the chosen scale.
+static const int SC_LEN[5] = { 12, 7, 7, 5, 5 };
+static const int SC_STEPS[5][12] = { { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }, { 0, 2, 4, 5, 7, 9, 11 }, { 0, 2, 3, 5, 7, 8, 10 }, { 0, 2, 4, 7, 9 }, { 0, 3, 5, 7, 10 } };
+int stepToNote(int i) { int sc = constrain(cfg.scale, 0, 4), n = SC_LEN[sc]; return cfg.kroot + 12 * (i / n) + SC_STEPS[sc][i % n]; }
 int keyForTilt(float a) {
   float dir = (cfg.kEdge ? (cfg.kHi >= cfg.kLo ? 1.0f : -1.0f) : 1.0f) * (cfg.kflip ? -1.0f : 1.0f);
   float h = keyHalf(), t = constrain((a - keyMid()) * dir, -h, h);
-  return cfg.kroot + (int)roundf((t + h) / cfg.kdeg);
+  return stepToNote((int)roundf((t + h) / cfg.kdeg));
 }
 
 void notesOff() {
@@ -199,8 +204,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[480];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"kdeg\":%.1f,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, cfg.kdeg, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"kdeg\":%.1f,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, cfg.kdeg, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 float jsonNum(const char* s, const char* key, bool* found) {
@@ -240,6 +245,11 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "ints", &f); if (f) cfg.ints = constrain((int)v, 0, 31);
   v = jsonNum(s, "out", &f); if (f) { cfg.out = constrain((int)v, 0, 2); if (cfg.out == 1) for (int i = 0; i < 6; i++) M5.Speaker.stop(i); }
   v = jsonNum(s, "vol", &f); if (f) { cfg.vol = constrain((int)v, 0, 255); M5.Speaker.setVolume(cfg.vol); }
+  v = jsonNum(s, "scale", &f);
+  if (f) {   // keep about the same span in octaves when the scale changes
+    int ns = constrain((int)v, 0, 4);
+    if (ns != cfg.scale) { float oct = (stepToNote(cfg.kspan) - cfg.kroot) / 12.0f; cfg.scale = ns; cfg.kspan = constrain((int)roundf(oct * SC_LEN[ns]), 2, 48); keyTip = -1; notesOff(); }
+  }
   v = jsonNum(s, "chan", &f); if (f) { keyTip = -1; notesOff(); cfg.chan = constrain((int)v, 1, 16); }
   saveCfg();
   sendCfg(nullptr);
@@ -321,8 +331,9 @@ void drawScreen() {
   d.setTextColor(rootHeld >= 0 ? TFT_ORANGE : TFT_WHITE, TFT_BLACK); d.setTextSize(4);
   d.setCursor(4, 4); d.print(rootHeld >= 0 ? lastName : aim);
   d.setTextSize(1); d.setTextColor(TFT_DARKGREY);
-  char lo[8], hi[8]; noteName(cfg.kroot, lo); noteName(cfg.kroot + cfg.kspan, hi);
-  d.setCursor(4, 44); d.printf("%s-%s  %.1f deg/note", lo, hi, cfg.kdeg);
+  char lo[8], hi[8]; noteName(cfg.kroot, lo); noteName(stepToNote(cfg.kspan), hi);
+  d.setCursor(4, 44); static const char* SCN[5] = { "chrom", "major", "minor", "maj pent", "min pent" };
+  d.printf("%s-%s %s %.1fdeg", lo, hi, SCN[constrain(cfg.scale, 0, 4)], cfg.kdeg);
   d.setCursor(4, 56); d.print("+ ");
   bool any = false; for (int i = 0; i < 5; i++) if (cfg.ints & (1 << i)) { d.printf("%s ", INT_NAMES[i]); any = true; }
   if (!any) d.print("no harmony");
