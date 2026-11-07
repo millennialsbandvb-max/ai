@@ -73,6 +73,7 @@ struct Cfg {
   float kflat = 10.0f;                             // foot keyboard: tilt from flat that releases the note (deg)
   int kspan = 18;                                  // foot keyboard: semitones from lowest to highest note (18 = 1.5 octaves)
   float kdeg = 4.0f;                               // foot keyboard: degrees of swivel per note
+  bool kEdge = false; float kLo = 0, kHi = 0;      // foot keyboard: swivel positions of the lowest and highest note, when set
 } cfg;
 Preferences prefs;
 
@@ -142,6 +143,7 @@ int keyNote = -1;            // note currently held (MIDI number), -1 = none
 float keyQx = 0, keyQy = 0, keyQz = 1;   // foot orientation (gravity direction) when the note started
 uint32_t keyOnAt = 0;                    // when the note started
 float keyTip = 0;                        // how far the foot has tipped from that position (deg)
+bool loSet = false, hiSet = false;       // which keyboard edges have been set since the last clear
 uint32_t keyLiftSince = 0;   // when the foot started to leave flat
 static const char* NOTE_NAMES[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 void keyName(int n, char* out) { sprintf(out, "%s%d", NOTE_NAMES[n % 12], n / 12 - 1); }
@@ -174,9 +176,15 @@ void keyOn(int note, float vel, float tilt) {
   char nm[8]; keyName(note, nm);
   char b[96]; snprintf(b, sizeof b, "{\"key\":%d,\"on\":1,\"v\":%.2f,\"name\":\"%s\",\"tilt\":%.0f}", note, vel, nm, tilt); ws.textAll(b);
 }
-// Which note a swivel picks: the range is centred on the middle position; each note is kdeg degrees wide.
-float keyHalf() { return cfg.kspan * cfg.kdeg / 2; }   // degrees from centre to either end
+// Which note a swivel picks. With edges set, the notes spread evenly from the low-end position to the
+// high-end position; otherwise the range is centred on 0 with each note kdeg degrees wide.
+float keyHalf() { return cfg.kEdge ? fabsf(cfg.kHi - cfg.kLo) / 2 : cfg.kspan * cfg.kdeg / 2; }
+float keyMid() { return cfg.kEdge ? (cfg.kLo + cfg.kHi) / 2 : 0; }
 int keyForTilt(float a) {
+  if (cfg.kEdge) {
+    float f = constrain((a - cfg.kLo) / (cfg.kHi - cfg.kLo), 0.0f, 1.0f);
+    return cfg.kroot + (int)roundf(f * cfg.kspan);
+  }
   float h = keyHalf(), t = constrain(a, -h, h);
   return cfg.kroot + (int)roundf((t + h) / cfg.kdeg);
 }
@@ -501,7 +509,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
     }
     float yr = (wx - bwx) * qx + (wy - bwy) * qy + (wz - bwz) * qz;   // deg/s about vertical
     if (fabsf(yr) > 1.5f) yawDeg += (cfg.kflip ? -yr : yr) * dts;      // ignore sub-noise creep
-    yawDeg = constrain(yawDeg, -keyHalf() - 15, keyHalf() + 15);
+    yawDeg = constrain(yawDeg, keyMid() - keyHalf() - 15, keyMid() + keyHalf() + 15);
   }
   gH[gHi][0] = wx; gH[gHi][1] = wy; gH[gHi][2] = wz; gHT[gHi] = now; pH[gHi] = toeAngle; qH[gHi][0] = qx; qH[gHi][1] = qy; qH[gHi][2] = qz; yH[gHi] = yawDeg; gHi = (gHi + 1) % GH;
   if (nMeter < 12) meterBuf[nMeter++] = mag;
@@ -567,9 +575,9 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
-  char b[800];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  char b[880];
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -589,7 +597,11 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   if (strstr(s, "\"learnToe\"")) { learnTH = 1; learnN = 0; memset(learnSig, 0, sizeof learnSig); ws.textAll("{\"learn\":\"toe 0/3\"}"); return; }
   if (strstr(s, "\"learnHeel\"")) { learnTH = 2; learnN = 0; memset(learnSig, 0, sizeof learnSig); ws.textAll("{\"learn\":\"heel 0/3\"}"); return; }
   if (strstr(s, "\"setFlat\"")) { setFlat(); return; }
-  if (strstr(s, "\"keyCenter\"")) { yawDeg = 0; return; }
+  if (strstr(s, "\"keyCenter\"")) { yawDeg = keyMid(); return; }
+  // Edges: both must be set (since the last clear) and at least 6 degrees apart before they're used.
+  if (strstr(s, "\"keyLo\"")) { cfg.kLo = yawDeg; loSet = true; cfg.kEdge = (loSet || cfg.kEdge) && (hiSet || cfg.kEdge) && fabsf(cfg.kHi - cfg.kLo) >= 6; saveCfg(); sendCfg(nullptr); ws.textAll("{\"edge\":\"lo\"}"); return; }
+  if (strstr(s, "\"keyHi\"")) { cfg.kHi = yawDeg; hiSet = true; cfg.kEdge = (loSet || cfg.kEdge) && (hiSet || cfg.kEdge) && fabsf(cfg.kHi - cfg.kLo) >= 6; saveCfg(); sendCfg(nullptr); ws.textAll("{\"edge\":\"hi\"}"); return; }
+  if (strstr(s, "\"keyClear\"")) { cfg.kEdge = false; cfg.kLo = cfg.kHi = 0; loSet = hiSet = false; yawDeg = 0; saveCfg(); sendCfg(nullptr); return; }
   if (strstr(s, "\"flipSwing\"")) { cfg.rx = -cfg.rx; cfg.ry = -cfg.ry; cfg.rz = -cfg.rz; saveCfg(); ws.textAll("{\"learn\":\"flipped ✓\"}"); return; }
   if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }
   if (const char* q = strstr(s, "\"ssid\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.ssid) - 1); memcpy(cfg.ssid, q, n); cfg.ssid[n] = 0; } }
@@ -754,7 +766,7 @@ void loop() {
     cfg.kroot += 12; if (cfg.kroot > 84) cfg.kroot -= 48; if (cfg.kroot < 24) cfg.kroot = 24;
     keyOff(); saveCfg(); sendCfg(nullptr);
   }
-  if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else if (!resetHeld && cfg.snare == 6) startSwingCal(); else if (!resetHeld && cfg.snare == 10) yawDeg = 0; resetHeld = false; }
+  if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else if (!resetHeld && cfg.snare == 6) startSwingCal(); else if (!resetHeld && cfg.snare == 10) yawDeg = keyMid(); resetHeld = false; }
   if (M5.BtnA.pressedFor(2000) && !resetHeld) {   // reset settings, keep Wi-Fi
     resetHeld = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.sigVer = 6; cfg = d; saveCfg(); sendCfg(nullptr);
   }
