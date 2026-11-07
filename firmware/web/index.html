@@ -84,6 +84,18 @@
   <button type="button" data-v="2">Tap = kick, stomp = snare</button>
   <button type="button" data-v="1">Tap = snare, stomp = kick</button>
   <button type="button" data-v="9">Shaker</button>
+  <button type="button" data-v="10">Foot keyboard</button>
+</div>
+<div id="keyBox" style="display:flex;flex-direction:column;gap:10px">
+<div class="tiles">
+  <div class="tile"><b id="keyAim">—</b><span>note at this angle</span></div>
+  <div class="tile"><b id="keyNow">—</b><span>playing</span></div>
+  <div class="tile"><b id="keyRange">—</b><span>range</span></div>
+</div>
+<div class="ctl"><label for="kroot">Lowest note (heel all the way up)</label><output id="krootOut"></output>
+  <input type="range" id="kroot" data-key="kroot" min="24" max="84" step="1" value="48"></div>
+<div class="ctl"><label for="krange">Tilt for the ends (heel-up = bottom, toe-up = top)</label><output id="krangeOut"></output>
+  <input type="range" id="krange" data-key="krange" min="8" max="70" step="1" value="36"></div>
 </div>
 <div id="shkBox">
 <div class="seg" data-key="shk">
@@ -175,6 +187,8 @@
 <script src="samples.js"></script>
 <script>
 (() => {
+  const NN = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  function noteName(n) { return NN[n % 12] + (Math.floor(n / 12) - 1); }
   const $ = id => document.getElementById(id);
   const colors = { kick: '#ff6a3d', snare: '#ffd166', hat: '#7bdff2', hatOpen: '#b3f0ff', shaker: '#7bf2a8', tamb: '#f27bd5' };
   let cfg = {}, ws = null, phoneSound = false; const logRows = [];
@@ -222,7 +236,7 @@
   }
 
   // ---------- Settings UI ----------
-  const fmt = { thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', swang: v => v + '°', tthr: v => v + '°', othr: v => v + '°', klvl: v => (+v).toFixed(2) + ' g', slvl: v => (+v).toFixed(2) + ' g', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
+  const fmt = { thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', swang: v => v + '°', kroot: v => noteName(+v), krange: v => '±' + v + '° (' + (2 * v / 24).toFixed(1) + '° per note)', tthr: v => v + '°', othr: v => v + '°', klvl: v => (+v).toFixed(2) + ' g', slvl: v => (+v).toFixed(2) + ' g', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
   function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function applyCfg(c) {
     cfg = c;
@@ -252,12 +266,28 @@
     send({ set: { [seg.dataset.key]: +b.dataset.v } });
   });
   $('flatBtn').addEventListener('click', () => { send({ setFlat: 1 }); $('flatBtn').textContent = 'Now raise your toe…'; });
+  function keyForTilt(t) { const r = +$('krange').value, c = Math.max(-r, Math.min(r, t)); return +$('kroot').value + Math.round((c + r) / (2 * r) * 24); }
+  function keyRangeText() { $('keyRange').textContent = noteName(+$('kroot').value) + '–' + noteName(+$('kroot').value + 24); }
+  $('kroot').addEventListener('input', keyRangeText); $('krange').addEventListener('input', keyRangeText);
+  let osc = null, oscGain = null;
+  function phoneKeyOn(n, v) {
+    if (!ctx) return; phoneKeyOff();
+    osc = ctx.createOscillator(); oscGain = ctx.createGain();
+    osc.type = 'triangle'; osc.frequency.value = 440 * Math.pow(2, (n - 69) / 12);
+    oscGain.gain.setValueAtTime(0, ctx.currentTime); oscGain.gain.linearRampToValueAtTime(0.3 + 0.5 * v, ctx.currentTime + 0.01);
+    osc.connect(oscGain).connect(master); osc.start();
+  }
+  function phoneKeyOff() {
+    if (!osc) return; const o = osc, g = oscGain; osc = null;
+    g.gain.setTargetAtTime(0, ctx.currentTime, 0.05); o.stop(ctx.currentTime + 0.3);
+  }
   function modeUi(mode) {
-    const swing = mode === 6, th = mode === 7 || mode === 8, shk = mode === 9;
+    const swing = mode === 6, th = mode === 7 || mode === 8, shk = mode === 9, key = mode === 10;
+    $('keyBox').hidden = !key; keyRangeText();
     $('swingBox').hidden = !swing; $('swthrCtl').hidden = !swing; $('thBox').hidden = !th; $('tthrCtl').hidden = !th; $('sthrCtl').hidden = swing || th || shk;
     $('shkBox').hidden = !shk;
     $('klvlCtl').hidden = !th; $('slvlCtl').hidden = !th; $('thr').closest('.ctl').hidden = th;
-    $('thrLabel').textContent = shk ? 'Lightest shake that counts (full volume at 4× this)' : swing ? 'Stomp threshold (harder than this = kick)' : th ? 'Lightest stomp that counts' : 'Lightest tap that counts';
+    $('thrLabel').textContent = key ? 'Lightest landing that plays a note' : shk ? 'Lightest shake that counts (full volume at 4× this)' : swing ? 'Stomp threshold (harder than this = kick)' : th ? 'Lightest stomp that counts' : 'Lightest tap that counts';
   }
   $('learnHeel').addEventListener('click', () => { send({ learnHeel: 1 }); $('learnHeel').classList.add('arm'); });
   $('learnToe').addEventListener('click', () => { send({ learnToe: 1 }); $('learnToe').classList.add('arm'); });
@@ -283,6 +313,14 @@
       const m = JSON.parse(ev.data);
       if (m.cfg) applyCfg(m.cfg);
       if (m.m) { for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; } }
+      if (m.toe !== undefined && +(cfg.snare) === 10) $('keyAim').textContent = noteName(keyForTilt(m.toe));
+      if (m.key !== undefined) {
+        if (m.on) {
+          $('keyNow').textContent = m.name; show('kick'); $('last').textContent = m.name;
+          logRows.unshift((m.name + '     ').slice(0, 5) + '  vel ' + Math.round(20 + m.v * 107) + '  tilt ' + (m.tilt > 0 ? '+' : '') + m.tilt + '°'); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n');
+          const out = +(cfg.out || 0); if (phoneSound && (out === 1 || out === 2)) phoneKeyOn(m.key, m.v);
+        } else { $('keyNow').textContent = '—'; phoneKeyOff(); }
+      }
       if (m.toe !== undefined) { $('toeAng').textContent = (m.toe > 0 ? '+' : '') + m.toe + '°'; $('hatState').textContent = m.open ? 'open' : 'closed'; }
       if (m.flat === 2) { $('flatBtn').textContent = 'Flat + toe-up set ✓'; $('upState').textContent = 'toe-up learned ✓'; }
       if (m.flat === 3) $('flatBtn').textContent = 'Toe didn’t come up, try again';
