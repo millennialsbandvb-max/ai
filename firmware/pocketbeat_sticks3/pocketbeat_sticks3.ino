@@ -784,7 +784,7 @@ void setup() {
   c.internal_spk = true;
 #endif
   M5.begin(c);
-  M5.Display.setRotation(1); M5.Display.setBrightness(96);
+  M5.Display.setRotation(3);   // USB-C end away from the player M5.Display.setBrightness(96);
   lastButtonMs = millis();
   loadCfg();
   M5.Speaker.setVolume(cfg.vol);

@@ -253,6 +253,13 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 int aimNote() { return cfg.move ? stepToNote(constrain(slideStep, 0, cfg.kspan)) : keyForTilt(yawDeg); }
 
 // ---------------- Web ----------------
+void notesOff();
+// change scale, keeping about the same span in octaves
+void setScale(int ns) {
+  float oct = (stepToNote(cfg.kspan) - cfg.kroot) / 12.0f;
+  cfg.scale = constrain(ns, 0, 4); cfg.kspan = constrain((int)roundf(oct * SC_LEN[cfg.scale]), 2, 48);
+  slideStep = constrain(slideStep, 0, cfg.kspan); keyTip = -1; notesOff();
+}
 void sendCfg(AsyncWebSocketClient* c) {
   char b[600];
   snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"kdeg\":%.1f,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"move\":%d,\"sthr\":%.2f,\"scm\":%.1f,\"rSet\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
@@ -300,7 +307,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "scale", &f);
   if (f) {   // keep about the same span in octaves when the scale changes
     int ns = constrain((int)v, 0, 4);
-    if (ns != cfg.scale) { float oct = (stepToNote(cfg.kspan) - cfg.kroot) / 12.0f; cfg.scale = ns; cfg.kspan = constrain((int)roundf(oct * SC_LEN[ns]), 2, 48); keyTip = -1; notesOff(); }
+    if (ns != cfg.scale) setScale(ns);
   }
   v = jsonNum(s, "move", &f); if (f) { cfg.move = (int)v ? 1 : 0; slideStep = cfg.kspan / 2; slState = 0; }
   v = jsonNum(s, "sthr", &f); if (f) cfg.sthr = constrain(v, 0.03f, 1.0f);
@@ -413,14 +420,14 @@ void drawScreen() {
   bool any = false; for (int i = 0; i < 5; i++) if (cfg.ints & (1 << i)) { d.printf("%s ", INT_NAMES[i]); any = true; }
   if (!any) d.print("no harmony");
   d.setCursor(4, 72); d.printf("BLE %s  WiFi %d  batt %d%%", bleConnected ? "on" : "--", WiFi.softAPgetStationNum(), M5.Power.getBatteryLevel());
-  d.setCursor(4, 84); d.printf("A=centre  side=oct+  v%s", FW_VERSION);
+  d.setCursor(4, 84); d.printf("A=centre  side=scale  v%s", FW_VERSION);
   d.endWrite();
 }
 
 void setup() {
   auto c = M5.config(); c.internal_imu = true; c.internal_spk = true;
   M5.begin(c);
-  M5.Display.setRotation(1); M5.Display.setBrightness(96);
+  M5.Display.setRotation(3);   // USB-C end away from the player M5.Display.setBrightness(96);
   lastButtonMs = millis();
   loadCfg();
   M5.Speaker.setVolume(cfg.vol);
@@ -445,9 +452,8 @@ void loop() {
     if (!screenOn) { screenSet(true); drawScreen(); wakeOnly = true; }
   }
   if (screenOn && now - lastButtonMs > SCREEN_TIMEOUT_MS) screenSet(false);
-  if (M5.BtnB.wasReleased() && !wakeOnly) {   // side button: octave up (wraps back to the bottom)
-    cfg.kroot += 12; if (cfg.kroot > 84) cfg.kroot -= 48; if (cfg.kroot < 24) cfg.kroot = 24;
-    keyTip = -1; notesOff(); saveCfg(); sendCfg(nullptr);
+  if (M5.BtnB.wasReleased() && !wakeOnly) {   // side button: next scale (chromatic > major > minor > major pent > minor pent)
+    setScale((cfg.scale + 1) % 5); saveCfg(); sendCfg(nullptr); lastDraw = 0;
   }
   if (M5.BtnA.wasReleased()) { if (!wakeOnly && !resetHeld) { yawDeg = keyMid(); slideStep = cfg.kspan / 2; } resetHeld = false; }
   if ((M5.BtnA.wasReleased() || M5.BtnB.wasReleased()) && wakeOnly) wakeOnly = false;
