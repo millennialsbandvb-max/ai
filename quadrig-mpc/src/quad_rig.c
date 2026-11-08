@@ -9,7 +9,8 @@
  * (knob values after a preset or algorithm change) come back through our host callback and on to MPC.
  * State: a chunk with our parameters and NAM's own chunk (its model and IR paths).
  * MIDI (any channel): CC 81-84 bypass FX 1-4 (64+ = bypassed), CC 85 the amp, CC 86-87 FX 5-6, CC 64 Hold on every slot,
- * Program Change n: rig preset n + 1 (rigs.h: whole boards, the Rig stepper).
+ * Program Change n: rig preset n + 1 in the bank chosen (rigs.h: whole boards, the Rig stepper); CC 0 = the bank (0 Factory,
+ * 1 Live).
  * State: "QRIG1 <n>"; a four-slot chunk (before Nov 2026) is read too (its slots 5-6 Off, its amp position mapped). */
 #include <math.h>
 #include <stdint.h>
@@ -51,7 +52,8 @@ enum { kNam0 = kSlot0 + NS * SP, kNumSaved = kNam0 + NAM_N,   /* (the state chun
        kLook0 = kNumSaved, kAmpLook = kLook0 + NS,               /* FX1..6 Look, Amp Look: read-only, the pages' colours */
        kRig, kRigPrev, kRigNext,                                 /* the rig presets (rigs.h): not in the state chunk */
        kFxArrow0,                                                /* FX1 Effect <, FX1 Effect >, ... (Nov 2026: steppers, not pop-ups) */
-       kNumParams = kFxArrow0 + 2 * NS };
+       kBank = kFxArrow0 + 2 * NS, kBankPrev, kBankNext,         /* the rig banks (rigs.h BANKS): Factory, Live */
+       kNumParams };
 static const char *const AMP_POS[] = {"Amp First", "After FX 1", "After FX 2", "After FX 3", "After FX 4", "After FX 5", "Amp Last"};
 #define N_POS (NS + 1)
 
@@ -64,7 +66,7 @@ typedef struct {
     int kind[NS];                  /* what each slot runs now: 0 Duo, 1 Ambient Lab, 2 Off */
     float byp_s[NS];
     int amp_look_tick;
-    int rig;                       /* the rig preset last loaded (-1: none) */
+    int rig, bank;                 /* the rig preset last loaded (-1: none), in the bank chosen */
     volatile int update_display;
     volatile unsigned char automate[kNumParams];
     char *chunk;
@@ -155,11 +157,13 @@ static void choose_fx(Plugin *s, int k, int fx) {   /* point the slot at an engi
 }
 
 static void rig_param(Plugin *s, int w, float v);
+static void bank_param(Plugin *s, int w, float v);
 static void load_rig(Plugin *s, int r);
 static void setParameter(AEffect *e, int32_t i, float v) {
     Plugin *s = (Plugin *)e->object;
     if (i < 0 || i >= kNumParams || (i >= kLook0 && i < kRig)) return;   /* (the looks are read-only) */
     v = clampf(v, 0, 1);
+    if (i >= kBank) { bank_param(s, i - kBank, v); return; }
     if (i >= kFxArrow0) {   /* an effect's < or >: the one before / after in the A-Z list */
         const int k = (i - kFxArrow0) / 2, d = (i - kFxArrow0) % 2 ? 1 : -1;
         if (v > 0.5f) {
@@ -255,6 +259,7 @@ static int amp_look(Plugin *s) {   /* (NAM's model and folder names: its params 
 }
 static int slot_look(Plugin *s, int k) { return s->kind[k] == 0 ? duo_look(s->duo[k]) : s->kind[k] == 1 ? amb_look(s->amb[k]) : LK_GRAPHITE; }
 static void param_name(Plugin *s, int i, char *t) {
+    if (i >= kBank) { snprintf(t, 32, "%s", i == kBank ? "Bank" : i == kBankPrev ? "Bank <" : "Bank >"); return; }
     if (i >= kFxArrow0) { snprintf(t, 32, "FX%d Effect %s", (i - kFxArrow0) / 2 + 1, (i - kFxArrow0) % 2 ? ">" : "<"); return; }
     if (i >= kRig) { snprintf(t, 32, "%s", i == kRig ? "Rig" : i == kRigPrev ? "Rig <" : "Rig >"); return; }
     if (i == kAmpLook) { snprintf(t, 32, "Amp Look"); return; }
@@ -273,7 +278,9 @@ static void param_name(Plugin *s, int i, char *t) {
     snprintf(t, 32, "FX%d %s", k + 1, W[w]);
 }
 static void param_display(Plugin *s, int i, char *t) {
-    if (i == kRig) { snprintf(t, 32, "%s", s->rig >= 0 ? RIGS[s->rig].name : "-"); return; }
+    if (i == kBank) { snprintf(t, 32, "%s", BANKS[s->bank].name); return; }
+    if (i > kBank) { snprintf(t, 32, "%s", i == kBankPrev ? "<" : ">"); return; }
+    if (i == kRig) { snprintf(t, 32, "%s", s->rig >= 0 && s->rig < BANKS[s->bank].n ? BANKS[s->bank].rigs[s->rig].name : "-"); return; }
     if (i >= kFxArrow0) { snprintf(t, 32, "%s", (i - kFxArrow0) % 2 ? ">" : "<"); return; }
     if (i > kRig) { snprintf(t, 32, "%s", i == kRigPrev ? "<" : ">"); return; }
     if (i == kAmpLook) { snprintf(t, 32, "%s", PEDAL_LOOKS[option_of(s->norm[i], N_LOOKS)].name); return; }
@@ -451,7 +458,11 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
         const Evs *ev = (const Evs *)p;
         for (int k = 0; ev && k < ev->numEvents; k++) {
             if (!ev->events[k] || ev->events[k]->type != 1) continue;
-            if ((ev->events[k]->midiData[0] & 0xf0) == 0xc0) { load_rig(s, ev->events[k]->midiData[1]); continue; }   /* Program Change n: rig n + 1 */
+            if ((ev->events[k]->midiData[0] & 0xf0) == 0xc0) { load_rig(s, ev->events[k]->midiData[1]); continue; }   /* Program Change n: rig n + 1 (in the bank) */
+            if ((ev->events[k]->midiData[0] & 0xf0) == 0xb0 && ev->events[k]->midiData[1] == 0) {   /* CC 0 (bank select): the bank */
+                if (ev->events[k]->midiData[2] < N_BANKS) bank_param(s, 0, N_BANKS > 1 ? (float)ev->events[k]->midiData[2] / (float)(N_BANKS - 1) : 0);
+                continue;
+            }
             if ((ev->events[k]->midiData[0] & 0xf0) != 0xb0) continue;
             const int cc = ev->events[k]->midiData[1], hi = ev->events[k]->midiData[2] >= 64;
             int i = -1;
@@ -475,6 +486,14 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
 #define RIG_LIST (NS + 4 + NS * 8)
 static int quad_pick(AEffect *e, int list, int op, int i, char *out, int max) {
     Plugin *s = (Plugin *)e->object;
+    if (list == RIG_LIST + 1 + NS) {   /* the banks */
+        if (op == PL_COUNT) return N_BANKS;
+        if (op == PL_CURRENT) return s->bank;
+        if (op == PL_HEADING || i < 0 || i >= N_BANKS) return 0;
+        if (op == PL_NAME) snprintf(out, (size_t)max, "%s", BANKS[i].name);
+        else if (op == PL_CHOOSE) { s->bank = i; s->rig = -1; s->norm[kBank] = N_BANKS > 1 ? (float)i / (float)(N_BANKS - 1) : 0; s->automate[kBank] = s->automate[kRig] = 1; s->update_display = 1; }
+        return 0;
+    }
     if (list > RIG_LIST) {   /* a slot's effect, A-Z (Off first) */
         const int k = list - RIG_LIST - 1;
         if (op == PL_COUNT) return N_FX;
@@ -485,11 +504,11 @@ static int quad_pick(AEffect *e, int list, int op, int i, char *out, int max) {
         return 0;
     }
     if (list == RIG_LIST) {   /* the rig presets */
-        if (op == PL_COUNT) return N_RIGS;
+        if (op == PL_COUNT) return BANKS[s->bank].n;
         if (op == PL_CURRENT) return s->rig;
         if (op == PL_HEADING) return 0;
-        if (i < 0 || i >= N_RIGS) return 0;
-        if (op == PL_NAME) snprintf(out, (size_t)max, "%s", RIGS[i].name);
+        if (i < 0 || i >= BANKS[s->bank].n) return 0;
+        if (op == PL_NAME) snprintf(out, (size_t)max, "%s", BANKS[s->bank].rigs[i].name);
         else if (op == PL_CHOOSE) load_rig(s, i);
         return 0;
     }
@@ -514,11 +533,11 @@ static int quad_pick(AEffect *e, int list, int op, int i, char *out, int max) {
               "FX " #f " Knob 7", "FX " #f " Knob 8"
 static const char *const LIST_KEYS[] = {"f1_preset", "f2_preset", "f3_preset", "f4_preset", "f5_preset", "f6_preset", "amp_folder",
                                         "amp_model", "amp_ir_folder", "amp_ir", KN(1), KN(2), KN(3), KN(4), KN(5), KN(6), "rig",
-                                        "f1_fx", "f2_fx", "f3_fx", "f4_fx", "f5_fx", "f6_fx"};
+                                        "f1_fx", "f2_fx", "f3_fx", "f4_fx", "f5_fx", "f6_fx", "bank"};
 static const char *const LIST_TITLES[] = {"FX 1 Presets", "FX 2 Presets", "FX 3 Presets", "FX 4 Presets", "FX 5 Presets", "FX 6 Presets",
                                           "Model Folders", "Models", "IR Folders", "IRs", KT(1), KT(2), KT(3), KT(4), KT(5), KT(6), "Rigs",
-                                          "FX 1 Effects", "FX 2 Effects", "FX 3 Effects", "FX 4 Effects", "FX 5 Effects", "FX 6 Effects"};
-static const PickLists LISTS = {RIG_LIST + 1 + NS, LIST_KEYS, LIST_TITLES, quad_pick, 1};   /* (1: MIDI Ch) */
+                                          "FX 1 Effects", "FX 2 Effects", "FX 3 Effects", "FX 4 Effects", "FX 5 Effects", "FX 6 Effects", "Banks"};
+static const PickLists LISTS = {RIG_LIST + 2 + NS, LIST_KEYS, LIST_TITLES, quad_pick, 1};   /* (1: MIDI Ch) */
 
 /* ---- rig presets (rigs.h) --------------------------------------------------------------------------------------- */
 static int alnum(char c) { return (c >= '0' && c <= '9') || ((c | 32) >= 'a' && (c | 32) <= 'z'); }
@@ -539,8 +558,9 @@ static int preset_named(Plugin *s, int k, const char *n) {   /* in the slot's ow
     return -1;
 }
 static void load_rig(Plugin *s, int r) {
-    if (r < 0 || r >= N_RIGS) return;
-    const Rig *g = &RIGS[r];
+    const int nr = BANKS[s->bank].n;
+    if (r < 0 || r >= nr) return;
+    const Rig *g = &BANKS[s->bank].rigs[r];
     for (int k = 0; k < NS; k++) {
         const RigSlot *rs = &g->s[k];
         const int fx = fx_named(rs->fx);
@@ -568,22 +588,33 @@ static void load_rig(Plugin *s, int r) {
         if (w != S_PREV && w != S_NEXT) s->automate[i] = 1;   /* (MPC shows the whole board anew) */
     }
     s->rig = r;
-    s->norm[kRig] = (float)r / (float)(N_RIGS - 1);
+    s->norm[kRig] = nr > 1 ? (float)r / (float)(nr - 1) : 0;
     s->automate[kRig] = 1;
     s->update_display = 1;
 }
 /* Rig: a pick (an exact value: a project restoring only shows its name) or a Q-Link nudge (loads the next / previous);
  * Rig < and >: momentary buttons */
 static void rig_param(Plugin *s, int w, float v) {
+    const int nrigs = BANKS[s->bank].n;
     if (w) {
-        if (v > 0.5f) load_rig(s, s->rig < 0 ? (w == 1 ? N_RIGS - 1 : 0) : (s->rig + (w == 1 ? -1 : 1) + N_RIGS) % N_RIGS);
+        if (v > 0.5f) load_rig(s, s->rig < 0 ? (w == 1 ? nrigs - 1 : 0) : (s->rig + (w == 1 ? -1 : 1) + nrigs) % nrigs);
         s->norm[kRig + w] = 0;
         return;
     }
-    const float pos = v * (float)(N_RIGS - 1), cur = s->rig >= 0 ? (float)s->rig : s->norm[kRig] * (float)(N_RIGS - 1);
-    if (fabsf(pos - roundf(pos)) > 0.001f && fabsf(pos - cur) < 1) { load_rig(s, ((int)lrintf(cur) + (pos > cur ? 1 : -1) + N_RIGS) % N_RIGS); return; }
+    const float pos = v * (float)(nrigs - 1), cur = s->rig >= 0 ? (float)s->rig : s->norm[kRig] * (float)(nrigs - 1);
+    if (fabsf(pos - roundf(pos)) > 0.001f && fabsf(pos - cur) < 1) { load_rig(s, ((int)lrintf(cur) + (pos > cur ? 1 : -1) + nrigs) % nrigs); return; }
     s->rig = (int)lrintf(pos);
     s->norm[kRig] = v;
+    s->update_display = 1;
+}
+/* Bank: < > (or a pick / Q-Link) chooses the bank the Rig stepper works in; nothing loads until a rig is chosen */
+static void bank_param(Plugin *s, int w, float v) {
+    int b = s->bank;
+    if (w) { if (v > 0.5f) b = (s->bank + (w == 1 ? -1 : 1) + N_BANKS) % N_BANKS; s->norm[kBank + w] = 0; }
+    else b = N_BANKS > 1 ? (int)lrintf(clampf(v, 0, 1) * (float)(N_BANKS - 1)) : 0;
+    if (b != s->bank) { s->bank = b; s->rig = -1; s->automate[kRig] = 1; }
+    s->norm[kBank] = N_BANKS > 1 ? (float)s->bank / (float)(N_BANKS - 1) : 0;
+    s->automate[kBank] = 1;
     s->update_display = 1;
 }
 
@@ -711,6 +742,9 @@ int main(int argc, char **argv) {
         printf(",\n    {\"key\": \"f%d_fx_prev\", \"name\": \"FX%d Effect <\", \"options\": [\"Off\", \"On\"], \"momentary\": true}", k + 1, k + 1);
         printf(",\n    {\"key\": \"f%d_fx_next\", \"name\": \"FX%d Effect >\", \"options\": [\"Off\", \"On\"], \"momentary\": true}", k + 1, k + 1);
     }
+    printf(",\n    {\"key\": \"bank\", \"name\": \"Bank\", \"min\": 0, \"max\": 1, \"display\": \"string\", \"type\": \"stepper\"}");
+    printf(",\n    {\"key\": \"bank_prev\", \"name\": \"Bank <\", \"options\": [\"Off\", \"On\"], \"momentary\": true}");
+    printf(",\n    {\"key\": \"bank_next\", \"name\": \"Bank >\", \"options\": [\"Off\", \"On\"], \"momentary\": true}");
     pl_params_json(&LISTS, stdout);
     printf("\n  ]\n}\n");
     return count == NAM_N ? 0 : 1;

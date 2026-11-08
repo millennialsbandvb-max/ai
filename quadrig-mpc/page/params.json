@@ -305,6 +305,9 @@
     {"key": "f5_fx_next", "name": "FX5 Effect >", "options": ["Off", "On"], "momentary": true},
     {"key": "f6_fx_prev", "name": "FX6 Effect <", "options": ["Off", "On"], "momentary": true},
     {"key": "f6_fx_next", "name": "FX6 Effect >", "options": ["Off", "On"], "momentary": true},
+    {"key": "bank", "name": "Bank", "min": 0, "max": 1, "display": "string", "type": "stepper"},
+    {"key": "bank_prev", "name": "Bank <", "options": ["Off", "On"], "momentary": true},
+    {"key": "bank_next", "name": "Bank >", "options": ["Off", "On"], "momentary": true},
     {"key": "f1_preset__list", "name": "FX 1 Presets List", "options": ["Closed", "Open"]},
     {"key": "f2_preset__list", "name": "FX 2 Presets List", "options": ["Closed", "Open"]},
     {"key": "f3_preset__list", "name": "FX 3 Presets List", "options": ["Closed", "Open"]},
@@ -370,6 +373,7 @@
     {"key": "f4_fx__list", "name": "FX 4 Effects List", "options": ["Closed", "Open"]},
     {"key": "f5_fx__list", "name": "FX 5 Effects List", "options": ["Closed", "Open"]},
     {"key": "f6_fx__list", "name": "FX 6 Effects List", "options": ["Closed", "Open"]},
+    {"key": "bank__list", "name": "Banks List", "options": ["Closed", "Open"]},
     {"key": "midi_ch__list", "name": "MIDI Ch List", "options": ["Closed", "Open"]},
     {"key": "pick_1", "name": "List 1", "options": ["Off", "On"], "display": "string"},
     {"key": "pick_2", "name": "List 2", "options": ["Off", "On"], "display": "string"},
@@ -467,6 +471,7 @@
     {"key": "f4_fx__sel", "name": "FX 4 Effects Sel", "options": ["Off", "On"], "momentary": true},
     {"key": "f5_fx__sel", "name": "FX 5 Effects Sel", "options": ["Off", "On"], "momentary": true},
     {"key": "f6_fx__sel", "name": "FX 6 Effects Sel", "options": ["Off", "On"], "momentary": true},
+    {"key": "bank__sel", "name": "Banks Sel", "options": ["Off", "On"], "momentary": true},
     {"key": "midi_ch__sel", "name": "MIDI Ch Sel", "options": ["Off", "On"], "momentary": true}
   ]
 }

@@ -188,3 +188,36 @@ static const Rig RIGS[] = {
      {{"PolySynt", "Melting Tones", M_, NOK}, {"Polym00n", "DimensionChorus", 0.35f, NOK}, {"Cloudbrst", "Cloud Pad", 0.5f, NOK}, OFF, OFF, OFF}},
 };
 #define N_RIGS ((int)(sizeof RIGS / sizeof *RIGS))
+
+/* ---- the Live bank (Nov 2026, the user's ask: "banks ... so I can have you make me some live rigs that are easier to
+ * access"): gig rigs, a compressor first, few slots, no surprises. Starters until the user says what they want. ---- */
+static const Rig LIVE_RIGS[] = {
+    {"Live Clean", "twin,deluxe,jc120,ac30,fender", "2x12,1x12", 1, -2, -100, 5, 5, 6.5f, 6.5f, 3,
+     {{"Compressor", "Opto Smooth", M_, NOK}, {"Chorus", "Warmth", 0.2f, NOK}, {"Digital Delay", "Pristine Digital Delay", 0.2f, NOK},
+      {"Room", "Lux Space", 0.18f, NOK}, OFF, OFF}},
+    {"Live Crunch", "plexi,jcm,1959,ac30,marshall", "greenback,4x12,2x12", 2, 0, -85, 5, 6, 6.5f, 6.5f, 3,
+     {{"Compressor", "Clean Studio", M_, NOK}, {"DrivPdls", "Klone", M_, {K_, 0.45f, 0.55f, 0.7f, K_, K_, K_, K_}},
+      {"Tape Echo", "Classic Slap", 0.18f, NOK}, {"Room", "Guitar Room", 0.15f, NOK}, OFF, OFF}},
+    {"Live Lead", "jcm800,plexi,mark iv,marshall,mesa", "4x12,v30", 1, 0, -75, 5, 6, 6.5f, 6.5f, 4,
+     {{"DrivPdls", "Tube Scrmr", M_, {K_, 0.3f, 0.55f, 0.8f, K_, K_, K_, K_}}, {"Digital Delay", "Big Warm Digital", 0.3f, NOK},
+      {"Hall", "Hall", 0.25f, NOK}, OFF, OFF, OFF}},
+    {"Live Heavy", "5150,6505,rectifier,mesa,evh,engl", "v30,4x12", 1, 2, -55, 5.5f, 4.5f, 5, 5, 2,
+     {{"DrivPdls", "Tube Scrmr", M_, {K_, 0.1f, 0.6f, 0.85f, K_, K_, K_, K_}}, {"Room", "Boxy Ro0m", 0.1f, NOK}, OFF, OFF, OFF, OFF}},
+    {"Live Ambient", "twin,ac30,deluxe,fender", "2x12", 1, -2, -100, 5, 5, 6, 6, 2,
+     {{"Compressor", "Opto Smooth", M_, NOK}, {"Digital Delay", "Ambient Delay", 0.35f, NOK}, {"Cloudbrst", "Infinite Swell", 0.45f, NOK},
+      OFF, OFF, OFF}},
+    {"Live Funk", "twin,jc120,roland,fender", "2x12", 2, -2, -90, 5, 5.5f, 7, 7, 3,
+     {{"Compressor", "Funk Snap", M_, NOK}, {"Sculpt3", "Wahcraft", M_, NOK}, {"Phaser", "FunkPhase", 0.35f, NOK},
+      {"Room", "PCM60Room", 0.15f, NOK}, OFF, OFF}},
+    {"Live Acoustic", "twin,deluxe,jc120,fender", "2x12,1x12", 2, -3, -100, 5, 5, 5.5f, 5, 3,
+     {{"Compressor", "Clean Studio", M_, NOK}, {"Acoustic Sim", "Concert Clean", M_, NOK}, {"Plate", "Just Cuz", 0.2f, NOK},
+      OFF, OFF, OFF}},
+    {"Live Solo Boost", "jcm800,plexi,dumble,marshall", "4x12,2x12", 2, 0, -80, 5, 6.5f, 6.5f, 6.5f, 5,
+     {{"Compressor", "Infinite Sustain", 0.6f, NOK}, {"DrivPdls", "Kng o Tone", M_, NOK}, {"Vintage Delay", "Long Vintage H-9", 0.3f, NOK},
+      {"Hall", "Hall", 0.25f, NOK}, OFF, OFF}},
+};
+#define N_LIVE ((int)(sizeof LIVE_RIGS / sizeof *LIVE_RIGS))
+
+/* the banks: the Rig stepper, its list, its arrows and Program Change all work within the bank chosen (CC 0 = bank) */
+static const struct { const char *name; const Rig *rigs; int n; } BANKS[] = {{"Factory", RIGS, N_RIGS}, {"Live", LIVE_RIGS, N_LIVE}};
+#define N_BANKS ((int)(sizeof BANKS / sizeof *BANKS))

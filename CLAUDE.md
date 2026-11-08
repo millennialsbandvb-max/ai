@@ -360,6 +360,10 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   amp_look: rig, rig_prev, rig_next; not in the state chunk) on the RIG page where the amp folder stepper was (the
   folder is on AMP), with a full-page list "Rigs" (the last list); exact value = name only (a restore), a nudge or
   arrow loads; MIDI Program Change n = rig n+1. quad_test loads every rig and checks names; new rigs go at the end.
+  Banks (Nov 2026, the user's ask: live rigs kept apart from the factory ones): rigs.h BANKS = Factory (RIGS) and Live
+  (LIVE_RIGS, 8 starters, a Compressor first; more on the user's word, at the end). Params kBank / Bank < / Bank > after
+  the FX arrows; the Rig stepper, its list (Rigs), arrows and Program Change work within the bank; a bank change loads
+  nothing (Rig shows "-"); a "Banks" list (the last); MIDI CC 0 = bank. RIG page: Bank stepper above MIDI Ch.
   Voicing pass (the user: "more volume and clarity, the metal ones too bright"): every rig +3 dB Output (max 9),
   Presence +1, Treble +0.5, Bass -0.5 from 5.5 up, Input no lower than -3; Modern Metal / Djent Machine / Drop Tune
   Metal: Treble -1.5, Presence -2, Output +1.

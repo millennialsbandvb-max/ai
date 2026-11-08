@@ -175,40 +175,44 @@ int main(int argc, char **argv) {
     printf("  amp on, model \"%s\": difference from the input %.3f\n", model, err);
     if (getenv("NAM_MPC_DIR")) CHECK(err > 0.01, "the amp's model doesn't change the sound");
 
-    /* the rig presets: Rig > steps through them all; each slot shows the rig's effect and preset, and it plays */
-    {
+    /* the rig presets, in both banks: Rig > steps through them all; each slot shows the rig's effect and preset, and it plays */
+    for (int bk = 0; bk < N_BANKS; bk++) {
+        const Rig *rigs = BANKS[bk].rigs;
+        const int nrigs = BANKS[bk].n;
+        if (bk) { const int bn = param(e, "Bank >"); e->setParameter(e, bn, 1); e->setParameter(e, bn, 0); disp(e, param(e, "Bank"), t); printf("  bank: %s\n", t); CHECK(!strcmp(t, BANKS[bk].name), "Bank > doesn't move to the next bank"); }
         const int rig = param(e, "Rig"), next = param(e, "Rig >"), pres = param(e, "Presence");
         int bad = 0;
-        for (int r = 0; r < N_RIGS; r++) {
+        for (int r = 0; r < nrigs; r++) {
             e->setParameter(e, next, 1);
             e->setParameter(e, next, 0);
             disp(e, rig, t);
-            if (strcmp(t, RIGS[r].name)) { printf("  rig %d shows \"%s\", not \"%s\"\n", r + 1, t, RIGS[r].name); bad++; }
+            if (strcmp(t, rigs[r].name)) { printf("  rig %d shows \"%s\", not \"%s\"\n", r + 1, t, rigs[r].name); bad++; }
             for (int k = 0; k < 6; k++) {
                 char f[64], pr[64];
                 disp(e, fx1 + 16 * k, f);
                 disp(e, fx1 + 16 * k + 11, pr);
-                const char *want = RIGS[r].s[k].preset;
-                int ok = !strcmp(f, RIGS[r].s[k].fx);
+                const char *want = rigs[r].s[k].preset;
+                int ok = !strcmp(f, rigs[r].s[k].fx);
                 if (want) {   /* (letters and digits alike: rigs.h writes Ain't with a plain quote or none) */
                     char a2[64] = {0}, b2[64] = {0};
                     for (int i = 0, j = 0; pr[i] && j < 63; i++) if (isalnum((unsigned char)pr[i])) a2[j++] = (char)tolower((unsigned char)pr[i]);
                     for (int i = 0, j = 0; want[i] && j < 63; i++) if (isalnum((unsigned char)want[i])) b2[j++] = (char)tolower((unsigned char)want[i]);
                     ok = ok && *a2 && !strncmp(a2, b2, strlen(a2));   /* (the display may cut a long name) */
                 }
-                if (!ok) { printf("  rig \"%s\" slot %d: %s / %s, wanted %s / %s\n", RIGS[r].name, k + 1, f, pr, RIGS[r].s[k].fx, want ? want : "-"); bad++; }
+                if (!ok) { printf("  rig \"%s\" slot %d: %s / %s, wanted %s / %s\n", rigs[r].name, k + 1, f, pr, rigs[r].s[k].fx, want ? want : "-"); bad++; }
             }
             disp(e, pres, t);
             const int fine = render(e, 1.5f, &peak);
-            printf("  rig %2d %-18s presence %s, peak %.2f\n", r + 1, RIGS[r].name, t, peak);
-            if (!fine || peak > 4.01f) { printf("  rig \"%s\" plays badly\n", RIGS[r].name); bad++; }
+            printf("  rig %2d %-18s presence %s, peak %.2f\n", r + 1, rigs[r].name, t, peak);
+            if (!fine || peak > 4.01f) { printf("  rig \"%s\" plays badly\n", rigs[r].name); bad++; }
         }
         CHECK(!bad, "a rig preset doesn't load as written");
-        e->setParameter(e, rig, 2.0f / (N_RIGS - 1));   /* an exact value (a project restoring) shows the name only */
+        if (bk) continue;
+        e->setParameter(e, rig, 2.0f / (nrigs - 1));   /* an exact value (a project restoring) shows the name only */
         disp(e, rig, t);
         char f1[64];
         disp(e, fx1, f1);
-        CHECK(!strcmp(t, RIGS[2].name) && !strcmp(f1, RIGS[N_RIGS - 1].s[0].fx), "a restored Rig value changed the board");
+        CHECK(!strcmp(t, rigs[2].name) && !strcmp(f1, rigs[nrigs - 1].s[0].fx), "a restored Rig value changed the board");
     }
     /* a rig picks an amp from the library by its words (QUAD_AMP_TEST=1: a library of "Marshall Plexi" and
      * "Fender Twin" models): Plexi Crunch -> the Marshall, Texas Blues -> the Fender, Fuzz Synth Beast (svt / ampeg /
