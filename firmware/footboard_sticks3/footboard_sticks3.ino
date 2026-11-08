@@ -108,7 +108,6 @@ int keyForTilt(float a) {
 }
 
 int slideStep = 9;   // slide mode: which step of the range the foot is on
-int aimNote() { return cfg.move ? stepToNote(constrain(slideStep, 0, cfg.kspan)) : keyForTilt(yawDeg); }
 
 void notesOff() {
   if (rootHeld < 0) return;
@@ -250,6 +249,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
     }
   } else if (peakT) { float p = peak; uint32_t o = peakT; peak = 0; peakT = 0; lastTapT = now; fireTap(p, o, now); }
 }
+
+int aimNote() { return cfg.move ? stepToNote(constrain(slideStep, 0, cfg.kspan)) : keyForTilt(yawDeg); }
 
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
