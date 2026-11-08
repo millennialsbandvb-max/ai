@@ -364,6 +364,10 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   (LIVE_RIGS, 8 starters, a Compressor first; more on the user's word, at the end). Params kBank / Bank < / Bank > after
   the FX arrows; the Rig stepper, its list (Rigs), arrows and Program Change work within the bank; a bank change loads
   nothing (Rig shows "-"); a "Banks" list (the last); MIDI CC 0 = bank. RIG page: Bank stepper above MIDI Ch.
+  Setlist banks (Nov 2026, the user's Hoochie_Daddy_Setlist.xlsx, "I need tones for that"): `quadrig-mpc/setlist/make_setlist.py`
+  writes `src/rigs_setlist.h` (SET_0..6, SETLIST_BANKS, included at the end of rigs.h): banks A Grunge Core .. G Slow
+  Ones, one rig per song in sheet order (Program Change n = song n of the bank); each rig = a base sound (clean / edge /
+  crunch / heavy / fuzz / acoustic) + touches (chorus, wah, whammy at Bend 0, delays, reverbs ...). Bank numbers: 0 Factory, 1 Live, 2..8 A..G.
   Voicing pass (the user: "more volume and clarity, the metal ones too bright"): every rig +3 dB Output (max 9),
   Presence +1, Treble +0.5, Bass -0.5 from 5.5 up, Input no lower than -3; Modern Metal / Djent Machine / Drop Tune
   Metal: Treble -1.5, Presence -2, Output +1.

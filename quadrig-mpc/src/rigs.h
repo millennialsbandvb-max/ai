@@ -219,5 +219,6 @@ static const Rig LIVE_RIGS[] = {
 #define N_LIVE ((int)(sizeof LIVE_RIGS / sizeof *LIVE_RIGS))
 
 /* the banks: the Rig stepper, its list, its arrows and Program Change all work within the bank chosen (CC 0 = bank) */
-static const struct { const char *name; const Rig *rigs; int n; } BANKS[] = {{"Factory", RIGS, N_RIGS}, {"Live", LIVE_RIGS, N_LIVE}};
+#include "rigs_setlist.h"   /* the Hoochie Daddy setlist (setlist/make_setlist.py) */
+static const struct { const char *name; const Rig *rigs; int n; } BANKS[] = {{"Factory", RIGS, N_RIGS}, {"Live", LIVE_RIGS, N_LIVE}, SETLIST_BANKS};
 #define N_BANKS ((int)(sizeof BANKS / sizeof *BANKS))
