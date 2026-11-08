@@ -415,28 +415,69 @@ void screenSet(bool on) {
   screenOn = on;
   if (on) { M5.Display.wakeup(); M5.Display.setBrightness(96); } else { M5.Display.setBrightness(0); M5.Display.sleep(); }
 }
+int battPct = -1;
+uint32_t lastSig = 0;   // what the screen last showed; 0 forces a redraw   // read every 2 s, not on every redraw
+M5Canvas scr(&M5.Display);   // draw off-screen, then push in one go (no flicker)
+// where the cursor sits along the range, 0 = lowest note .. 1 = highest (same as the page's strip)
+float cursorFrac() {
+  if (cfg.move) return cfg.kspan ? constrain((float)slideStep / cfg.kspan, 0.0f, 1.0f) : 0.5f;
+  float dir = (cfg.kEdge ? (cfg.kHi >= cfg.kLo ? 1.0f : -1.0f) : 1.0f) * (cfg.kflip ? -1.0f : 1.0f);
+  float h = keyHalf(), t = constrain((yawDeg - keyMid()) * dir, -h, h);
+  return h > 0 ? (t + h) / (2 * h) : 0.5f;
+}
 void drawScreen() {
-  auto& d = M5.Display;
-  char aim[8]; noteName(aimNote(), aim);
-  d.startWrite(); d.fillScreen(TFT_BLACK);
-  d.setTextColor(rootHeld >= 0 ? TFT_ORANGE : TFT_WHITE, TFT_BLACK); d.setTextSize(4);
-  d.setCursor(4, 4); d.print(rootHeld >= 0 ? lastName : aim);
-  d.setTextSize(1); d.setTextColor(TFT_DARKGREY);
+  auto& d = scr; const int W = d.width(), H = d.height();
+  static const char* SCN[5] = { "Chromatic", "Major", "Minor", "Major pent", "Minor pent" };
+  int shown = rootHeld >= 0 ? rootHeld : aimNote();
+  int cxp = (int)(cursorFrac() * (W - 5));
+  // only redraw when something visible changed, so the motion loop isn't held up
+  uint32_t sig = shown * 2654435761u ^ (rootHeld + 1) * 40503u ^ cxp * 97u ^ cfg.ints * 7919u ^ cfg.scale * 131u ^ cfg.kroot * 31337u ^ cfg.kspan * 613u ^ (bleConnected ? 1 : 0) * 2u ^ battPct * 1009u ^ WiFi.softAPgetStationNum() * 4099u;
+  if (sig == lastSig) return; lastSig = sig;
+  d.fillScreen(TFT_BLACK);
+  // scale + key
+  d.setFont(&fonts::Font2); d.setTextSize(1); d.setTextDatum(top_center); d.setTextColor(TFT_DARKGREY);
+  char key[8]; noteName(cfg.kroot, key); key[strcspn(key, "0123456789-")] = 0;
+  char top[32]; snprintf(top, sizeof top, "%s %s", key, SCN[constrain(cfg.scale, 0, 4)]); d.drawString(top, W / 2, 2);
+  // big note: pitch letters huge, octave under it
+  uint16_t col = rootHeld >= 0 ? TFT_ORANGE : TFT_WHITE;
+  d.setTextColor(col); d.setTextDatum(middle_center);
+  d.setFont(&fonts::FreeSansBold24pt7b);
+  const char* pc = NOTE_NAMES[((shown % 12) + 12) % 12];
+  float sz = min(2.2f, (W - 6) / (float)max(1, d.textWidth(pc)));
+  d.setTextSize(sz); d.drawString(pc, W / 2, 62);
+  d.setFont(&fonts::FreeSansBold18pt7b); d.setTextSize(1);
+  char oc[6]; snprintf(oc, sizeof oc, "%d", shown / 12 - 1); d.drawString(oc, W / 2, 122);
+  // harmony
+  d.setFont(&fonts::Font2); d.setTextDatum(top_center); d.setTextColor(TFT_GOLD);
+  char hb[24] = ""; for (int i = 0; i < 5; i++) if (cfg.ints & (1 << i)) { strcat(hb, "+"); strcat(hb, INT_NAMES[i]); strcat(hb, " "); }
+  d.drawString(hb[0] ? hb : "single notes", W / 2, 144);
+  // key strip, like the phone's: one cell per note, sharps darker and shorter, cursor = where the foot points
+  int n = cfg.kspan + 1, x0 = 2, sw = W - 4, y0 = 166, sh = 34;
+  for (int i = 0; i < n; i++) {
+    int note = stepToNote(i), xa = x0 + i * sw / n, xb = x0 + (i + 1) * sw / n - 1;
+    bool sharp = NOTE_NAMES[note % 12][1] == '#', on = false, har = false;
+    for (int k = 0; k < nHeld; k++) { if (held[k] == note) { if (k == 0) on = true; else har = true; } }
+    uint16_t c = on ? TFT_ORANGE : har ? TFT_GOLD : (rootHeld < 0 && note == shown) ? TFT_WHITE : sharp ? 0x2945 : 0x52AA;
+    d.fillRect(xa, y0, max(1, xb - xa), sharp ? sh * 7 / 10 : sh, c);
+  }
+  int cx = x0 + (int)(cursorFrac() * (sw - 1));
+  d.fillRect(cx - 1, y0 - 5, 3, sh + 10, TFT_GOLD);
   char lo[8], hi[8]; noteName(cfg.kroot, lo); noteName(stepToNote(cfg.kspan), hi);
-  d.setCursor(4, 44); static const char* SCN[5] = { "chrom", "major", "minor", "maj pent", "min pent" };
-  d.printf("%s-%s %s %.1fdeg", lo, hi, SCN[constrain(cfg.scale, 0, 4)], cfg.kdeg);
-  d.setCursor(4, 56); d.print("+ ");
-  bool any = false; for (int i = 0; i < 5; i++) if (cfg.ints & (1 << i)) { d.printf("%s ", INT_NAMES[i]); any = true; }
-  if (!any) d.print("no harmony");
-  d.setCursor(4, 72); d.printf("BLE %s  WiFi %d  batt %d%%", bleConnected ? "on" : "--", WiFi.softAPgetStationNum(), M5.Power.getBatteryLevel());
-  d.setCursor(4, 84); d.printf("A=centre  side=scale  v%s", FW_VERSION);
-  d.endWrite();
+  d.setFont(&fonts::Font0); d.setTextColor(TFT_DARKGREY);
+  d.setTextDatum(top_left); d.drawString(lo, 2, y0 + sh + 4);
+  d.setTextDatum(top_right); d.drawString(hi, W - 2, y0 + sh + 4);
+  // status
+  d.setTextDatum(bottom_center);
+  char st[40]; snprintf(st, sizeof st, "BLE %s  WiFi %d  %d%%", bleConnected ? "on" : "--", WiFi.softAPgetStationNum(), battPct);
+  d.drawString(st, W / 2, H - 2);
+  d.pushSprite(0, 0);
 }
 
 void setup() {
   auto c = M5.config(); c.internal_imu = true; c.internal_spk = true;
   M5.begin(c);
-  M5.Display.setRotation(3); M5.Display.setBrightness(96);   // rotation 3: USB-C end away from the player
+  M5.Display.setRotation(2); M5.Display.setBrightness(96);   // portrait
+  scr.setPsram(true); scr.setColorDepth(16); scr.createSprite(M5.Display.width(), M5.Display.height());
   lastButtonMs = millis();
   loadCfg();
   M5.Speaker.setVolume(cfg.vol);
@@ -458,7 +499,7 @@ void loop() {
   uint32_t now = millis();
   if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) { lastActive = now;
     lastButtonMs = now;
-    if (!screenOn) { screenSet(true); drawScreen(); wakeOnly = true; }
+    if (!screenOn) { screenSet(true); lastSig = 0; drawScreen(); wakeOnly = true; }
   }
   if (screenOn && now - lastButtonMs > SCREEN_TIMEOUT_MS) screenSet(false);
   if (M5.BtnB.wasReleased() && !wakeOnly) {   // side button: next scale (chromatic > major > minor > major pent > minor pent)
@@ -482,10 +523,12 @@ void loop() {
     snprintf(b + p, sizeof b - p, "],\"yaw\":%.1f,\"tip\":%.0f,\"step\":%d,\"sa\":%.2f}", yawDeg, flatTilt, slideStep, saPeak); saPeak = 0; ws.textAll(b); nMeter = 0; lastMeterSend = now;
   } else if (nMeter >= 12) nMeter = 0;
 
-  if (now - lastDraw > 250) {
-    lastDraw = now; if (screenOn) drawScreen();
+  if (screenOn && now - lastDraw > 80) { lastDraw = now; drawScreen(); }
+  static uint32_t lastHouse = 0;
+  if (now - lastHouse > 250) {
+    lastHouse = now;
     static uint32_t lastBatt = 0;
-    if (ws.count() && now - lastBatt > 2000) { lastBatt = now; char b[32]; snprintf(b, sizeof b, "{\"batt\":%d}", M5.Power.getBatteryLevel()); ws.textAll(b); }
+    if (now - lastBatt > 2000 || battPct < 0) { lastBatt = now; battPct = M5.Power.getBatteryLevel(); if (ws.count()) { char b[32]; snprintf(b, sizeof b, "{\"batt\":%d}", battPct); ws.textAll(b); } }
     ws.cleanupClients();
   }
 }
