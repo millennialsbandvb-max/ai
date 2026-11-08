@@ -76,6 +76,8 @@ struct Cfg {
   int kspan = 18;                                  // foot keyboard: semitones from lowest to highest note (18 = 1.5 octaves)
   float kdeg = 4.0f;                               // foot keyboard: degrees of swivel per note
   bool kEdge = false; float kLo = 0, kHi = 0;      // foot keyboard: swivel positions of the lowest and highest note, when set
+  float zdeg = 15.0f;                              // swivel kit: swivel past this (deg) from centre = snare (out) / open hat (in)
+  int zflip = 0;                                   // swivel kit: swap which way is out
 } cfg;
 Preferences prefs;
 
@@ -403,6 +405,15 @@ void fireStomp(float p, float now) {
     keyLiftSince = 0;
     return;
   }
+  if (cfg.snare == 11) {   // Swivel kit: centre = kick, swivelled out = snare, swivelled in = open hi-hat
+    float a = yawDeg; int32_t bestAge = 1 << 30;
+    for (int i = 0; i < GH; i++) { int32_t age = (int32_t)(onsetT - gHT[i]); if (age >= 10 && age < bestAge) { bestAge = age; a = yH[i]; } }
+    float rel = cfg.zflip ? -a : a;
+    float vel = constrain(0.5f + 0.5f * ((p - cfg.thr) / (cfg.thr * 3)), 0.0f, 1.0f);
+    if (rel < -cfg.zdeg) hit(OHAT, vel, p);                 // open hat: plays straight away, doesn't move the tempo
+    else onHit(rel > cfg.zdeg ? SNARE : KICK, vel, p, -1, now);
+    return;
+  }
   if (cfg.snare == 9) {   // Shaker: every shake is a hit; strength sets the velocity (lightest = thr, full at 4x thr)
     float vel = constrain((p - cfg.thr) / (cfg.thr * 3), 0.0f, 1.0f);
     hit(SHAKE, vel, p);
@@ -519,7 +530,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
     }
     float yr = (wx - bwx) * qx + (wy - bwy) * qy + (wz - bwz) * qz;   // deg/s about vertical
     if (fabsf(yr) > 1.5f) yawDeg += yr * dts;   // ignore sub-noise creep
-    yawDeg = constrain(yawDeg, keyMid() - keyHalf() - 15, keyMid() + keyHalf() + 15);
+    if (cfg.snare == 11) yawDeg = constrain(yawDeg, -70.0f, 70.0f);
+    else yawDeg = constrain(yawDeg, keyMid() - keyHalf() - 15, keyMid() + keyHalf() + 15);
   }
   gH[gHi][0] = wx; gH[gHi][1] = wy; gH[gHi][2] = wz; gHT[gHi] = now; pH[gHi] = toeAngle; qH[gHi][0] = qx; qH[gHi][1] = qy; qH[gHi][2] = qz; yH[gHi] = yawDeg; gHi = (gHi + 1) % GH;
   if (nMeter < 12) meterBuf[nMeter++] = mag;
@@ -586,8 +598,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[880];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -607,7 +619,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   if (strstr(s, "\"learnToe\"")) { learnTH = 1; learnN = 0; memset(learnSig, 0, sizeof learnSig); ws.textAll("{\"learn\":\"toe 0/3\"}"); return; }
   if (strstr(s, "\"learnHeel\"")) { learnTH = 2; learnN = 0; memset(learnSig, 0, sizeof learnSig); ws.textAll("{\"learn\":\"heel 0/3\"}"); return; }
   if (strstr(s, "\"setFlat\"")) { setFlat(); return; }
-  if (strstr(s, "\"keyCenter\"")) { yawDeg = keyMid(); return; }
+  if (strstr(s, "\"keyCenter\"")) { yawDeg = cfg.snare == 11 ? 0 : keyMid(); return; }
   // Edges: both must be set (since the last clear) and at least 6 degrees apart before they're used.
   if (strstr(s, "\"keyLo\"") || strstr(s, "\"keyHi\"")) {
     bool lo = strstr(s, "\"keyLo\"") != nullptr;
@@ -630,6 +642,8 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "kroot", &f); if (f) cfg.kroot = constrain((int)v, 24, 96);
   v = jsonNum(s, "krange", &f); if (f) cfg.krange = constrain(v, 8.0f, 80.0f);
   v = jsonNum(s, "kflip", &f); if (f) cfg.kflip = (int)v ? 1 : 0;
+  v = jsonNum(s, "zdeg", &f); if (f) cfg.zdeg = constrain(v, 3.0f, 45.0f);
+  v = jsonNum(s, "zflip", &f); if (f) cfg.zflip = (int)v ? 1 : 0;
   v = jsonNum(s, "kflat", &f); if (f) cfg.kflat = constrain(v, 3.0f, 40.0f);
   v = jsonNum(s, "kspan", &f); if (f) cfg.kspan = constrain((int)v, 2, 48);
   v = jsonNum(s, "kdeg", &f); if (f) cfg.kdeg = constrain(v, 1.0f, 15.0f);
@@ -638,7 +652,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "lthr", &f); if (f) cfg.lthr = v;
   v = jsonNum(s, "kthr", &f); if (f) cfg.kthr = v;
   v = jsonNum(s, "gap", &f); if (f) cfg.gap = (int)v;
-  v = jsonNum(s, "snare", &f); if (f && (v == 1 || v == 2 || v == 6 || v == 7 || v == 8 || v == 9 || v == 10)) { cfg.snare = (int)v; if ((v == 9 || v == 10) && clockOn) stopClock(); keyOff(); }
+  v = jsonNum(s, "snare", &f); if (f && (v == 1 || v == 2 || v == 6 || v == 7 || v == 8 || v == 9 || v == 10 || v == 11)) { cfg.snare = (int)v; if (v == 11) yawDeg = 0; if ((v == 9 || v == 10) && clockOn) stopClock(); keyOff(); }
   v = jsonNum(s, "shk", &f); if (f) cfg.shk = constrain((int)v, 0, 2);
   v = jsonNum(s, "ohat", &f); if (f) cfg.ohat = (int)v ? 1 : 0;
   v = jsonNum(s, "othr", &f); if (f) cfg.othr = constrain(v, 3.0f, 80.0f);
@@ -741,7 +755,7 @@ void drawScreen() {
   d.setTextSize(1); d.setTextColor(TFT_DARKGREY);
   d.setCursor(4, 60); d.printf("BLE %s  WiFi %d", bleConnected ? "on" : "--", WiFi.softAPgetStationNum());
   d.setCursor(4, 72); d.printf("batt %d%%  v%s", M5.Power.getBatteryLevel(), FW_VERSION);
-  d.setCursor(4, 84); d.print(calibrating ? "swing foot 3x..." : cfg.snare == 10 ? "keys: A = centre" : cfg.snare == 9 ? (cfg.shk == 2 ? "tambourine" : cfg.shk == 1 ? "maracas" : "shaker") : cfg.snare == 7 ? (cfg.lcal && cfg.rcal ? "toe=kick heel=snare" : "SET TOE/HEEL") : cfg.snare == 8 ? (cfg.lcal && cfg.rcal ? "heel=kick toe=snare" : "SET TOE/HEEL") : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A");
+  d.setCursor(4, 84); d.print(calibrating ? "swing foot 3x..." : cfg.snare == 10 ? "keys: A = centre" : cfg.snare == 11 ? "in=hat mid=kick out=snr" : cfg.snare == 9 ? (cfg.shk == 2 ? "tambourine" : cfg.shk == 1 ? "maracas" : "shaker") : cfg.snare == 7 ? (cfg.lcal && cfg.rcal ? "toe=kick heel=snare" : "SET TOE/HEEL") : cfg.snare == 8 ? (cfg.lcal && cfg.rcal ? "heel=kick toe=snare" : "SET TOE/HEEL") : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A");
   d.endWrite();
 }
 
@@ -783,7 +797,7 @@ void loop() {
     cfg.kroot += 12; if (cfg.kroot > 84) cfg.kroot -= 48; if (cfg.kroot < 24) cfg.kroot = 24;
     keyOff(); saveCfg(); sendCfg(nullptr);
   }
-  if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else if (!resetHeld && cfg.snare == 6) startSwingCal(); else if (!resetHeld && cfg.snare == 10) yawDeg = keyMid(); resetHeld = false; }
+  if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else if (!resetHeld && cfg.snare == 6) startSwingCal(); else if (!resetHeld && cfg.snare == 10) yawDeg = keyMid(); else if (!resetHeld && cfg.snare == 11) yawDeg = 0; resetHeld = false; }
   if (M5.BtnA.pressedFor(2000) && !resetHeld) {   // reset settings, keep Wi-Fi
     resetHeld = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.sigVer = 7; cfg = d; saveCfg(); sendCfg(nullptr);
   }
