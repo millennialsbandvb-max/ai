@@ -92,6 +92,67 @@ static float blep(float t, float dt) {
     return 0;
 }
 
+/* ---- a fast pitch tracker for a guitar: YIN at half rate (24 kHz at 48), a fresh reading every 64 half-rate
+ * samples (~2.7 ms), window 256 (~11 ms), 60 .. 1400 Hz; the first dip under the threshold (not the deepest: a strong
+ * 2nd harmonic doesn't drag it an octave up), parabolic interpolation. (vocal_core's tracker, at quarter rate every
+ * 11 ms with a median of three, landed notes in ~40 ms.) */
+#define FT_N 2048
+#define FT_W 256
+typedef struct { float buf[FT_N], d[430]; int w, cnt, half, tmax; float acc, hz, conf; OnePole a1, a2; int fresh; } FastTrack;
+static void ft_push(FastTrack *t, float x, float fs) {
+    const float c = lp_coef(1400, fs);   /* (two poles at 1.4 kHz: the harmonics down, the fundamental kept) */
+    const float y = lp(&t->a2, lp(&t->a1, x, c), c);
+    t->acc += y;
+    if (++t->half < 2) return;
+    t->buf[t->w] = t->acc * 0.5f;
+    t->w = (t->w + 1) & (FT_N - 1);
+    t->acc = 0; t->half = 0;
+    if (++t->cnt < 64) return;
+    t->cnt = 0;
+    const float fsd = fs * 0.5f;
+    const int tmin = (int)(fsd / 1400), tmax = (int)(fsd / 60) < 420 ? (int)(fsd / 60) : 420;
+    static float x0[FT_W + 430];
+    float *d = t->d;
+    t->tmax = tmax;
+    for (int i = 0; i <= tmax; i++) d[i] = 1;
+    for (int i = 0; i < FT_W + tmax + 1; i++) x0[i] = t->buf[(t->w - (FT_W + tmax + 1) + i) & (FT_N - 1)];
+    /* the window is the newest FT_W samples (x0[tmax + 1 ..]), each compared with tau samples before it */
+    const float *cur = x0 + tmax + 1;
+    float energy = 0;
+    for (int i = 0; i < FT_W; i++) energy += cur[i] * cur[i];
+    t->fresh = 1;
+    if (energy < 1e-6f) { t->conf = 0; return; }
+    float run = 0;
+    d[0] = 1;
+    int best = -1, gmin = -1;
+    for (int tau = 1; tau <= tmax; tau++) {
+        float sum = 0;
+        for (int i = 0; i < FT_W; i++) { const float e = cur[i] - cur[i - tau]; sum += e * e; }
+        run += sum;
+        d[tau] = sum * (float)tau / (run + 1e-12f);
+        if (tau > tmin + 1) {
+            if (gmin < 0 || d[tau - 1] < d[gmin]) gmin = tau - 1;
+            if (best < 0 && d[tau - 1] < 0.15f && d[tau - 1] <= d[tau] && d[tau - 1] <= d[tau - 2]) best = tau - 1;   /* (and on: the whole curve is kept) */
+        }
+    }
+    if (best < 0) best = gmin;
+    if (best < 2 || best >= tmax || d[best] > 0.45f) { t->conf = 0; return; }
+    t->conf = 1;   /* (set below) */
+    const float a = d[best - 1], b = d[best], c2 = d[best + 1], den = a - 2 * b + c2;
+    const float tau = (float)best + (fabsf(den) > 1e-9f ? 0.5f * (a - c2) / den : 0);
+    t->hz = fsd / tau;
+    t->conf = 1 - b;
+}
+
+/* how clearly a note (Hz) is in the last reading: the lowest of the curve within 3% of its period (0 = clear, 1 = not) */
+static float ft_has(const FastTrack *t, float hz, float fs) {
+    const float tau = fs * 0.5f / hz;
+    const int lo = (int)(tau * 0.97f), hi = (int)(tau * 1.03f) + 1;
+    float m = 1;
+    for (int i = lo < 1 ? 1 : lo; i <= hi && i < t->tmax; i++) if (t->d[i] < m) m = t->d[i];
+    return m;
+}
+
 typedef struct {
     AEffect fx;
     audioMasterCallback master;
@@ -100,7 +161,10 @@ typedef struct {
     int ready, program;
     volatile int update_display;
     volatile unsigned char automate[kNumParams];
-    Tracker trk;
+    FastTrack trk;
+    float env_slow, env_fast, cand;             /* onsets; a big jump waits for a second reading that agrees */
+    int cand_n, note_ok, note_ok_pending_guard;
+    float since_onset;
     Shift sh;
     Line dly[2];
     Verb verb;
@@ -128,6 +192,7 @@ static int setup(Plugin *s, float fs) {
     s->ready = 0;
     s->fs = fs;
     memset(&s->trk, 0, sizeof s->trk);
+    s->env_slow = s->env_fast = 0; s->note_ok = 0; s->cand_n = 0;
     s->sh.win = (int)(fs * 0.04f);
     int ok = line_init(&s->sh.l, s->sh.win * 2 + 8) && line_init(&s->dly[0], (int)(fs * 1.6f)) && line_init(&s->dly[1], (int)(fs * 1.6f)) &&
              verb_init(&s->verb, fs);
@@ -184,13 +249,55 @@ static void process(AEffect *e, float **in, float **out, int32_t n) {
         /* the playing: its envelope, its note, and new notes */
         const float lvl = fabsf(x);
         s->env += (lvl > s->env ? 0.01f : 0.0005f) * (lvl - s->env);
-        track(&s->trk, x, fs);
+        /* a new pick: a fast envelope jumping well over a slow one (~100 ms); re-armed once the burst has passed */
+        s->env_fast += (lvl > s->env_fast ? 0.05f : 0.002f) * (lvl - s->env_fast);
+        s->env_slow += 0.0002f * (s->env_fast - s->env_slow);
         const int gate = s->env > 0.004f;
-        if (s->trk.conf > 0.6f && s->trk.hz > 30 && gate) s->tracked = midi_of(s->trk.hz);
+        const int onset = gate && s->env_fast > s->env_slow * 2 + 0.002f && !s->note_ok_pending_guard;
         int trig = gate && s->gate_prev < 0.5f;
+#ifdef ENZO_DEBUG
+        static long dbg_t; dbg_t++;
+        if (onset) fprintf(stderr, "%7.3f onset (note_ok %d) fast %.3f slow %.3f\n", (double)dbg_t / fs, s->note_ok, s->env_fast, s->env_slow);
+#endif
+        if (onset) { s->note_ok = 0; s->cand_n = 0; s->since_onset = 0; trig = 1; }   /* a new pick: wait for its note */
+        s->since_onset += 1;
         if (!hold) s->gate_prev = (float)gate;
-        /* the synth's loudness: follows the playing (Sustain: how long it rings); Hold keeps it */
-        if (!hold) { const float want = gate ? fminf(s->env * 4, 1) : 0; s->amp += (want > s->amp ? att : rel) * (want - s->amp); }
+        ft_push(&s->trk, x, fs);
+        if (s->trk.fresh && !hold) {
+            s->trk.fresh = 0;
+#ifdef ENZO_DEBUG
+            fprintf(stderr, "%7.3f read %.2f conf %.2f tracked %.2f ok %d gate %d\n", (double)dbg_t / fs, midi_of(s->trk.hz), s->trk.conf, s->tracked, s->note_ok, gate);
+#endif
+            if (gate && s->trk.conf > 0.82f) {
+                const float r = midi_of(s->trk.hz);
+                if (!s->note_ok) {   /* a new pick: two readings that agree (not the first 3 ms: the old string's) */
+                    if (s->since_onset < 0.003f * fs) {}
+                    else if (s->cand_n && fabsf(r - s->cand) < 0.5f) { s->tracked = r; s->note_ok = 1; s->note = r + pitch; s->cand_n = 0; }
+                    else { s->cand = r; s->cand_n = 1; }
+                }
+                else if (fabsf(r - s->tracked) < 0.8f) { s->tracked = r; s->cand_n = 0; }               /* bends, vibrato */
+                else if (ft_has(&s->trk, 440 * powf(2, (s->tracked - 69) / 12), fs) < 0.2f) s->cand_n = 0;   /* (still clearly playing: stay) */
+                else if ((fabsf(s->tracked - r - 12) < 0.6f || fabsf(s->tracked - r - 19) < 0.6f || fabsf(s->tracked - r - 24) < 0.6f) &&
+                         ft_has(&s->trk, 440 * powf(2, (s->tracked - 69) / 12), fs) < 0.45f) s->cand_n = 0;
+                    /* (an octave, a 12th or two octaves below, while the note is still there: two strings ringing make a
+                     * common lower period; not a new note) */
+                else {   /* a jump with no new pick (a hammer-on, a slide): readings that agree; big or octave jumps: more */
+                    if (s->cand_n && fabsf(r - s->cand) < 0.5f) s->cand_n++; else { s->cand = r; s->cand_n = 1; }
+                    const float j = fabsf(r - s->tracked);
+                    const int need = fabsf(j - 12) < 0.6f || fabsf(j - 24) < 0.6f ? 6 : j > 7 ? 4 : 2;
+                    if (s->cand_n >= need) { s->tracked = r; s->cand_n = 0; }
+                }
+            }
+            if (!gate) { s->note_ok = 0; s->cand_n = 0; }
+        }
+        if (s->env_fast < s->env_slow * 1.3f) s->note_ok_pending_guard = 0;
+        if (onset) s->note_ok_pending_guard = 1;
+        /* the synth's loudness: follows the playing (Sustain: how long it rings); silent until a new pick's note is
+         * known (a few ms) rather than the old note sounding; Hold keeps it */
+        if (!hold) {
+            const float want = gate && (s->note_ok || mode == 3 || mode == 1) ? fminf(s->env * 4, 1) : 0;
+            s->amp += (want > s->amp ? att : rel) * (want - s->amp);
+        }
         /* the note: Mono / Arp from the tracker (+ Pitch, + the arp step), gliding */
         float target = s->tracked + pitch;
         if (mode == 2) {

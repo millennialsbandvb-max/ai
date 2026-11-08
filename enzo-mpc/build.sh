@@ -20,6 +20,7 @@ host)
   gcc -O2 -Wall -Wextra -Wno-unused-function -fPIC -shared -fvisibility=hidden "${INC[@]}" "$HERE/src/enzo.c" -lm \
     -Wl,--version-script="$REPO/nam-mpc/src/exports.map" -o "$B/Enz0-X-host.so"
   gcc -O2 -Wall -Wextra "$HERE/test/enzo_test.c" -ldl -lm -o "$B/enzo-test-host"
+  gcc -O2 -Wall -Wextra "$HERE/test/track_test.c" -ldl -lm -o "$B/track-test-host"
   echo "built $B/Enz0-X-host.so" ;;
 arm)
   arm-linux-gnueabihf-gcc -O2 -Wall -Wextra -Wno-unused-function "${ARMF[@]}" -fPIC -shared -fvisibility=hidden "${INC[@]}" \
@@ -29,6 +30,7 @@ arm)
   echo "built $B/Enz0-X.so" ;;
 test)
   "$B/enzo-test-host" "$B/Enz0-X-host.so"
+  "$B/track-test-host" "$B/Enz0-X-host.so" 15 3 && HARD=1 "$B/track-test-host" "$B/Enz0-X-host.so" 15 3
   qemu-arm -L "$SYSROOT" "$B/enzo-test-arm" "$B/Enz0-X.so" ;;
 skin)   # the parameter list comes from the plugin's own table
   gcc -O2 -DVC_PARAMS -Wno-unused-function "${INC[@]}" "$HERE/src/enzo.c" -lm -o "$B/gen-params"
