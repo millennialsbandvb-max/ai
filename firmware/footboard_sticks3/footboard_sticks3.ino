@@ -443,7 +443,7 @@ void drawScreen() {
   d.setTextColor(col); d.setTextDatum(middle_center);
   d.setFont(&fonts::FreeSansBold24pt7b);
   const char* pc = NOTE_NAMES[((shown % 12) + 12) % 12];
-  float sz = min(2.2f, (W - 6) / (float)max(1, d.textWidth(pc)));
+  float sz = min(2.2f, (W - 6) / (float)max((int32_t)1, (int32_t)d.textWidth(pc)));
   d.setTextSize(sz); d.drawString(pc, W / 2, 62);
   d.setFont(&fonts::FreeSansBold18pt7b); d.setTextSize(1);
   char oc[6]; snprintf(oc, sizeof oc, "%d", shown / 12 - 1); d.drawString(oc, W / 2, 122);
