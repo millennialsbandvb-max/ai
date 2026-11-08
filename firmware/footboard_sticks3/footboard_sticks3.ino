@@ -50,6 +50,10 @@ struct Cfg {
   int chan = 1;            // MIDI channel 1-16
   char ssid[33] = ""; char pass[65] = "";
   int scale = 0;           // 0 chromatic, 1 major, 2 minor, 3 major pentatonic, 4 minor pentatonic (key = lowest note)
+  int move = 0;            // how notes are picked: 0 swivel (angle), 1 slide (move the foot left/right)
+  float sthr = 0.12f;      // slide: sideways push (g) that counts as a slide
+  float scm = 5.0f;        // slide: cm of movement per note (0 = one note per slide)
+  float rx = 1, ry = 0, rz = 0; bool rSet = false;   // slide: board direction that points to the foot's right (learned)
 } cfg;
 Preferences prefs;
 // Home Wi-Fi is also kept in a shared "wifi" store, so PocketBeat and Footboard can each use it after a switch.
@@ -103,6 +107,9 @@ int keyForTilt(float a) {
   return stepToNote((int)roundf((t + h) / cfg.kdeg));
 }
 
+int slideStep = 9;   // slide mode: which step of the range the foot is on
+int aimNote() { return cfg.move ? stepToNote(constrain(slideStep, 0, cfg.kspan)) : keyForTilt(yawDeg); }
+
 void notesOff() {
   if (rootHeld < 0) return;
   for (int i = 0; i < nHeld; i++) {
@@ -146,18 +153,23 @@ float gx = 0, gy = 0, gz = 0;                        // slow gravity estimate fo
 float bwx = 0, bwy = 0, bwz = 0;                     // gyro bias, re-learned whenever the foot is still
 float yawDeg = 0;                                    // swivel from centre (deg)
 float flatTilt = 0;                                  // how far the foot is tipped from where the last note started
-const int GH = 256; uint32_t hT[GH]; float hY[GH]; float hQ[GH][3]; int hI = 0;   // recent swivel / orientation
+const int GH = 256; uint32_t hT[GH]; float hY[GH]; float hQ[GH][3]; int16_t hS[GH]; int hI = 0;   // recent swivel / slide step / orientation
+// slide tracking: a sideways push starts a slide; speed and distance are added up until the foot is still again
+int slState = 0; uint32_t slT0 = 0, slQuiet = 0, slEnd = 0; float slV = 0, slX = 0; int slDir = 0;
+uint32_t learnUntil = 0; float lrnX = 0, lrnY = 0, lrnZ = 0; uint32_t lrnT0 = 0;
 float peak = 0; uint32_t peakT = 0, lastTapT = 0, lastT = 0;
 float meterBuf[12]; int nMeter = 0; uint32_t lastMeterSend = 0;
 
 void fireTap(float p, uint32_t onset, uint32_t now) {
   // read the swivel and the foot's orientation from just before the tap: the tap's own jolt twitches the gyro
-  float a = yawDeg; float q[3] = { qx, qy, qz }; int32_t best = 1 << 30;
+  float a = yawDeg; int st = slideStep; float q[3] = { qx, qy, qz }; int32_t best = 1 << 30;
   for (int i = 0; i < GH; i++) {
     int32_t age = (int32_t)(onset - hT[i]);
-    if (age >= 10 && age < best) { best = age; a = hY[i]; q[0] = hQ[i][0]; q[1] = hQ[i][1]; q[2] = hQ[i][2]; }
+    if (age >= 10 && age < best) { best = age; a = hY[i]; st = hS[i]; q[0] = hQ[i][0]; q[1] = hQ[i][1]; q[2] = hQ[i][2]; }
   }
-  notesOn(keyForTilt(a), constrain((p - cfg.thr) / (cfg.thr * 3), 0.0f, 1.0f), a);
+  slState = 0;   // a tap ends any slide in progress
+  int note = cfg.move ? stepToNote(constrain(st, 0, cfg.kspan)) : keyForTilt(a);
+  notesOn(note, constrain((p - cfg.thr) / (cfg.thr * 3), 0.0f, 1.0f), cfg.move ? st : a);
   keyQx = q[0]; keyQy = q[1]; keyQz = q[2]; keyOnAt = now; keyTip = 0; keyLiftSince = 0;
 }
 
@@ -180,6 +192,44 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   float yr = (wx - bwx) * qx + (wy - bwy) * qy + (wz - bwz) * qz;
   if (fabsf(yr) > 1.5f) yawDeg += yr * dts;
   yawDeg = constrain(yawDeg, keyMid() - keyHalf() - 15, keyMid() + keyHalf() + 15);
+  // ---- slide: sideways movement of the whole foot ----
+  {
+    float la[3] = { ax - qx, ay - qy, az - qz };                   // movement acceleration (g), gravity removed
+    float lv = la[0] * qx + la[1] * qy + la[2] * qz;               // up/down part
+    float hx = la[0] - lv * qx, hy = la[1] - lv * qy, hz = la[2] - lv * qz, hm = sqrtf(hx * hx + hy * hy + hz * hz);
+    if (learnUntil) {   // "Learn right": the first push after the button is the foot's right
+      if (now > learnUntil) { learnUntil = 0; ws.textAll("{\"learn\":\"timeout\"}"); }
+      else if (!lrnT0 && hm > max(cfg.sthr, 0.1f) && fabsf(lv) < max(0.3f, hm)) { lrnT0 = now; lrnX = lrnY = lrnZ = 0; }
+      if (lrnT0) { lrnX += hx; lrnY += hy; lrnZ += hz;
+        if (now - lrnT0 > 60) { float m = sqrtf(lrnX * lrnX + lrnY * lrnY + lrnZ * lrnZ);
+          if (m > 0) { cfg.rx = lrnX / m; cfg.ry = lrnY / m; cfg.rz = lrnZ / m; cfg.rSet = true; saveCfg(); sendCfg(nullptr); ws.textAll("{\"learn\":\"ok\"}"); }
+          learnUntil = 0; lrnT0 = 0; slEnd = now; } }
+    } else if (cfg.move) {
+      // the learned right direction, kept level with the ground
+      float d = cfg.rx * qx + cfg.ry * qy + cfg.rz * qz, rxh = cfg.rx - d * qx, ryh = cfg.ry - d * qy, rzh = cfg.rz - d * qz;
+      float rm = sqrtf(rxh * rxh + ryh * ryh + rzh * rzh); if (rm > 0.01f) { rxh /= rm; ryh /= rm; rzh /= rm; }
+      float sa = hx * rxh + hy * ryh + hz * rzh;                    // + = toward the foot's right (g)
+      bool tapping = peakT || now - lastTapT < 200;
+      if (slState == 0) {
+        if (!tapping && now - slEnd > 250 && fabsf(sa) > cfg.sthr && fabsf(lv) < max(0.3f, fabsf(sa))) {
+          slState = 1; slT0 = now; slV = 0; slX = 0; slDir = sa > 0 ? 1 : -1; slQuiet = 0;
+        }
+      }
+      if (slState == 1) {
+        slV += sa * 9.81f * dts; slX += slV * dts;                   // metres
+        if (hm < 0.04f) { if (!slQuiet) slQuiet = now; } else slQuiet = 0;
+        if ((slQuiet && now - slQuiet > 80) || now - slT0 > 800) {
+          float cm = fabsf(slX) * 100;
+          int steps = cfg.scm > 0 ? max(1, min(6, (int)roundf(cm / cfg.scm))) : 1;
+          int dir = slDir * (cfg.kflip ? -1 : 1);
+          slideStep = constrain(slideStep + dir * steps, 0, cfg.kspan);
+          char b[80]; snprintf(b, sizeof b, "{\"slide\":%d,\"cm\":%.0f,\"step\":%d}", slDir * steps, cm, slideStep); ws.textAll(b);
+          slState = 0; slEnd = now;
+        }
+      }
+    }
+  }
+  hS[hI] = slideStep;
   hT[hI] = now; hY[hI] = yawDeg; hQ[hI][0] = qx; hQ[hI][1] = qy; hQ[hI][2] = qz; hI = (hI + 1) % GH;
   if (nMeter < 12) meterBuf[nMeter++] = mag;
 
@@ -203,9 +253,9 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
-  char b[480];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"kdeg\":%.1f,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, cfg.kdeg, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, FW_VERSION, cfg.ssid);
+  char b[600];
+  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"kdeg\":%.1f,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"move\":%d,\"sthr\":%.2f,\"scm\":%.1f,\"rSet\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, cfg.kdeg, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, cfg.move, cfg.sthr, cfg.scm, cfg.rSet ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 float jsonNum(const char* s, const char* key, bool* found) {
@@ -220,7 +270,8 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   char s[256]; size_t n = min(len, sizeof(s) - 1); memcpy(s, data, n); s[n] = 0;
   bool f;
   if (strstr(s, "\"get\"")) { sendCfg(client); return; }
-  if (strstr(s, "\"keyCenter\"")) { yawDeg = keyMid(); return; }
+  if (strstr(s, "\"keyCenter\"")) { yawDeg = keyMid(); slideStep = cfg.kspan / 2; return; }
+  if (strstr(s, "\"learnRight\"")) { learnUntil = millis() + 3000; lrnT0 = 0; return; }
   if (strstr(s, "\"keyLo\"") || strstr(s, "\"keyHi\"")) {
     bool lo = strstr(s, "\"keyLo\"") != nullptr;
     if (lo) { cfg.kLo = yawDeg; loSet = true; } else { cfg.kHi = yawDeg; hiSet = true; }
@@ -250,6 +301,10 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
     int ns = constrain((int)v, 0, 4);
     if (ns != cfg.scale) { float oct = (stepToNote(cfg.kspan) - cfg.kroot) / 12.0f; cfg.scale = ns; cfg.kspan = constrain((int)roundf(oct * SC_LEN[ns]), 2, 48); keyTip = -1; notesOff(); }
   }
+  v = jsonNum(s, "move", &f); if (f) { cfg.move = (int)v ? 1 : 0; slideStep = cfg.kspan / 2; slState = 0; }
+  v = jsonNum(s, "sthr", &f); if (f) cfg.sthr = constrain(v, 0.03f, 1.0f);
+  v = jsonNum(s, "scm", &f); if (f) cfg.scm = constrain(v, 0.0f, 30.0f);
+  slideStep = constrain(slideStep, 0, cfg.kspan);
   v = jsonNum(s, "chan", &f); if (f) { keyTip = -1; notesOff(); cfg.chan = constrain((int)v, 1, 16); }
   saveCfg();
   sendCfg(nullptr);
@@ -326,7 +381,7 @@ void screenSet(bool on) {
 }
 void drawScreen() {
   auto& d = M5.Display;
-  char aim[8]; noteName(keyForTilt(yawDeg), aim);
+  char aim[8]; noteName(aimNote(), aim);
   d.startWrite(); d.fillScreen(TFT_BLACK);
   d.setTextColor(rootHeld >= 0 ? TFT_ORANGE : TFT_WHITE, TFT_BLACK); d.setTextSize(4);
   d.setCursor(4, 4); d.print(rootHeld >= 0 ? lastName : aim);
@@ -374,7 +429,7 @@ void loop() {
     cfg.kroot += 12; if (cfg.kroot > 84) cfg.kroot -= 48; if (cfg.kroot < 24) cfg.kroot = 24;
     keyTip = -1; notesOff(); saveCfg(); sendCfg(nullptr);
   }
-  if (M5.BtnA.wasReleased()) { if (!wakeOnly && !resetHeld) yawDeg = keyMid(); resetHeld = false; }
+  if (M5.BtnA.wasReleased()) { if (!wakeOnly && !resetHeld) { yawDeg = keyMid(); slideStep = cfg.kspan / 2; } resetHeld = false; }
   if ((M5.BtnA.wasReleased() || M5.BtnB.wasReleased()) && wakeOnly) wakeOnly = false;
   if (M5.BtnA.pressedFor(2000) && !resetHeld) {   // hold front button 2 s: reset settings, keep Wi-Fi
     resetHeld = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); cfg = d; saveCfg(); sendCfg(nullptr);
@@ -388,7 +443,7 @@ void loop() {
   if (ws.count() && nMeter >= 12 && now - lastMeterSend > 25) {
     char b[240]; int p = snprintf(b, sizeof b, "{\"m\":[");
     for (int i = 0; i < nMeter; i++) p += snprintf(b + p, sizeof b - p, "%s%.2f", i ? "," : "", meterBuf[i]);
-    snprintf(b + p, sizeof b - p, "],\"yaw\":%.1f,\"tip\":%.0f}", yawDeg, flatTilt); ws.textAll(b); nMeter = 0; lastMeterSend = now;
+    snprintf(b + p, sizeof b - p, "],\"yaw\":%.1f,\"tip\":%.0f,\"step\":%d}", yawDeg, flatTilt, slideStep); ws.textAll(b); nMeter = 0; lastMeterSend = now;
   } else if (nMeter >= 12) nMeter = 0;
 
   if (now - lastDraw > 250) {
