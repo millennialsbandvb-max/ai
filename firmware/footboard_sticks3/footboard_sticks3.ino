@@ -373,6 +373,25 @@ void setupWeb() {
 }
 
 // ---------------- Screen ----------------
+// ---- Power: hold the side button 3 s to switch off; also switches off after 10 min with no movement and no page open.
+// Press the power button to turn it back on.
+uint32_t lastActive = 0;
+const uint32_t AUTO_OFF_MS = 10UL * 60UL * 1000UL;
+void powerDown(const char* why) {
+  ws.textAll("{\"ota\":\"Board is switching off. Press its power button to turn it on.\"}");
+  auto& d = M5.Display; d.wakeup(); d.setBrightness(96); d.fillScreen(TFT_BLACK); d.setTextColor(TFT_WHITE, TFT_BLACK);
+  d.setTextSize(2); d.setCursor(6, 20); d.print("Power off"); d.setTextSize(1); d.setCursor(6, 50); d.print(why);
+  M5.Speaker.stop();
+  delay(1200);
+  M5.Display.setBrightness(0);
+  M5.Power.powerOff();
+}
+void powerCheck(uint32_t now, float wx, float wy, float wz) {
+  if (!lastActive) lastActive = now;
+  if (ws.count() || wx * wx + wy * wy + wz * wz > 40.0f * 40.0f) lastActive = now;   // page open, or the foot is moving
+  if (M5.BtnB.pressedFor(3000)) powerDown("held side button");
+  if (now - lastActive > AUTO_OFF_MS) powerDown("10 min unused");
+}
 uint32_t lastDraw = 0, lastButtonMs = 0; bool screenOn = true, wakeOnly = false, resetHeld = false;
 const uint32_t SCREEN_TIMEOUT_MS = 30000;
 void screenSet(bool on) {
@@ -421,7 +440,7 @@ void loop() {
   M5.update();
   MIDI.read();
   uint32_t now = millis();
-  if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) {
+  if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) { lastActive = now;
     lastButtonMs = now;
     if (!screenOn) { screenSet(true); drawScreen(); wakeOnly = true; }
   }
@@ -438,6 +457,7 @@ void loop() {
 
   float ax, ay, az, wx = 0, wy = 0, wz = 0;
   if (M5.Imu.update() && M5.Imu.getAccel(&ax, &ay, &az)) { M5.Imu.getGyro(&wx, &wy, &wz); processMotion(ax, ay, az, wx, wy, wz, now); }
+  powerCheck(now, wx, wy, wz);
 
   if (otaRequest) { int r = otaRequest; otaRequest = 0; if (r == 2) doOtaFromGithub(OTHER_URL, OTHER_VER_URL, true); else doOtaFromGithub(OTA_URL, OTA_VER_URL, false); WiFi.mode(WIFI_AP); }
 

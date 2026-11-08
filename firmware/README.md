@@ -61,3 +61,9 @@ Builds: `bin/footboard_sticks3.app.bin` (install from a tuning page upload, or l
 - Settings live in their own storage, separate from PocketBeat's, so switching between the two firmwares keeps both sets.
 
 The drum firmware as of the split is saved in `saved/pocketbeat_drums_8546ce0/` (source included).
+
+## Power (both firmwares)
+
+- **Off:** hold the side button for 3 seconds ("Power off" shows, then it switches off).
+- **Auto off:** after 10 minutes with no foot movement, no button press and no tuning page open.
+- **On:** press the power button.
