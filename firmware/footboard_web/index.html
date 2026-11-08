@@ -129,6 +129,8 @@
   <div id="slideBox" hidden>
     <div class="row"><button type="button" id="learnRight">Learn right (then slide your foot right)</button></div>
     <span class="pill" id="learnState">—</span>
+    <div class="ctl"><label>Sideways push right now</label><output id="saOut">—</output>
+      <div class="tipbar" style="grid-column:1/-1;position:relative"><i id="saBar" style="position:absolute;left:50%"></i></div></div>
     <div class="ctl"><label for="scm">Slide distance per note</label><output id="scmOut"></output>
       <input type="range" id="scm" data-key="scm" min="0" max="20" step="0.5" value="5"></div>
     <div class="ctl"><label for="sthr">Slide sensitivity (push needed)</label><output id="sthrOut"></output>
@@ -336,6 +338,9 @@
       if (m.cfg) applyCfg(m.cfg);
       if (m.m) for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; }
       if (m.step !== undefined) step = m.step;
+      if (m.sa !== undefined && +cfg.move) { const v = m.sa, f = Math.min(1, Math.abs(v) / (2 * +$('sthr').value));
+        $('saOut').textContent = (v > 0 ? 'right ' : v < 0 ? 'left ' : '') + Math.abs(v).toFixed(2) + ' g';
+        const bar = $('saBar'); bar.style.width = (f * 50) + '%'; bar.style.left = v >= 0 ? '50%' : (50 - f * 50) + '%'; bar.style.background = Math.abs(v) > +$('sthr').value ? 'var(--accent)' : 'var(--ok)'; }
       if (m.slide !== undefined) log('slide ' + (m.slide > 0 ? 'right +' : 'left ') + m.slide + '  (~' + m.cm + ' cm)');
       if (m.learn) $('learnState').textContent = m.learn === 'ok' ? 'Right direction learned' : 'Didn\'t feel a slide; tap Learn right and try again';
       if (m.yaw !== undefined) {

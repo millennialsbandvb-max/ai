@@ -155,6 +155,7 @@ float flatTilt = 0;                                  // how far the foot is tipp
 const int GH = 256; uint32_t hT[GH]; float hY[GH]; float hQ[GH][3]; int16_t hS[GH]; int hI = 0;   // recent swivel / slide step / orientation
 // slide tracking: a sideways push starts a slide; speed and distance are added up until the foot is still again
 int slState = 0; uint32_t slT0 = 0, slQuiet = 0, slEnd = 0; float slV = 0, slX = 0; int slDir = 0;
+float sx = 0, sy = 0, sz = 1, saPeak = 0; bool sInit = false;   // slow gravity for slides; strongest sideways push since the last report
 uint32_t learnUntil = 0; float lrnX = 0, lrnY = 0, lrnZ = 0; uint32_t lrnT0 = 0;
 float peak = 0; uint32_t peakT = 0, lastTapT = 0, lastT = 0;
 float meterBuf[12]; int nMeter = 0; uint32_t lastMeterSend = 0;
@@ -193,9 +194,16 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   yawDeg = constrain(yawDeg, keyMid() - keyHalf() - 15, keyMid() + keyHalf() + 15);
   // ---- slide: sideways movement of the whole foot ----
   {
-    float la[3] = { ax - qx, ay - qy, az - qz };                   // movement acceleration (g), gravity removed
-    float lv = la[0] * qx + la[1] * qy + la[2] * qz;               // up/down part
-    float hx = la[0] - lv * qx, hy = la[1] - lv * qy, hz = la[2] - lv * qz, hm = sqrtf(hx * hx + hy * hy + hz * hz);
+    // Gravity for slides: turned with the gyro, but only nudged toward the accelerometer very slowly (and not at all
+    // mid-slide); the fast-corrected one above soaks up a slow sideways push within a few hundredths of a second.
+    if (!sInit) { sx = qx; sy = qy; sz = qz; sInit = true; }
+    { float rx = (wx - bwx) * 0.0174533f, ry = (wy - bwy) * 0.0174533f, rz = (wz - bwz) * 0.0174533f;
+      float nx = sx + (sy * rz - sz * ry) * dts, ny = sy + (sz * rx - sx * rz) * dts, nz = sz + (sx * ry - sy * rx) * dts;
+      if (slState == 0 && !lrnT0 && am > 0.9f && am < 1.1f) { float k2 = min(1.0f, dts * 0.6f); nx += k2 * (ax / am - nx); ny += k2 * (ay / am - ny); nz += k2 * (az / am - nz); }
+      float nm = sqrtf(nx * nx + ny * ny + nz * nz); if (nm > 0) { sx = nx / nm; sy = ny / nm; sz = nz / nm; } }
+    float la[3] = { ax - sx, ay - sy, az - sz };                   // movement acceleration (g), gravity removed
+    float lv = la[0] * sx + la[1] * sy + la[2] * sz;               // up/down part
+    float hx = la[0] - lv * sx, hy = la[1] - lv * sy, hz = la[2] - lv * sz, hm = sqrtf(hx * hx + hy * hy + hz * hz);
     if (learnUntil) {   // "Learn right": the first push after the button is the foot's right
       if (now > learnUntil) { learnUntil = 0; ws.textAll("{\"learn\":\"timeout\"}"); }
       else if (!lrnT0 && hm > max(cfg.sthr, 0.1f) && fabsf(lv) < max(0.3f, hm)) { lrnT0 = now; lrnX = lrnY = lrnZ = 0; }
@@ -205,9 +213,10 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
           learnUntil = 0; lrnT0 = 0; slEnd = now; } }
     } else if (cfg.move) {
       // the learned right direction, kept level with the ground
-      float d = cfg.rx * qx + cfg.ry * qy + cfg.rz * qz, rxh = cfg.rx - d * qx, ryh = cfg.ry - d * qy, rzh = cfg.rz - d * qz;
+      float d = cfg.rx * sx + cfg.ry * sy + cfg.rz * sz, rxh = cfg.rx - d * sx, ryh = cfg.ry - d * sy, rzh = cfg.rz - d * sz;
       float rm = sqrtf(rxh * rxh + ryh * ryh + rzh * rzh); if (rm > 0.01f) { rxh /= rm; ryh /= rm; rzh /= rm; }
       float sa = hx * rxh + hy * ryh + hz * rzh;                    // + = toward the foot's right (g)
+      if (fabsf(sa) > fabsf(saPeak)) saPeak = sa;
       bool tapping = peakT || now - lastTapT < 200;
       if (slState == 0) {
         if (!tapping && now - slEnd > 250 && fabsf(sa) > cfg.sthr && fabsf(lv) < max(0.3f, fabsf(sa))) {
@@ -427,7 +436,7 @@ void drawScreen() {
 void setup() {
   auto c = M5.config(); c.internal_imu = true; c.internal_spk = true;
   M5.begin(c);
-  M5.Display.setRotation(3);   // USB-C end away from the player M5.Display.setBrightness(96);
+  M5.Display.setRotation(3); M5.Display.setBrightness(96);   // rotation 3: USB-C end away from the player
   lastButtonMs = millis();
   loadCfg();
   M5.Speaker.setVolume(cfg.vol);
@@ -470,7 +479,7 @@ void loop() {
   if (ws.count() && nMeter >= 12 && now - lastMeterSend > 25) {
     char b[240]; int p = snprintf(b, sizeof b, "{\"m\":[");
     for (int i = 0; i < nMeter; i++) p += snprintf(b + p, sizeof b - p, "%s%.2f", i ? "," : "", meterBuf[i]);
-    snprintf(b + p, sizeof b - p, "],\"yaw\":%.1f,\"tip\":%.0f,\"step\":%d}", yawDeg, flatTilt, slideStep); ws.textAll(b); nMeter = 0; lastMeterSend = now;
+    snprintf(b + p, sizeof b - p, "],\"yaw\":%.1f,\"tip\":%.0f,\"step\":%d,\"sa\":%.2f}", yawDeg, flatTilt, slideStep, saPeak); saPeak = 0; ws.textAll(b); nMeter = 0; lastMeterSend = now;
   } else if (nMeter >= 12) nMeter = 0;
 
   if (now - lastDraw > 250) {
