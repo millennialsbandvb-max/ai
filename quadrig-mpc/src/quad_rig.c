@@ -9,8 +9,10 @@
  * (knob values after a preset or algorithm change) come back through our host callback and on to MPC.
  * State: a chunk with our parameters and NAM's own chunk (its model and IR paths).
  * MIDI (any channel): CC 81-84 bypass FX 1-4 (64+ = bypassed), CC 85 the amp, CC 86-87 FX 5-6, CC 64 Hold on every slot,
- * Program Change n: rig preset n + 1 in the bank chosen (rigs.h: whole boards, the Rig stepper); CC 0 = the bank (0 Factory,
- * 1 Live).
+ * Program Change n: rig preset n + 1 in the bank chosen (rigs.h: whole boards, the Rig stepper). Rigs by CC (undefined CCs,
+ * nothing MPC uses; for a foot controller): CC 20 = the bank (0 Factory, 1 Live, 2.. the setlist's A..), CC 21 = rig n
+ * (value n, 1 up; 0 = the first), CC 22 = song n's signature, CC 23 = song n's rhythm (setlist banks: two rigs a song;
+ * elsewhere both = rig n), CC 24 / 25 = Rig > / Rig < (rising past 64), CC 26 = this song's rhythm (64+) or signature.
  * State: "QRIG1 <n>"; a four-slot chunk (before Nov 2026) is read too (its slots 5-6 Off, its amp position mapped). */
 #include <math.h>
 #include <stdint.h>
@@ -67,6 +69,7 @@ typedef struct {
     float byp_s[NS];
     int amp_look_tick;
     int rig, bank;                 /* the rig preset last loaded (-1: none), in the bank chosen */
+    int cc_hi[2];                  /* CC 24 / 25 (Rig > / <) last above 64 */
     volatile int update_display;
     volatile unsigned char automate[kNumParams];
     char *chunk;
@@ -158,6 +161,7 @@ static void choose_fx(Plugin *s, int k, int fx) {   /* point the slot at an engi
 
 static void rig_param(Plugin *s, int w, float v);
 static void bank_param(Plugin *s, int w, float v);
+static void rig_cc(Plugin *s, int cc, int v);
 static void load_rig(Plugin *s, int r);
 static void setParameter(AEffect *e, int32_t i, float v) {
     Plugin *s = (Plugin *)e->object;
@@ -459,12 +463,9 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t val, vo
         for (int k = 0; ev && k < ev->numEvents; k++) {
             if (!ev->events[k] || ev->events[k]->type != 1) continue;
             if ((ev->events[k]->midiData[0] & 0xf0) == 0xc0) { load_rig(s, ev->events[k]->midiData[1]); continue; }   /* Program Change n: rig n + 1 (in the bank) */
-            if ((ev->events[k]->midiData[0] & 0xf0) == 0xb0 && ev->events[k]->midiData[1] == 0) {   /* CC 0 (bank select): the bank */
-                if (ev->events[k]->midiData[2] < N_BANKS) bank_param(s, 0, N_BANKS > 1 ? (float)ev->events[k]->midiData[2] / (float)(N_BANKS - 1) : 0);
-                continue;
-            }
             if ((ev->events[k]->midiData[0] & 0xf0) != 0xb0) continue;
             const int cc = ev->events[k]->midiData[1], hi = ev->events[k]->midiData[2] >= 64;
+            if (cc >= 20 && cc <= 26) { rig_cc(s, cc, ev->events[k]->midiData[2]); continue; }
             int i = -1;
             if (cc >= 81 && cc <= 84) i = SLOT(cc - 81, S_BYPASS);
             else if (cc == 85) i = kAmpBypass;
@@ -606,6 +607,20 @@ static void rig_param(Plugin *s, int w, float v) {
     s->rig = (int)lrintf(pos);
     s->norm[kRig] = v;
     s->update_display = 1;
+}
+/* the rig CCs (20-26, see the top): a foot controller picks the bank, a rig, a song's signature or rhythm */
+static void rig_cc(Plugin *s, int cc, int v) {
+    const int nr = BANKS[s->bank].n, pr = BANKS[s->bank].pairs, n = v > 0 ? v - 1 : 0;
+    if (cc == 20) { if (v < N_BANKS) bank_param(s, 0, N_BANKS > 1 ? (float)v / (float)(N_BANKS - 1) : 0); }
+    else if (cc == 21) load_rig(s, n);
+    else if (cc == 22 || cc == 23) load_rig(s, pr ? 2 * n + (cc == 23) : n);
+    else if (cc == 24 || cc == 25) {
+        if ((v >= 64) != s->cc_hi[cc - 24] && v >= 64) rig_param(s, cc == 24 ? 2 : 1, 1);
+        s->cc_hi[cc - 24] = v >= 64;
+    } else if (cc == 26 && pr && s->rig >= 0) {
+        const int want = (s->rig & ~1) + (v >= 64);
+        if (want != s->rig && want < nr) load_rig(s, want);
+    }
 }
 /* Bank: < > (or a pick / Q-Link) chooses the bank the Rig stepper works in; nothing loads until a rig is chosen */
 static void bank_param(Plugin *s, int w, float v) {

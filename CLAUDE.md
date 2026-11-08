@@ -363,12 +363,16 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   Banks (Nov 2026, the user's ask: live rigs kept apart from the factory ones): rigs.h BANKS = Factory (RIGS) and Live
   (LIVE_RIGS, 8 starters, a Compressor first; more on the user's word, at the end). Params kBank / Bank < / Bank > after
   the FX arrows; the Rig stepper, its list (Rigs), arrows and Program Change work within the bank; a bank change loads
-  nothing (Rig shows "-"); a "Banks" list (the last); MIDI CC 0 = bank. RIG page: Bank stepper above MIDI Ch.
+  nothing (Rig shows "-"); a "Banks" list (the last); MIDI CC 20 = bank. RIG page: Bank stepper above MIDI Ch.
   Setlist banks (Nov 2026, the user's Hoochie_Daddy_Setlist.xlsx, "I need tones for that"): `quadrig-mpc/setlist/make_setlist.py`
   writes `src/rigs_setlist.h` (SET_0..6, SETLIST_BANKS, included at the end of rigs.h): banks A Grunge Core .. G Slow
   Ones, two rigs per song in sheet order, the signature tone then "<song> Rhy" (the rhythm: same amp + reverb, clean /
-  acoustic ones keep chorus / trem; a signature with nothing more gets a boost + delay, +1 dB; song n = PC 2n-2 / 2n-1); each rig = a base sound (clean / edge /
+  acoustic ones keep chorus / trem; a signature with nothing more gets a boost + delay, +1 dB; BANKS[].pairs = 1); each rig = a base sound (clean / edge /
   crunch / heavy / fuzz / acoustic) + touches (chorus, wah, whammy at Bend 0, delays, reverbs ...). Bank numbers: 0 Factory, 1 Live, 2..8 A..G.
+  Rig CCs (the user: Program Change doesn't work well with MPC; their foot controller sends exact CCs; undefined CCs
+  MPC doesn't use): CC 20 = bank (value = number above), 21 = rig n (value n, from 1), 22 / 23 = song n's signature /
+  rhythm, 24 / 25 = Rig > / < (rising past 64), 26 = this song's rhythm (64+) or signature (rig_cc; quad_test checks).
+  CC 0 bank select was dropped (MPC uses it).
   Voicing pass (the user: "more volume and clarity, the metal ones too bright"): every rig +3 dB Output (max 9),
   Presence +1, Treble +0.5, Bass -0.5 from 5.5 up, Input no lower than -3; Modern Metal / Djent Machine / Drop Tune
   Metal: Treble -1.5, Presence -2, Output +1.

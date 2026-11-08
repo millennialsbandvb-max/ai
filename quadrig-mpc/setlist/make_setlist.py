@@ -2,7 +2,7 @@
 """Make 0dd Rig's setlist banks (rigs_setlist.h) from the user's band setlist (Hoochie Daddy, Nov 2026).
 One bank per setlist section (A..G), two rigs per song in the sheet's order: the song's signature tone, then its
 rhythm tone under it ("<song> Rhy": the same amp, the reverb, and for clean / acoustic songs their chorus / tremolo;
-song n = Program Change 2n-2 and 2n-1). A signature with nothing beyond the rhythm gets a lead lift (a boost and a
+picked by MIDI CC 20-26, see quad_rig.c). A signature with nothing beyond the rhythm gets a lead lift (a boost and a
 delay, +1 dB). Each tone is a
 base sound (clean / edge / crunch / heavy / fuzz / acoustic: amp words, the amp's EQ, what goes before the amp) plus
 the song's signature touches (chorus, rotary, vibe, tremolo, phaser, octave, whammy, slap, delay, reverb), after
@@ -147,4 +147,4 @@ for bi, (bank, songs) in enumerate(SECTIONS):
             rig(nm, base, tks, up)
     print("};")
 print("#define SETLIST_BANKS \\")
-print(" \\\n".join('    {"%s", %s, (int)(sizeof %s / sizeof *%s)},' % (n, a, a, a) for n, a in banks))
+print(" \\\n".join('    {"%s", %s, (int)(sizeof %s / sizeof *%s), 1},' % (n, a, a, a) for n, a in banks))

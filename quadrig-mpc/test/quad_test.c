@@ -214,6 +214,26 @@ int main(int argc, char **argv) {
         disp(e, fx1, f1);
         CHECK(!strcmp(t, rigs[2].name) && !strcmp(f1, rigs[nrigs - 1].s[0].fx), "a restored Rig value changed the board");
     }
+    /* the rig CCs (a foot controller): 20 bank, 21 rig, 22 / 23 a song's signature / rhythm, 24 / 25 Rig > / <, 26 rhythm on/off */
+    {
+        static const struct { int cc, v; const char *want; } STEPS[] = {
+            {20, 2, NULL}, {22, 2, "Alive"}, {26, 127, "Alive Rhy"}, {26, 0, "Alive"}, {23, 3, "Corduroy Rhy"},
+            {24, 127, "Rearviewmirror"}, {24, 0, "Rearviewmirror"}, {25, 127, "Corduroy Rhy"}, {25, 0, "Corduroy Rhy"},
+            {20, 3, NULL}, {22, 1, "Fell on Black Days"}, {20, 0, NULL}, {21, 2, NULL}, {23, 1, NULL}};
+        const int rig = param(e, "Rig");
+        int bad = 0;
+        for (size_t k = 0; k < sizeof STEPS / sizeof *STEPS; k++) {
+            struct { int32_t type, byteSize, deltaFrames, flags, noteLength, noteOffset; unsigned char d[4]; char a, b, c, x; } ev = {1, 32, 0, 0, 0, 0, {0xb3, (unsigned char)STEPS[k].cc, (unsigned char)STEPS[k].v, 0}, 0, 0, 0, 0};
+            struct { int32_t n; intptr_t r; void *ev[2]; } evs = {1, 0, {&ev, NULL}};
+            e->dispatcher(e, 25, 0, 0, &evs, 0);
+            disp(e, rig, t);
+            const char *want = STEPS[k].want ? STEPS[k].want : STEPS[k].cc == 20 ? "-" : STEPS[k].v == 2 ? BANKS[0].rigs[1].name : BANKS[0].rigs[0].name;
+            if (STEPS[k].cc == 20) { char b[64]; disp(e, param(e, "Bank"), b); if (strcmp(b, BANKS[STEPS[k].v].name)) { printf("  CC 20 %d: bank %s\n", STEPS[k].v, b); bad++; } }
+            else if (strcmp(t, want)) { printf("  CC %d %d: rig \"%s\", wanted \"%s\"\n", STEPS[k].cc, STEPS[k].v, t, want); bad++; }
+        }
+        printf("  rig CCs 20-26: %d wrong\n", bad);
+        CHECK(!bad, "the rig CCs don't pick the right rigs");
+    }
     /* a rig picks an amp from the library by its words (QUAD_AMP_TEST=1: a library of "Marshall Plexi" and
      * "Fender Twin" models): Plexi Crunch -> the Marshall, Texas Blues -> the Fender, Fuzz Synth Beast (svt / ampeg /
      * orange: none there) -> stays */

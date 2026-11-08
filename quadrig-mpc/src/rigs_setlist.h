@@ -466,10 +466,10 @@ static const Rig SET_6[] = {
      {{"Compressor", "Clean Studio", 0.7f, NOK}, {"DrivPdls", "Kng o Tone", M_, {K_, 0.25f, 0.55f, 0.65f, K_, K_, K_, K_}}, {"Room", "Guitar Room", 0.15f, NOK}, OFF, OFF, OFF}},
 };
 #define SETLIST_BANKS \
-    {"A Grunge Core", SET_0, (int)(sizeof SET_0 / sizeof *SET_0)}, \
-    {"B Cornell", SET_1, (int)(sizeof SET_1 / sizeof *SET_1)}, \
-    {"C Southern", SET_2, (int)(sizeof SET_2 / sizeof *SET_2)}, \
-    {"D Classic Rock", SET_3, (int)(sizeof SET_3 / sizeof *SET_3)}, \
-    {"E Butt Rock", SET_4, (int)(sizeof SET_4 / sizeof *SET_4)}, \
-    {"F Foo Fighters", SET_5, (int)(sizeof SET_5 / sizeof *SET_5)}, \
-    {"G Slow Ones", SET_6, (int)(sizeof SET_6 / sizeof *SET_6)},
+    {"A Grunge Core", SET_0, (int)(sizeof SET_0 / sizeof *SET_0), 1}, \
+    {"B Cornell", SET_1, (int)(sizeof SET_1 / sizeof *SET_1), 1}, \
+    {"C Southern", SET_2, (int)(sizeof SET_2 / sizeof *SET_2), 1}, \
+    {"D Classic Rock", SET_3, (int)(sizeof SET_3 / sizeof *SET_3), 1}, \
+    {"E Butt Rock", SET_4, (int)(sizeof SET_4 / sizeof *SET_4), 1}, \
+    {"F Foo Fighters", SET_5, (int)(sizeof SET_5 / sizeof *SET_5), 1}, \
+    {"G Slow Ones", SET_6, (int)(sizeof SET_6 / sizeof *SET_6), 1},
