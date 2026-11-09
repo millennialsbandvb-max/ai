@@ -23,8 +23,10 @@ jobs:
           arduino-cli config init --overwrite
           arduino-cli config add board_manager.additional_urls https://espressif.github.io/arduino-esp32/package_esp32_index.json
           arduino-cli core update-index
-          arduino-cli core install esp32:esp32@3.1.1
-          arduino-cli lib install "M5Unified" "ESP Async WebServer" "Async TCP" "BLE-MIDI" "NimBLE-Arduino@1.4.3" "MIDI Library"
+          # downloads sometimes time out (504); retry a few times before giving up
+          for i in 1 2 3 4 5; do arduino-cli core install esp32:esp32@3.1.1 && break; echo "core install failed, retry $i"; sleep 30; done
+          arduino-cli core list | grep -q "esp32:esp32"
+          for i in 1 2 3; do arduino-cli lib install "M5Unified" "ESP Async WebServer" "Async TCP" "BLE-MIDI" "NimBLE-Arduino@1.4.3" "MIDI Library" && break; sleep 20; done
       - name: Compile
         run: |
           echo "#define FW_VERSION \"${GITHUB_SHA::7}\"" > firmware/pocketbeat_sticks3/version.h
