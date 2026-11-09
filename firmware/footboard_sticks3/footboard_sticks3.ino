@@ -61,6 +61,14 @@ struct Cfg {
   float kdegR = 4.0f;      // degrees per note on the right (higher) side; kdeg is the left (lower) side
   int nudge = 1;           // 1: swivelling (or sliding) while a note holds moves it to the new note
   int arc = 1;             // 1: auto re-centre: while the foot rests, slowly treat its position as straight ahead
+  // chord mode
+  int kmode = 0;           // 0 single notes, 1 chord progression
+  int ckey = 0;            // key quality: 0 major, 1 minor (the key's tonic is kroot, the centre note)
+  int cpat = 0;            // pattern index (last one = custom)
+  int8_t cdeg[8] = { 1, 5, 6, 4, 0, 0, 0, 0 };   // custom pattern: scale degrees 1-7, 0 = end
+  int cpick = 0;           // 0 swivel picks the chord, 1 each tap plays the next chord in the pattern
+  int cbass = 1;           // add the root an octave below
+  int c7 = 0;              // 1: four-note chords (add the 7th)
 } cfg;
 Preferences prefs;
 // Home Wi-Fi is also kept in a shared "wifi" store, so PocketBeat and Footboard can each use it after a switch.
@@ -107,7 +115,7 @@ int rootHeld = -1;                       // the swivelled note of the chord, -1 
 float keyQx = 0, keyQy = 0, keyQz = 1;   // foot orientation when the note started
 uint32_t keyOnAt = 0, keyLiftSince = 0;
 float keyTip = 0;
-char lastName[8] = "--";
+char lastName[12] = "--";
 
 // Range: the centre note plays with the foot straight ahead; each note is kdeg degrees of swivel; the range runs
 // ktot degrees in total, kpos of it to the left (toes in = lower notes) and the rest to the right (higher).
@@ -129,6 +137,44 @@ int stepToNote(int i) {
 float rangeFrac(float a) { float st = nLo() - (a > 0 ? a / cfg.kdeg : a / cfg.kdegR); return cfg.kspan ? constrain(st / cfg.kspan, 0.0f, 1.0f) : 0.5f; }   // + = toes left (lower)
 int keyForTilt(float a) { return stepToNote((int)roundf(rangeFrac(a) * cfg.kspan)); }
 
+// ---------------- Chord progressions ----------------
+// Patterns are scale degrees; the chord qualities follow the key (major: I ii iii IV V vi vii°;
+// minor: i ii° III iv V VI VII, with a major V as is usual). The last pattern is the custom one.
+static const int8_t PATS[][12] = {
+  { 1, 5, 6, 4 }, { 1, 6, 4, 5 }, { 6, 4, 1, 5 }, { 1, 4, 5 }, { 1, 4, 6, 5 }, { 2, 5, 1 },
+  { 1, 7, 6, 5 }, { 1, 6, 3, 7 }, { 1, 4, 7, 3 }, { 1, 1, 1, 1, 4, 4, 1, 1, 5, 4, 1, 5 },
+};
+static const int NPATS = sizeof(PATS) / sizeof(PATS[0]);   // + 1 custom
+static const int MAJ_SEMIS[7] = { 0, 2, 4, 5, 7, 9, 11 }, MIN_SEMIS[7] = { 0, 2, 3, 5, 7, 8, 10 };
+static const int8_t MAJ_Q[7] = { 0, 1, 1, 0, 0, 1, 2 }, MIN_Q[7] = { 1, 2, 0, 1, 0, 0, 0 };   // 0 major 1 minor 2 dim
+static const char* ROMAN[3][7] = { { "I", "II", "III", "IV", "V", "VI", "VII" }, { "i", "ii", "iii", "iv", "v", "vi", "vii" }, { "i°", "ii°", "iii°", "iv°", "v°", "vi°", "vii°" } };
+int patLen() {
+  if (cfg.cpat < NPATS) { int n = 0; while (n < 12 && PATS[cfg.cpat][n]) n++; return n; }
+  int n = 0; while (n < 8 && cfg.cdeg[n] >= 1 && cfg.cdeg[n] <= 7) n++; return max(1, n);
+}
+int patDeg(int i) { int n = patLen(); i = ((i % n) + n) % n; int d = cfg.cpat < NPATS ? PATS[cfg.cpat][i] : cfg.cdeg[i]; return constrain(d, 1, 7); }
+int chordQual(int deg) { return cfg.ckey ? MIN_Q[deg - 1] : MAJ_Q[deg - 1]; }
+int chordRoot(int deg) { return cfg.kroot + (cfg.ckey ? MIN_SEMIS[deg - 1] : MAJ_SEMIS[deg - 1]); }
+// notes of the chord on pattern slot i (root position; bass octave below if set; 7th if set)
+int chordNotes(int i, int* out) {
+  int deg = patDeg(i), root = chordRoot(deg), q = chordQual(deg), n = 0;
+  if (cfg.cbass && root - 12 >= 0) out[n++] = root - 12;
+  out[n++] = root; out[n++] = root + (q == 0 ? 4 : 3); out[n++] = root + (q == 2 ? 6 : 7);
+  if (cfg.c7) {   // diatonic 7th: major 7 on I/IV (major key) and III/VI (minor key), minor 7 otherwise, dim -> m7b5
+    bool maj7 = cfg.ckey ? (deg == 3 || deg == 6) : (deg == 1 || deg == 4);
+    out[n++] = root + (maj7 ? 11 : 10);
+  }
+  return n;
+}
+void chordName(int i, char* out) {   // e.g. "Am", "Bdim", "F#", with the 7th as "7"/"maj7"
+  int deg = patDeg(i), q = chordQual(deg); const char* pc = NOTE_NAMES[((chordRoot(deg) % 12) + 12) % 12];
+  bool maj7 = cfg.c7 && (cfg.ckey ? (deg == 3 || deg == 6) : (deg == 1 || deg == 4));
+  snprintf(out, 12, "%s%s%s", pc, q == 1 ? "m" : q == 2 ? "dim" : "", cfg.c7 ? (maj7 ? "maj7" : "7") : "");
+}
+const char* chordRoman(int i) { int deg = patDeg(i); return ROMAN[chordQual(deg)][deg - 1]; }
+float chordFrac(float a) { return cfg.ktot > 0 ? constrain((reachL() - a) / cfg.ktot, 0.0f, 1.0f) : 0.5f; }   // 0 = far left
+int stepIdx = 0, heldChord = -1; uint32_t lastChordTap = 0;
+
 int slideStep = 0;   // slide mode: which step of the range the foot is on
 
 void notesOff() {
@@ -141,15 +187,25 @@ void notesOff() {
     M5.Speaker.stop(i);
   }
   char b[64]; snprintf(b, sizeof b, "{\"key\":%d,\"on\":0,\"tip\":%.0f}", rootHeld, keyTip); ws.textAll(b);
-  rootHeld = -1; nHeld = 0;
+  rootHeld = -1; heldChord = -1; nHeld = 0;
 }
 float heldVel = 0.6f;   // strength of the tap that started the held note (nudged notes reuse it)
+void soundNotes(int root, const int* notes, int n, float vel, const char* name, float swivel, int chord);
 void notesOn(int root, float vel, float swivel) {
+  int list[6]; int n = 0; list[n++] = root;
+  for (int i = 0; i < 5; i++) if (cfg.ints & (1 << i)) { int x = root + INT_SEMIS[i]; if (x <= 127) list[n++] = x; }
+  char nm[8]; noteName(root, nm);
+  soundNotes(root, list, n, vel, nm, swivel, -1);
+}
+void chordOn(int i, float vel, float swivel) {
+  int list[6]; int n = chordNotes(i, list); char nm[12]; chordName(i, nm);
+  soundNotes(list[cfg.cbass ? 1 : 0], list, n, vel, nm, swivel, i);
+}
+void soundNotes(int root, const int* notes, int n, float vel, const char* name, float swivel, int chord) {
   heldVel = vel;
   if (rootHeld >= 0) { keyTip = -1; notesOff(); }
-  rootHeld = root; nHeld = 0;
-  held[nHeld++] = root;
-  for (int i = 0; i < 5; i++) if (cfg.ints & (1 << i)) { int n = root + INT_SEMIS[i]; if (n <= 127) held[nHeld++] = n; }
+  rootHeld = root; heldChord = chord; nHeld = 0;
+  for (int i = 0; i < n && nHeld < 6; i++) held[nHeld++] = notes[i];
   uint8_t v = (uint8_t)constrain(20 + vel * 107, 1, 127);
   for (int i = 0; i < nHeld; i++) {
     if (bleConnected) MIDI.sendNoteOn(held[i], v, cfg.chan);
@@ -164,8 +220,8 @@ void notesOn(int root, float vel, float swivel) {
       M5.Speaker.tone(440.0f * powf(2.0f, (held[i] - 69) / 12.0f), 60000, i, true);   // sounds until released
     }
   }
-  noteName(root, lastName);
-  char b[200]; int p = snprintf(b, sizeof b, "{\"key\":%d,\"on\":1,\"v\":%.2f,\"name\":\"%s\",\"tilt\":%.0f,\"notes\":[", root, vel, lastName, swivel);
+  strlcpy(lastName, name, sizeof lastName);
+  char b[220]; int p = snprintf(b, sizeof b, "{\"key\":%d,\"on\":1,\"v\":%.2f,\"name\":\"%s\",\"tilt\":%.0f,\"chord\":%d,\"notes\":[", root, vel, lastName, swivel, chord);
   for (int i = 0; i < nHeld; i++) p += snprintf(b + p, sizeof b - p, "%s%d", i ? "," : "", held[i]);
   snprintf(b + p, sizeof b - p, "]}"); ws.textAll(b);
 }
@@ -192,8 +248,17 @@ void fireTap(float p, uint32_t onset, uint32_t now) {
     if (age >= 10 && age < best) { best = age; a = hY[i]; st = hS[i]; q[0] = hQ[i][0]; q[1] = hQ[i][1]; q[2] = hQ[i][2]; }
   }
   slState = 0;   // a tap ends any slide in progress
-  int note = cfg.move ? stepToNote(constrain(st, 0, cfg.kspan)) : keyForTilt(a);
-  notesOn(note, constrain((p - cfg.thr) / (cfg.thr * 3), 0.0f, 1.0f), cfg.move ? st : a);
+  float vel = constrain((p - cfg.thr) / (cfg.thr * 3), 0.0f, 1.0f);
+  if (cfg.kmode == 1) {   // chords
+    int n = patLen(), idx;
+    if (cfg.cpick == 1) { if (now - lastChordTap > 6000) stepIdx = 0; idx = stepIdx; stepIdx = (stepIdx + 1) % n; }   // next chord; restart after a 6 s pause
+    else idx = cfg.move ? constrain(st, 0, n - 1) : min(n - 1, (int)(chordFrac(a) * n));
+    lastChordTap = now;
+    chordOn(idx, vel, cfg.move ? st : a);
+  } else {
+    int note = cfg.move ? stepToNote(constrain(st, 0, cfg.kspan)) : keyForTilt(a);
+    notesOn(note, vel, cfg.move ? st : a);
+  }
   keyQx = q[0]; keyQy = q[1]; keyQz = q[2]; keyOnAt = now; keyTip = 0; keyLiftSince = 0;
 }
 
@@ -281,12 +346,24 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   // nudge: while a note holds, moving onto another note switches to it (same strength, same release reference).
   // It has to be well inside the new note so it doesn't flicker on the border.
   if (rootHeld >= 0 && cfg.nudge && now - keyOnAt > 150) {
-    int a = aimNote();
-    float xs = rangeFrac(yawDeg) * cfg.kspan, cl = 1.0f - 2.0f * fabsf(xs - roundf(xs));
-    if (a != rootHeld && (cfg.move || cl > 0.4f)) {
-      uint32_t on = keyOnAt; float rx0 = keyQx, ry0 = keyQy, rz0 = keyQz;
-      notesOn(a, heldVel, cfg.move ? slideStep : yawDeg);
-      keyOnAt = on; keyQx = rx0; keyQy = ry0; keyQz = rz0;
+    if (cfg.kmode == 1) {
+      if (cfg.cpick == 0) {   // swivel picks: switch chord when well inside another zone
+        int n = patLen(); float z = chordFrac(yawDeg) * n; int idx = cfg.move ? constrain(slideStep, 0, n - 1) : min(n - 1, (int)z);
+        float cl = cfg.move ? 1.0f : 1.0f - 2.0f * fabsf(z - floorf(z) - 0.5f);
+        if (idx != heldChord && cl > 0.4f) {
+          uint32_t on = keyOnAt; float rx0 = keyQx, ry0 = keyQy, rz0 = keyQz;
+          chordOn(idx, heldVel, cfg.move ? slideStep : yawDeg);
+          keyOnAt = on; keyQx = rx0; keyQy = ry0; keyQz = rz0;
+        }
+      }
+    } else {
+      int a = aimNote();
+      float xs = rangeFrac(yawDeg) * cfg.kspan, cl = 1.0f - 2.0f * fabsf(xs - roundf(xs));
+      if (a != rootHeld && (cfg.move || cl > 0.4f)) {
+        uint32_t on = keyOnAt; float rx0 = keyQx, ry0 = keyQy, rz0 = keyQz;
+        notesOn(a, heldVel, cfg.move ? slideStep : yawDeg);
+        keyOnAt = on; keyQx = rx0; keyQy = ry0; keyQz = rz0;
+      }
     }
   }
 
@@ -300,6 +377,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 }
 
 int aimNote() { return cfg.move ? stepToNote(constrain(slideStep, 0, cfg.kspan)) : keyForTilt(yawDeg); }
+int aimChord() { int n = patLen(); return cfg.cpick == 1 ? (millis() - lastChordTap > 6000 ? 0 : stepIdx % n) : cfg.move ? constrain(slideStep, 0, n - 1) : min(n - 1, (int)(chordFrac(yawDeg) * n)); }
 
 // ---------------- Web ----------------
 void notesOff();
@@ -309,9 +387,9 @@ void setScale(int ns) {
   slideStep = constrain(slideStep, 0, cfg.kspan); keyTip = -1; notesOff();
 }
 void sendCfg(AsyncWebSocketClient* c) {
-  char b[600];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"nLo\":%d,\"ktot\":%.0f,\"kpos\":%.2f,\"kdeg\":%.1f,\"kdegR\":%.1f,\"nudge\":%d,\"arc\":%d,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"move\":%d,\"sthr\":%.2f,\"scm\":%.1f,\"rSet\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, nLo(), cfg.ktot, cfg.kpos, cfg.kdeg, cfg.kdegR, cfg.nudge, cfg.arc, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, cfg.move, cfg.sthr, cfg.scm, cfg.rSet ? 1 : 0, FW_VERSION, cfg.ssid);
+  char b[760];
+  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"nLo\":%d,\"ktot\":%.0f,\"kpos\":%.2f,\"kdeg\":%.1f,\"kdegR\":%.1f,\"nudge\":%d,\"arc\":%d,\"kmode\":%d,\"ckey\":%d,\"cpat\":%d,\"cdeg\":\"%d%d%d%d%d%d%d%d\",\"cpick\":%d,\"cbass\":%d,\"c7\":%d,\"npat\":%d,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"move\":%d,\"sthr\":%.2f,\"scm\":%.1f,\"rSet\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, nLo(), cfg.ktot, cfg.kpos, cfg.kdeg, cfg.kdegR, cfg.nudge, cfg.arc, cfg.kmode, cfg.ckey, cfg.cpat, cfg.cdeg[0], cfg.cdeg[1], cfg.cdeg[2], cfg.cdeg[3], cfg.cdeg[4], cfg.cdeg[5], cfg.cdeg[6], cfg.cdeg[7], cfg.cpick, cfg.cbass, cfg.c7, NPATS, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, cfg.move, cfg.sthr, cfg.scm, cfg.rSet ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 float jsonNum(const char* s, const char* key, bool* found) {
@@ -327,6 +405,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   bool f;
   if (strstr(s, "\"get\"")) { sendCfg(client); return; }
   if (strstr(s, "\"keyCenter\"")) { yawDeg = 0; slideStep = nLo(); return; }
+  if (strstr(s, "\"restart\"")) { stepIdx = 0; lastChordTap = millis(); return; }
   if (strstr(s, "\"learnRight\"")) { learnUntil = millis() + 3000; lrnT0 = 0; return; }
   if (strstr(s, "\"allOff\"")) { keyTip = -1; notesOff(); return; }
   if (strstr(s, "\"switchFw\"")) { otaRequest = 2; return; }
@@ -343,6 +422,13 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "kdegR", &f); if (f) cfg.kdegR = constrain(v, 1.0f, 30.0f);
   v = jsonNum(s, "nudge", &f); if (f) cfg.nudge = (int)v ? 1 : 0;
   v = jsonNum(s, "arc", &f); if (f) cfg.arc = (int)v ? 1 : 0;
+  v = jsonNum(s, "kmode", &f); if (f) { cfg.kmode = (int)v ? 1 : 0; keyTip = -1; notesOff(); stepIdx = 0; }
+  v = jsonNum(s, "ckey", &f); if (f) { cfg.ckey = (int)v ? 1 : 0; keyTip = -1; notesOff(); }
+  v = jsonNum(s, "cpat", &f); if (f) { cfg.cpat = constrain((int)v, 0, NPATS); stepIdx = 0; keyTip = -1; notesOff(); }
+  v = jsonNum(s, "cpick", &f); if (f) { cfg.cpick = (int)v ? 1 : 0; stepIdx = 0; }
+  v = jsonNum(s, "cbass", &f); if (f) cfg.cbass = (int)v ? 1 : 0;
+  v = jsonNum(s, "c7", &f); if (f) cfg.c7 = (int)v ? 1 : 0;
+  if (const char* q = strstr(s, "\"cdeg\":\"")) { q += 8; for (int i = 0; i < 8; i++) cfg.cdeg[i] = (q[i] >= '1' && q[i] <= '7') ? q[i] - '0' : 0; stepIdx = 0; }
   v = jsonNum(s, "ktot", &f); if (f) cfg.ktot = constrain(v, 5.0f, 180.0f);
   v = jsonNum(s, "kpos", &f); if (f) cfg.kpos = constrain(v, 0.0f, 1.0f);
   updateSpan();
@@ -518,7 +604,68 @@ void drawOutlined(M5Canvas& d, const char* t, int x, int y, int b, uint16_t fill
   for (int r = b; r > 0; r = (r >= 3 ? r / 2 : 0)) for (int i = 0; i < 8; i++) d.drawString(t, x + DX[i] * r, y + DY[i] * r);
   d.setTextColor(fill); d.drawString(t, x, y);
 }
+void drawStatus(M5Canvas& d, int W, int H) {
+  d.fillRect(0, H - 13, W, 13, TFT_BLACK);
+  d.setFont(&fonts::Font0); d.setTextSize(1); d.setTextDatum(bottom_center); d.setTextColor(TFT_LIGHTGREY);
+  char st[40]; snprintf(st, sizeof st, "BLE %s  WiFi %s  %d%%", bleConnected ? "on" : "--", WiFi.status() == WL_CONNECTED ? "ok" : "--", battPct);
+  d.drawString(st, W / 2, H - 2);
+}
+// Chord mode screen: key + pattern on top, the chord name huge in its root's colour, then the pattern as blocks
+// with the current one marked, and (swivel) a tuner showing where you are inside the chord's zone.
+void drawChordScreen() {
+  auto& d = scr; const int W = d.width(), H = d.height();
+  int n = patLen(), cur = heldChord >= 0 ? heldChord : aimChord();
+  float z = chordFrac(yawDeg) * n, inZone = cfg.cpick == 0 && !cfg.move ? constrain(z - cur, 0.0f, 1.0f) : 0.5f;
+  int root = chordRoot(patDeg(cur));
+  uint32_t sig = 7u ^ cur * 2654435761u ^ (heldChord + 1) * 40503u ^ (int)(inZone * 40) * 97u ^ cfg.cpat * 131u ^ cfg.ckey * 17u ^ cfg.kroot * 31337u ^ cfg.cpick * 613u ^ cfg.c7 * 5u ^ cfg.cbass * 3u ^ (bleConnected ? 1 : 0) * 2u ^ battPct * 1009u ^ (WiFi.status() == WL_CONNECTED ? 4099u : 0u);
+  for (int i = 0; i < 8; i++) sig ^= cfg.cdeg[i] << (i * 3);
+  if (sig == lastSig) return; lastSig = sig;
+  fillPitch(d, 0, 0, W, H, root, 18);
+  // key + pattern
+  d.setFont(&fonts::Font2); d.setTextSize(1); d.setTextDatum(top_center);
+  char key[8]; noteName(cfg.kroot, key); key[strcspn(key, "0123456789-")] = 0;
+  char top[40]; snprintf(top, sizeof top, "%s %s", key, cfg.ckey ? "minor" : "major"); drawOutlined(d, top, W / 2, 3, 1, TFT_WHITE);
+  char pat[64] = ""; for (int i = 0; i < n && i < 8; i++) { strlcat(pat, chordRoman(i), sizeof pat); if (i < n - 1) strlcat(pat, " ", sizeof pat); }
+  if (n > 8) strlcat(pat, " ...", sizeof pat);
+  d.setFont(&fonts::Font0); drawOutlined(d, pat, W / 2, 22, 1, TFT_WHITE);
+  // chord name
+  char nm[12]; chordName(cur, nm);
+  d.setTextDatum(middle_center); d.setFont(&fonts::FreeSansBold24pt7b);
+  float sz = min(2.0f, (W - 12) / (float)max((int32_t)1, (int32_t)d.textWidth(nm)));
+  uint16_t letter = heldChord >= 0 ? M5.Display.color565(255, 90, 80) : TFT_WHITE;
+  d.setTextSize(sz); drawOutlined(d, nm, W / 2, 72, sz > 1.4f ? 4 : 3, letter);
+  d.setFont(&fonts::FreeSansBold18pt7b); d.setTextSize(1); drawOutlined(d, chordRoman(cur), W / 2, 124, 3, letter);
+  // step mode: what comes next
+  d.setFont(&fonts::Font2); d.setTextDatum(top_center);
+  char nx[32];
+  if (cfg.cpick == 1) { char nn[12]; chordName((cur + 1) % n, nn); snprintf(nx, sizeof nx, "next: %s", nn); }
+  else snprintf(nx, sizeof nx, "%s", cfg.move ? "slide picks the chord" : "swivel picks the chord");
+  drawOutlined(d, nx, W / 2, 140, 1, TFT_WHITE);
+  // pattern blocks
+  int ty = 160; d.fillRect(0, ty, W, 66, TFT_BLACK);
+  int rx = 3, rw = W - 6, ry = ty + 6, rh = 22;
+  d.setFont(&fonts::Font0); d.setTextDatum(middle_center);
+  for (int i = 0; i < n; i++) {
+    int xa = rx + i * rw / n, xb = rx + (i + 1) * rw / n - 1, w = max(1, xb - xa);
+    fillPitch(d, xa, ry, w, rh, chordRoot(patDeg(i)), 3);
+    if (i == heldChord) d.drawRect(xa, ry, w, rh, TFT_WHITE), d.drawRect(xa + 1, ry + 1, w - 2, rh - 2, TFT_WHITE);
+    if (n <= 8) { d.setTextColor(TFT_BLACK); d.drawString(chordRoman(i), xa + w / 2, ry + rh / 2); }
+  }
+  if (cfg.cpick == 0 && !cfg.move) { int mk = rx + (int)(chordFrac(yawDeg) * (rw - 1)); d.fillRect(mk - 2, ry - 4, 5, rh + 8, TFT_BLACK); d.fillRect(mk - 1, ry - 3, 3, rh + 6, TFT_WHITE); }
+  else { int xa = rx + cur * rw / n, xb = rx + (cur + 1) * rw / n - 1; d.fillTriangle(xa + (xb - xa) / 2 - 5, ry - 2, xa + (xb - xa) / 2 + 5, ry - 2, xa + (xb - xa) / 2, ry + 4, TFT_WHITE); }
+  // position inside the zone (swivel only): centre = middle of the chord's zone
+  if (cfg.cpick == 0 && !cfg.move) {
+    int mx = W / 2, half = W / 2 - 10, my = ty + 48;
+    d.fillRect(mx - half, my - 1, half * 2, 3, 0x4208);
+    for (int t = -5; t <= 5; t++) { int x = mx + t * half / 5; int hgt = t == 0 ? 10 : (t % 5 == 0 ? 8 : 4); d.fillRect(x, my - hgt, 1, hgt * 2 + 1, t == 0 ? TFT_WHITE : TFT_LIGHTGREY); }
+    int px = mx + (int)((inZone - 0.5f) * 2 * half);
+    d.fillTriangle(px - 5, my - 14, px + 5, my - 14, px, my - 4, TFT_WHITE); d.fillRect(px - 1, my - 14, 3, 28, TFT_WHITE);
+  }
+  drawStatus(d, W, H);
+  d.pushSprite(0, 0);
+}
 void drawScreen() {
+  if (cfg.kmode == 1) { drawChordScreen(); return; }
   auto& d = scr; const int W = d.width(), H = d.height();
   static const char* SCN[5] = { "Chromatic", "Major", "Minor", "Major pent", "Minor pent" };
   int shown = rootHeld >= 0 ? rootHeld : aimNote();
@@ -575,11 +722,7 @@ void drawScreen() {
   int nx = mx + (int)(off * 2 * half);
   d.fillTriangle(nx - 6, my - 18, nx + 6, my - 18, nx, my - 6, TFT_WHITE);
   d.fillRect(nx - 1, my - 18, 3, 36, TFT_WHITE);
-  // status
-  d.fillRect(0, H - 13, W, 13, TFT_BLACK);
-  d.setTextDatum(bottom_center); d.setTextColor(TFT_LIGHTGREY);
-  char st[40]; snprintf(st, sizeof st, "BLE %s  WiFi %s  %d%%", bleConnected ? "on" : "--", WiFi.status() == WL_CONNECTED ? "ok" : "--", battPct);
-  d.drawString(st, W / 2, H - 2);
+  drawStatus(d, W, H);
   d.pushSprite(0, 0);
 }
 
@@ -617,7 +760,7 @@ void loop() {
   if (M5.BtnB.wasReleased() && !wakeOnly) {   // side button: next scale (chromatic > major > minor > major pent > minor pent)
     setScale((cfg.scale + 1) % 5); saveCfg(); sendCfg(nullptr); lastDraw = 0;
   }
-  if (M5.BtnA.wasReleased()) { if (!wakeOnly && !resetHeld) { yawDeg = 0; slideStep = nLo(); } resetHeld = false; }
+  if (M5.BtnA.wasReleased()) { if (!wakeOnly && !resetHeld) { if (cfg.kmode == 1 && cfg.cpick == 1) { stepIdx = 0; lastChordTap = millis(); } else { yawDeg = 0; slideStep = nLo(); } } resetHeld = false; }
   if ((M5.BtnA.wasReleased() || M5.BtnB.wasReleased()) && wakeOnly) wakeOnly = false;
   static bool factoryDone = false;
   if (M5.BtnA.wasReleased()) factoryDone = false;
@@ -641,7 +784,7 @@ void loop() {
   if (ws.count() && nMeter >= 12 && now - lastMeterSend > 25) {
     char b[240]; int p = snprintf(b, sizeof b, "{\"m\":[");
     for (int i = 0; i < nMeter; i++) p += snprintf(b + p, sizeof b - p, "%s%.2f", i ? "," : "", meterBuf[i]);
-    snprintf(b + p, sizeof b - p, "],\"yaw\":%.1f,\"tip\":%.0f,\"step\":%d,\"sa\":%.2f}", yawDeg, flatTilt, slideStep, saPeak); saPeak = 0; ws.textAll(b); nMeter = 0; lastMeterSend = now;
+    snprintf(b + p, sizeof b - p, "],\"yaw\":%.1f,\"tip\":%.0f,\"step\":%d,\"sa\":%.2f,\"ci\":%d}", yawDeg, flatTilt, slideStep, saPeak, cfg.kmode == 1 ? aimChord() : -1); saPeak = 0; ws.textAll(b); nMeter = 0; lastMeterSend = now;
   } else if (nMeter >= 12) nMeter = 0;
 
   if (screenOn && now - lastDraw > 80) { lastDraw = now; drawScreen(); }

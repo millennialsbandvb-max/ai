@@ -72,6 +72,8 @@
   .ints button small { display: block; font-family: var(--body); font-size: 9px; font-weight: 500; color: var(--muted); letter-spacing: .04em; }
   .ints button.on { background: var(--accent); color: #1d1300; border-color: var(--accent); }
   .ints button.on small { color: #3d2a00; }
+  #cdeg button { height: 44px; font-size: 18px; }
+  .strip .k.chord span { font-size: 11px; color: #000; font-weight: 800; text-shadow: 0 0 2px #fff; }
   .row { display: flex; gap: 8px; }
   .row button, .btn { flex: 1; min-height: 46px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel2); color: var(--fg); font-size: 14px; cursor: pointer; padding: 8px; }
   .row button.go { background: var(--fg); color: var(--bg); font-weight: 600; }
@@ -122,6 +124,39 @@
 </section>
 
 <section class="card">
+  <h2>Play</h2>
+  <div class="seg" data-key="kmode">
+    <button type="button" data-v="0">Single notes</button>
+    <button type="button" data-v="1">Chord progression</button>
+  </div>
+</section>
+
+<section class="card" id="chordCard" hidden>
+  <h2>Chords · key = centre note</h2>
+  <div class="seg" data-key="ckey">
+    <button type="button" data-v="0">Major key</button>
+    <button type="button" data-v="1">Minor key</button>
+  </div>
+  <div class="ctl"><label for="cpat">Pattern</label><output id="cpatOut"></output>
+    <select id="cpat" style="grid-column:1/-1;background:var(--panel2);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:11px;font-size:15px"></select></div>
+  <div id="customBox" hidden>
+    <p class="hint">Custom pattern: tap a slot to step through the scale degrees (1–7); “–” ends the pattern.</p>
+    <div class="ints" id="cdeg" style="grid-template-columns:repeat(8,1fr)"></div>
+  </div>
+  <span class="pill" id="patNames">—</span>
+  <div class="seg" data-key="cpick">
+    <button type="button" data-v="0">Swivel picks the chord</button>
+    <button type="button" data-v="1">Each tap = next chord</button>
+  </div>
+  <div class="row"><button type="button" id="restart">Restart pattern</button></div>
+  <div class="row">
+    <div class="seg" data-key="cbass" style="flex:1"><button type="button" data-v="1">Bass note</button><button type="button" data-v="0">No bass</button></div>
+    <div class="seg" data-key="c7" style="flex:1"><button type="button" data-v="0">Triads</button><button type="button" data-v="1">7th chords</button></div>
+  </div>
+  <p class="hint" id="chordHint">Swivel: the whole range is split into one zone per chord, left to right; tap in a zone to play that chord, and it holds until your foot tips. “Each tap = next chord” steps through the pattern instead (it restarts after a 6 s pause, or with Restart / the front button).</p>
+</section>
+
+<section class="card" id="harmonyCard">
   <h2>Harmony · tap to stack</h2>
   <div class="ints" id="ints">
     <button type="button" data-b="0">m3<small>minor 3rd</small></button>
@@ -133,7 +168,7 @@
   <p class="hint" id="intHint">Off: single notes. Each one you turn on adds that interval above the note you play, e.g. M3 + 5 = major chord, m3 + 5 = minor chord.</p>
 </section>
 
-<section class="card">
+<section class="card" id="rangeCard">
   <h2>Scale · key = centre note</h2>
   <div class="seg" data-key="scale" id="scaleSeg">
     <button type="button" data-v="0">Chromatic</button>
@@ -148,7 +183,7 @@
     <button type="button" data-v="0">Off</button>
   </div>
   <h2>While a note is playing</h2>
-  <div class="seg" data-key="nudge">
+  <div class="seg" data-key="nudge" id="nudgeSeg">
     <button type="button" data-v="1">Swivel moves it to the new note</button>
     <button type="button" data-v="0">Note stays put</button>
   </div>
@@ -254,13 +289,39 @@
   const SC = [[0,1,2,3,4,5,6,7,8,9,10,11],[0,2,4,5,7,9,11],[0,2,3,5,7,8,10],[0,2,4,7,9],[0,3,5,7,10]];
   const scl = () => SC[Math.max(0, Math.min(4, +cfg.scale || 0))];
   const stepToNote = i => { const sc = scl(), o = i - nLo(), q = Math.floor(o / sc.length); return +$('kroot').value + 12 * q + sc[o - q * sc.length]; };
+  // chords (same rules as the board)
+  const PATS = [[1,5,6,4],[1,6,4,5],[6,4,1,5],[1,4,5],[1,4,6,5],[2,5,1],[1,7,6,5],[1,6,3,7],[1,4,7,3],[1,1,1,1,4,4,1,1,5,4,1,5]];
+  const PATNAMES = ['Pop (I V vi IV)', '50s (I vi IV V)', 'Axis (vi IV I V)', 'Three chord (I IV V)', 'I IV vi V', 'Jazz turnaround (ii V I)', 'Andalusian (i VII VI V)', 'i VI III VII', 'i iv VII III', '12-bar blues', 'Custom'];
+  const MAJS = [0,2,4,5,7,9,11], MINS = [0,2,3,5,7,8,10], MAJQ = [0,1,1,0,0,1,2], MINQ = [1,2,0,1,0,0,0];
+  const ROM = [['I','II','III','IV','V','VI','VII'],['i','ii','iii','iv','v','vi','vii'],['i°','ii°','iii°','iv°','v°','vi°','vii°']];
+  const cdegArr = () => (cfg.cdeg || '15640000').split('').map(Number);
+  const patDegs = () => { if (+cfg.cpat < PATS.length) return PATS[+cfg.cpat]; const d = cdegArr(); let n = 0; while (n < 8 && d[n] >= 1 && d[n] <= 7) n++; return n ? d.slice(0, n) : [1]; };
+  const chordQ = deg => (+cfg.ckey ? MINQ : MAJQ)[deg - 1];
+  const chordRoot = deg => +$('kroot').value + (+cfg.ckey ? MINS : MAJS)[deg - 1];
+  const chordRoman = deg => ROM[chordQ(deg)][deg - 1];
+  const chordNm = deg => { const q = chordQ(deg), maj7 = +cfg.c7 && (+cfg.ckey ? (deg === 3 || deg === 6) : (deg === 1 || deg === 4)); return NN[((chordRoot(deg) % 12) + 12) % 12] + (q === 1 ? 'm' : q === 2 ? 'dim' : '') + (+cfg.c7 ? (maj7 ? 'maj7' : '7') : ''); };
+  const chordFrac = a => +$('ktot').value ? Math.max(0, Math.min(1, (reachL() - a) / +$('ktot').value)) : .5;
+  let heldChord = -1, aimCi = 0;
   const chordOf = r => [r, ...INT.filter((_, i) => cfg.ints & (1 << i)).map(s => r + s)];
 
   // ---------- strip ----------
   let cells = [];
   function buildStrip() {
-    const s = $('strip'), root = +$('kroot').value, span = spanN();
+    const s = $('strip'), root = +$('kroot').value, span = spanN(), chords = +cfg.kmode === 1;
     cells.forEach(c => c.remove()); cells = [];
+    $('chordCard').hidden = !chords; $('harmonyCard').hidden = chords; $('rangeCard').querySelector('h2').textContent = chords ? 'Range' : 'Scale · key = centre note';
+    for (const id of ['scaleSeg', 'kdegCtl']) $(id).hidden = chords; $('kdegR').closest('.ctl').hidden = chords; $('nudgeSeg').hidden = false;
+    $('customBox').hidden = +cfg.cpat < PATS.length;
+    if (chords) {
+      const degs = patDegs();
+      degs.forEach((dg, i) => { const k = document.createElement('div'); k.className = 'k chord'; k.dataset.n = chordRoot(dg); k.dataset.i = i;
+        const l = document.createElement('span'); l.textContent = degs.length <= 8 ? chordRoman(dg) : ''; k.appendChild(l); s.insertBefore(k, $('cursor')); cells.push(k); });
+      $('patNames').textContent = degs.map(dg => chordNm(dg)).join(' · ');
+      $('cpatOut').textContent = degs.map(chordRoman).join(' ');
+      $('endLo').textContent = chordNm(degs[0]); $('endHi').textContent = chordNm(degs[degs.length - 1]);
+      $('width').textContent = degs.length + ' chords · ' + (+cfg.cpick ? 'tap for the next' : 'swivel picks');
+      paint(); return;
+    }
     for (let i = 0; i <= span; i++) { const n = stepToNote(i);
       const k = document.createElement('div'); k.className = 'k' + (NN[n % 12].includes('#') ? ' s' : ''); k.dataset.n = n;
       if (span <= 14 || n % 12 === root % 12) { const l = document.createElement('span'); l.textContent = noteName(n); k.appendChild(l); }
@@ -282,7 +343,25 @@
   const pcol = (n, b) => { const h = PC[((n % 12) + 12) % 12], v = Math.max(0, Math.min(1, b)); return 'rgb(' + [1, 3, 5].map(i => Math.round(parseInt(h.substr(i, 2), 16) * v)).join(',') + ')'; };
   const stepHue = i => 0;
   for (let t = -5; t <= 5; t++) { const e = document.createElement('div'); e.className = 'tick' + (t === 0 ? ' c' : ''); e.style.left = (50 + t * 10) + '%'; $('meter2').insertBefore(e, $('needle')); }
+  function paintChords() {
+    const degs = patDegs(), n = degs.length, swivel = !+cfg.cpick && !+cfg.move;
+    const z = chordFrac(yaw) * n, ci = swivel ? Math.min(n - 1, Math.floor(z)) : Math.max(0, Math.min(n - 1, aimCi)), cur = heldChord >= 0 ? heldChord : ci;
+    cells.forEach((k, i) => { k.style.background = pfill(+k.dataset.n, 4); k.classList.toggle('on', i === heldChord); k.classList.toggle('aim', heldChord < 0 && i === cur); });
+    $('cursor').style.left = (swivel ? chordFrac(yaw) * 100 : (cur + 0.5) / n * 100) + '%';
+    const dg = degs[cur];
+    document.querySelector('.stage').style.background = pfill(chordRoot(dg), 22);
+    $('note').textContent = chordNm(dg); $('note').classList.toggle('held', heldChord >= 0);
+    $('nowLabel').textContent = heldChord >= 0 ? 'playing' : (+cfg.cpick ? 'next tap plays' : 'pointing at');
+    $('chordNames').textContent = chordRoman(dg) + (held.length ? ' · ' + held.map(noteName).join(' ') : '');
+    const inZ = swivel ? Math.max(0, Math.min(1, z - cur)) : 0.5;
+    $('needle').style.left = (inZ * 100) + '%';
+    $('tZone').style.background = inZ > 0.3 && inZ < 0.7 || heldChord >= 0 ? pfill(chordRoot(dg), 6) : '#222';
+    const pv = cur > 0 ? degs[cur - 1] : null, nx = cur < n - 1 ? degs[cur + 1] : null;
+    $('tPrev').textContent = pv === null ? '—' : chordNm(pv); $('tPrev').style.color = pv === null ? '#555' : pcol(chordRoot(pv), 1);
+    $('tNext').textContent = nx === null ? '—' : chordNm(nx); $('tNext').style.color = nx === null ? '#555' : pcol(chordRoot(nx), 1);
+  }
   function paint() {
+    if (+cfg.kmode === 1) { paintChords(); return; }
     const span = spanN(), xs = cursorFrac(yaw) * span, close = +cfg.move ? 1 : Math.max(0, 1 - 2 * Math.abs(xs - Math.round(xs)));
     const aim = +cfg.move ? stepToNote(Math.max(0, Math.min(span, step))) : keyForTilt(yaw), har = held.slice(1);
     cells.forEach((k, i) => { const n = +k.dataset.n, on = n === held[0], hh = har.includes(n), isAim = !held.length && n === aim, sh = k.classList.contains('s');
@@ -324,12 +403,15 @@
   for (const seg of document.querySelectorAll('.seg[data-key]')) seg.addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
     for (const x of seg.children) x.classList.toggle('on', x === b);
-    cfg[seg.dataset.key] = +b.dataset.v; send({ set: { [seg.dataset.key]: +b.dataset.v } }); if (['scale', 'move'].includes(seg.dataset.key)) buildStrip(); else paint();
+    cfg[seg.dataset.key] = +b.dataset.v; send({ set: { [seg.dataset.key]: +b.dataset.v } }); if (['scale', 'move', 'kmode', 'ckey', 'cpick', 'cbass', 'c7'].includes(seg.dataset.key)) buildStrip(); else paint();
   });
   const oct = d => { const r = $('kroot'), v = Math.max(+r.min, Math.min(+r.max, +r.value + 12 * d)); r.value = v; $('krootOut').textContent = noteName(v); cfg.kroot = v; buildStrip(); send({ set: { kroot: v } }); };
   $('octDown').onclick = () => oct(-1); $('octUp').onclick = () => oct(1);
   $('kpos').addEventListener('input', () => buildStrip());
   $('kpos').addEventListener('change', () => send({ set: { kpos: +$('kpos').value / 100 } }));
+  $('cpat').addEventListener('change', () => { cfg.cpat = +$('cpat').value; buildStrip(); send({ set: { cpat: cfg.cpat } }); });
+  $('cdeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; const d = cdegArr(), i = +b.dataset.i; d[i] = (d[i] + 1) % 8; cfg.cdeg = d.join(''); applyCfg({ cdeg: cfg.cdeg }); send({ set: { cdeg: cfg.cdeg } }); });
+  $('restart').onclick = () => { send({ restart: 1 }); aimCi = 0; paint(); };
   $('center').onclick = () => { send({ keyCenter: 1 }); step = nLo(); paint(); };
   $('learnRight').onclick = () => { send({ learnRight: 1 }); $('learnState').textContent = 'Slide your foot to the right now (3 s)…'; };
   $('scrOn').addEventListener('click', () => send({ screen: 1 })); $('scrOff').addEventListener('click', () => send({ screen: 0 }));
@@ -347,6 +429,10 @@
     for (const el of document.querySelectorAll('input[type=range][data-key]')) if (c[el.dataset.key] !== undefined) { el.value = c[el.dataset.key]; $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); }
     for (const seg of document.querySelectorAll('.seg[data-key]')) { const v = String(c[seg.dataset.key]); for (const b of seg.children) b.classList.toggle('on', b.dataset.v === v); }
     if (c.ver) $('ver').textContent = c.ver;
+    if (!$('cpat').options.length) { PATNAMES.forEach((nm, i) => { const o = document.createElement('option'); o.value = i; o.textContent = nm; $('cpat').appendChild(o); });
+      for (let i = 0; i < 8; i++) { const b = document.createElement('button'); b.type = 'button'; b.dataset.i = i; $('cdeg').appendChild(b); } }
+    if (c.cpat !== undefined) $('cpat').value = Math.min(+c.cpat, PATS.length);
+    if (c.cdeg !== undefined) { const d = cdegArr(); for (const b of $('cdeg').children) { const v = d[+b.dataset.i]; b.textContent = v ? v : '–'; b.classList.toggle('on', !!v); } }
     if (c.ssid !== undefined && document.activeElement !== $('ssid')) $('ssid').value = c.ssid;
     paintInts(); buildStrip();
   }
@@ -391,6 +477,7 @@
       if (m.cfg) applyCfg(m.cfg);
       if (m.m) for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; }
       if (m.step !== undefined) step = m.step;
+      if (m.ci !== undefined && m.ci >= 0) aimCi = m.ci;
       if (m.sa !== undefined && +cfg.move) { const v = m.sa, f = Math.min(1, Math.abs(v) / (2 * +$('sthr').value));
         $('saOut').textContent = (v > 0 ? 'right ' : v < 0 ? 'left ' : '') + Math.abs(v).toFixed(2) + ' g';
         const bar = $('saBar'); bar.style.width = (f * 50) + '%'; bar.style.left = v >= 0 ? '50%' : (50 - f * 50) + '%'; bar.style.background = Math.abs(v) > +$('sthr').value ? 'var(--accent)' : 'var(--ok)'; }
@@ -403,11 +490,11 @@
       }
       if (m.key !== undefined) {
         if (m.on) {
-          held = m.notes || [m.key]; paint();
-          log((held.map(noteName).join('+') + '            ').slice(0, 14) + ' vel ' + Math.round(20 + m.v * 107) + '  swivel ' + (m.tilt > 0 ? '+' : '') + m.tilt + '°');
+          held = m.notes || [m.key]; heldChord = m.chord !== undefined ? m.chord : -1; paint();
+          log(((m.chord >= 0 ? m.name : held.map(noteName).join('+')) + '            ').slice(0, 14) + ' vel ' + Math.round(20 + m.v * 107) + '  swivel ' + (m.tilt > 0 ? '+' : '') + m.tilt + '°');
           if (+cfg.out !== 0) phoneOn(held, m.v);
         } else {
-          held = []; paint(); phoneOff(); $('tipfill').style.width = '0';
+          held = []; heldChord = -1; paint(); phoneOff(); $('tipfill').style.width = '0';
           if (m.tip >= 0) log('   released (tipped ' + Math.round(m.tip) + '°)');
         }
       }
