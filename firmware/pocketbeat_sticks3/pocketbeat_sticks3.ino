@@ -79,6 +79,9 @@ struct Cfg {
   float zin = 15.0f;                               // swivel kit: swivel IN (toes left) past this = hats; zdeg is OUT (toes right) = snare
   float zoh = 2.5f;                                // swivel kit: a hat tap harder than this (g) is an open hat, softer is closed
   int zarc = 1;                                    // swivel kit: auto re-centre while the foot rests
+  int loop = 1;                                    // swivel kit: looper on
+  int lbars = 1;                                   // loop length in bars (1, 2, 4)
+  float lheel = 12.0f;                             // heel lift gesture: tipped from rest by more than this (deg)
 } cfg;
 Preferences prefs;
 
@@ -245,6 +248,7 @@ float bwx = 0, bwy = 0, bwz = 0;                  // gyro bias, re-measured when
 float flatTilt = 0;                               // degrees away from flat in any direction
 float qx = 0, qy = 0, qz = 0; bool qInit = false;   // gravity direction tracked with the gyro (instant), corrected slowly by the accelerometer
 #include "pb_clock.h"
+#include "pb_loop.h"
 
 // ---------------- Motion detection ----------------
 // Board taped to the top of the shoe.
@@ -417,8 +421,9 @@ void fireStomp(float p, float now) {
     float rel = -a;   // worn on the right foot: toes turning right (out) = yaw falling
     float vel = constrain(0.5f + 0.5f * ((p - cfg.thr) / (cfg.thr * 3)), 0.0f, 1.0f);
     // in = hats (soft tap closed, hard tap open) and they set the tempo; kick and snare just play on the grid
-    if (rel < -cfg.zin) onHit(p > cfg.zoh ? OHAT : HAT, vel, p, -1, now);
-    else playOnGrid(rel > cfg.zdeg ? SNARE : KICK, vel, p, now);
+    Kind k = rel < -cfg.zin ? (p > cfg.zoh ? OHAT : HAT) : rel > cfg.zdeg ? SNARE : KICK;
+    if (k == HAT || k == OHAT) onHit(k, vel, p, -1, now); else playOnGrid(k, vel, p, now);
+    if (cfg.loop) loopRecord(k, vel, now);
     return;
   }
   if (cfg.snare == 9) {   // Shaker: every shake is a hit; strength sets the velocity (lightest = thr, full at 4x thr)
@@ -595,6 +600,26 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
     else keyLiftSince = 0;
   }
 
+  // ---- looper gestures (swivel kit): the foot tipped from its resting angle = "heel lift" ----
+  if (cfg.snare == 11 && cfg.loop && qInit) {
+    // resting orientation: adopted after the foot has been still for 4 s (so a tilted mount is fine)
+    static float rqx = 0, rqy = 0, rqz = 0; static bool rSet = false; static uint32_t stillSince = 0;
+    if (wm < 8 && fabsf(sqrtf(ax * ax + ay * ay + az * az) - 1.0f) < 0.05f) { if (!stillSince) stillSince = now; } else stillSince = 0;
+    if (!rSet || (stillSince && now - stillSince > 4000)) { rqx = qx; rqy = qy; rqz = qz; rSet = true; if (stillSince) stillSince = now; }
+    float tilt = acosf(constrain(qx * rqx + qy * rqy + qz * rqz, -1.0f, 1.0f)) * 57.2958f;
+    static uint32_t liftStart = 0; static bool liftLong = false;
+    if (!liftStart && tilt > cfg.lheel && now - lastStompT > 200) liftStart = now;
+    if (liftStart && tilt > cfg.lheel - 3 && now - liftStart > 1800 && !liftLong) { liftLong = true; ws.textAll("{\"gesture\":\"erase?\"}"); }
+    if (liftStart && tilt < cfg.lheel - 3) {
+      uint32_t dur = now - liftStart; liftStart = 0; liftLong = false; quietUntil = now + 250;
+      if (dur < 400) { loopPlaying = !loopPlaying; ws.textAll(loopPlaying ? "{\"gesture\":\"play\"}" : "{\"gesture\":\"pause\"}"); }
+      else if (dur < 1800) { loopRec = !loopRec; ws.textAll(loopRec ? "{\"gesture\":\"rec on\"}" : "{\"gesture\":\"rec off\"}"); }
+      else { float rel = -yawDeg; int ki = rel < -cfg.zin ? 2 : rel > cfg.zdeg ? 1 : 0; loopClear(ki); ws.textAll(ki == 2 ? "{\"gesture\":\"hats erased\"}" : ki == 1 ? "{\"gesture\":\"snare erased\"}" : "{\"gesture\":\"kick erased\"}"); }
+      loopSendState();
+    }
+    if (liftStart) { peak = 0; peakT = 0; }   // no taps while the heel is up
+  }
+
   // ---- stop: a violent shake of the foot held for 3 beats stops the hats and the tempo (not in shaker mode) ----
   if (cfg.snare != 9) {
     static uint32_t shakeSince = 0, shakeCalm = 0;
@@ -604,7 +629,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
     float need = clockOn && beatMs > 0 ? 3.0f * beatMs : 1500.0f;
     if (shakeSince && now - shakeSince > need) {
       shakeSince = 0; shakeCalm = 0; quietUntil = now + 700;   // and ignore the foot settling afterwards
-      if (clockOn) stopClock(); pending.on = false; keyOff();
+      if (clockOn) stopClock(); pending.on = false; keyOff(); if (cfg.loop) { loopClear(); loopSendState(); }
       ws.textAll("{\"stopped\":1}");
     }
   } else shaking = false;
@@ -625,8 +650,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[880];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zin\":%.0f,\"zoh\":%.2f,\"zarc\":%d,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zin, cfg.zoh, cfg.zarc, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zin\":%.0f,\"zoh\":%.2f,\"zarc\":%d,\"loop\":%d,\"lbars\":%d,\"lheel\":%.0f,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zin, cfg.zoh, cfg.zarc, cfg.loop, cfg.lbars, cfg.lheel, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -646,6 +671,10 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   if (strstr(s, "\"learnToe\"")) { learnTH = 1; learnN = 0; memset(learnSig, 0, sizeof learnSig); ws.textAll("{\"learn\":\"toe 0/3\"}"); return; }
   if (strstr(s, "\"learnHeel\"")) { learnTH = 2; learnN = 0; memset(learnSig, 0, sizeof learnSig); ws.textAll("{\"learn\":\"heel 0/3\"}"); return; }
   if (strstr(s, "\"setFlat\"")) { setFlat(); return; }
+  if (strstr(s, "\"loopRec\"")) { loopRec = !loopRec; loopSendState(); return; }
+  if (strstr(s, "\"loopPlay\"")) { loopPlaying = !loopPlaying; loopSendState(); return; }
+  if (const char* q = strstr(s, "\"loopClear\":")) { int ki = atoi(q + 12); loopClear(ki); loopSendState(); return; }
+  if (strstr(s, "\"loopState\"")) { loopSendState(); return; }
   if (strstr(s, "\"keyCenter\"")) { yawDeg = cfg.snare == 11 ? 0 : keyMid(); return; }
   // Edges: both must be set (since the last clear) and at least 6 degrees apart before they're used.
   if (strstr(s, "\"keyLo\"") || strstr(s, "\"keyHi\"")) {
@@ -676,6 +705,9 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "zin", &f); if (f) cfg.zin = constrain(v, 3.0f, 60.0f);
   v = jsonNum(s, "zoh", &f); if (f) cfg.zoh = constrain(v, 0.3f, 8.0f);
   v = jsonNum(s, "zarc", &f); if (f) cfg.zarc = (int)v ? 1 : 0;
+  v = jsonNum(s, "loop", &f); if (f) { cfg.loop = (int)v ? 1 : 0; loopClear(); loopSendState(); }
+  v = jsonNum(s, "lbars", &f); if (f) { int b = (int)v; cfg.lbars = b == 2 ? 2 : b == 4 ? 4 : 1; loopClear(); loopSendState(); }
+  v = jsonNum(s, "lheel", &f); if (f) cfg.lheel = constrain(v, 5.0f, 40.0f);
   v = jsonNum(s, "zflip", &f); if (f) cfg.zflip = (int)v ? 1 : 0;
   v = jsonNum(s, "kflat", &f); if (f) cfg.kflat = constrain(v, 3.0f, 40.0f);
   v = jsonNum(s, "kspan", &f); if (f) cfg.kspan = constrain((int)v, 2, 48);
@@ -747,6 +779,7 @@ void setupWeb() {
 }
 
 // ---------------- Display ----------------
+uint32_t loopHash() { uint32_t h = 0; for (int s = 0; s < loopSlots(); s++) for (int k = 0; k < LOOP_KINDS; k++) h = h * 31u + loopVel[s][k]; return h; }
 // ---- Power: hold the side button 3 s to switch off; also switches off after 10 min with no movement and no page open.
 // Press the power button to turn it back on.
 uint32_t lastActive = 0;
@@ -794,7 +827,7 @@ void drawScreen() {
   bool flash = lastHitKind >= 0 && now - lastHitAt < 140;
   int big = flash ? lastHitKind : zone >= 0 ? zone : lastHitKind;
   int bpm = beatMs ? (int)roundf(60000.0f / beatMs) : 0;
-  uint32_t sig = (cfg.snare == 11 ? (int)roundf(yawDeg * 2) * 7u : 0u) ^ (big + 2) * 2654435761u ^ (flash ? 77u : 0) ^ bpm * 40503u ^ (bleConnected ? 3u : 0) ^ battPct * 1009u ^ (WiFi.status() == WL_CONNECTED ? 4099u : 0u) ^ cfg.snare * 131u ^ (calibrating ? 5u : 0) ^ (cfg.cal ? 11u : 0) ^ (cfg.lcal ? 13u : 0) ^ (cfg.rcal ? 17u : 0);
+  uint32_t sig = (cfg.snare == 11 && cfg.loop ? (uint32_t)(loopLastCounter + 1) * 2246822519u ^ (loopRec ? 5u : 0u) ^ (loopPlaying ? 9u : 0u) ^ loopHash() : 0u) ^ (cfg.snare == 11 ? (int)roundf(yawDeg * 2) * 7u : 0u) ^ (big + 2) * 2654435761u ^ (flash ? 77u : 0) ^ bpm * 40503u ^ (bleConnected ? 3u : 0) ^ battPct * 1009u ^ (WiFi.status() == WL_CONNECTED ? 4099u : 0u) ^ cfg.snare * 131u ^ (calibrating ? 5u : 0) ^ (cfg.cal ? 11u : 0) ^ (cfg.lcal ? 13u : 0) ^ (cfg.rcal ? 17u : 0);
   if (sig == lastSig) return; lastSig = sig;
   uint16_t col = big >= 0 ? kindColor(big) : TFT_WHITE;
   d.fillScreen(flash ? col : TFT_BLACK);
@@ -816,6 +849,21 @@ void drawScreen() {
   // what each gesture does / status
   d.setFont(&fonts::Font0); d.setTextSize(1); d.setTextDatum(bottom_left); d.setTextColor(dim);
   const char* hint = calibrating ? "swing foot 3x..." : cfg.snare == 10 ? "keys: A = centre" : cfg.snare == 11 ? "in=hats  mid=kick  out=snare" : cfg.snare == 9 ? (cfg.shk == 2 ? "tambourine" : cfg.shk == 1 ? "maracas" : "shaker") : cfg.snare == 7 ? (cfg.lcal && cfg.rcal ? "toe=kick heel=snare" : "SET TOE/HEEL") : cfg.snare == 8 ? (cfg.lcal && cfg.rcal ? "heel=kick toe=snare" : "SET TOE/HEEL") : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A";
+  if (cfg.snare == 11 && cfg.loop && !calibrating) {   // loop grid: hats / kick / snare rows, playhead
+    int n = loopSlots(), gx0 = 4, gw = W - 8, gy = H - 100, rh = 9;
+    int32_t cur = loopLastCounter >= 0 ? loopSlotOf(loopLastCounter) : -1;
+    for (int row = 0; row < 3; row++) {
+      int ki = row == 0 ? 2 : row == 1 ? 0 : 1; uint16_t col = row == 0 ? kindColor(HAT) : row == 1 ? kindColor(KICK) : kindColor(SNARE);
+      for (int i = 0; i < n; i++) {
+        int xa = gx0 + i * gw / n, xb = gx0 + (i + 1) * gw / n - 1;
+        bool on = loopVel[i][ki] || (ki == 2 && loopVel[i][3]);
+        d.fillRect(xa, gy + row * (rh + 2), max(1, xb - xa), rh, on ? (ki == 2 && !loopVel[i][2] ? kindColor(OHAT) : col) : (i % 4 == 0 ? 0x2104 : 0x1082));
+        if (i == cur) d.drawRect(xa, gy + row * (rh + 2), max(1, xb - xa), rh, TFT_WHITE);
+      }
+    }
+    d.setFont(&fonts::Font0); d.setTextDatum(top_right); d.setTextColor(loopRec ? TFT_RED : dim); d.drawString(loopRec ? "REC" : "rec off", W - 4, gy - 10);
+    d.setTextDatum(top_left); d.setTextColor(dim); d.drawString(loopPlaying ? "playing" : "paused", 4, gy - 10);
+  }
   if (cfg.snare == 11 && !calibrating) {   // swivel kit: zone bar (hats | kick | snare) with the swivel needle
     const float ZR = 60; int bx = 4, bw = W - 8, by = H - 62, bh = 34;
     float rel = constrain(-yawDeg, -ZR, ZR);
@@ -900,6 +948,7 @@ void loop() {
     else { screenBufFree(); if (r == 3) { if (joinHomeWifi()) slots::installFromGithub(reqId, true, false); } else doOtaFromGithub(); screenBufRestore(); } }
   if (pending.on && now >= pending.at) { pending.on = false; hit(pending.k, pending.vel, pending.g, pending.sw, pending.lift); }
   clockTick(now);
+  if (cfg.snare == 11 && cfg.loop) loopTick(now);
 
   // meter stream to the page, ~40 Hz, a dozen samples per message
   if (ws.count() && nMeter >= 12 && now - lastMeterSend > 25) {

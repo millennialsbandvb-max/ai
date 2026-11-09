@@ -14,7 +14,10 @@ float gapBuf[4]; int nGaps = 0;        // recent raw gaps between hits (ms), new
 int hitsSinceStart = 0;
 bool locked = false; int lockHits = 0; float countStart = 0;   // Locked tempo: count-in hits so far, first count-in hit, and whether the tempo is held
 const int COUNT_IN = 8;
-float lastManualHatMs = -1e9; int hatRun = 0;   // (declared extern in the sketch)   // hand-played hats (swivel kit): auto hats step aside, 6 in a row re-set the tempo
+float lastManualHatMs = -1e9; int hatRun = 0;   // (declared extern in the sketch)
+// looper hooks (pb_loop.h, included after this file)
+void loopBackfillHats(float now); void loopNoteHatTime(float t, bool open); bool loopHasContent(); extern int32_t loopLastCounter;
+static bool loopMode() { return cfg.loop && cfg.snare == 11; }   // hand-played hats (swivel kit): auto hats step aside, 6 in a row re-set the tempo
 
 static float foldBeat(float ms) {      // put a gap into a normal beat range (70-160 bpm)
   if (ms <= 0) return 0;
@@ -40,11 +43,12 @@ void startClock(float anchor, float now) {
   while (lastEighth + e <= now) { lastEighth += e; eighthIdx++; }
   nextEighth = lastEighth + e; drift = 0; offGrid = 0; clockOn = true;
 }
-void stopClock() { clockOn = false; lastHitMs = 0; firstHitMs = 0; beatMs = 0; offGrid = 0; nGaps = 0; locked = false; lockHits = 0; hatRun = 0; ws.textAll("{\"bpm\":0}"); }
+void stopClock() { loopLastCounter = -1; clockOn = false; lastHitMs = 0; firstHitMs = 0; beatMs = 0; offGrid = 0; nGaps = 0; locked = false; lockHits = 0; hatRun = 0; ws.textAll("{\"bpm\":0}"); }
 
 void clockTick(float now) {
   if (!clockOn) return;
   // Follow mode: stop after about two and a half beats of silence. Locked tempo: after two bars.
+  if (loopMode() && loopHasContent()) lastHitMs = now;   // a running loop keeps the clock alive until you stop it
   if (now - lastHitMs > beatMs * (cfg.tlock ? 8.0f : 2.5f)) { stopClock(); return; }
   float e = beatMs / 2;
   while (nextEighth <= now) {
@@ -53,6 +57,7 @@ void clockTick(float now) {
     bool play = cfg.hat == 2 || (cfg.hat == 1 && onBeat);
     // never two hats closer than ~60% of an 8th (re-locking the grid can otherwise double one up)
     if (now - lastManualHatMs < 2.0f * beatMs) play = false;   // you're playing the hats yourself: auto hats wait
+    if (loopMode()) play = false;                                 // loop mode: the hats come from the loop
     if (play && now - nextEighth < 40 && nextEighth - lastHatPlayed > 0.6f * e) {
       hit(cfg.ohat && hatIsOpen ? OHAT : HAT, onBeat ? 0.7f : 0.45f);   // toe raised past the angle: open hat
       lastHatPlayed = nextEighth;
@@ -90,6 +95,7 @@ void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
     // hats played by foot: a run of 6 evenly spaced ones re-sets the tempo to exactly what was played
     if (lastHitMs && now - lastHitMs > 150 && now - lastHitMs < 2000) hatRun++; else hatRun = 1;
     lastManualHatMs = now;
+    if (loopMode()) loopNoteHatTime(now, k == OHAT);
   }
   if (cfg.tlock) {
     if (locked && clockOn) {
@@ -128,7 +134,7 @@ void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
     float dt = now - lastHitMs;
     if (dt > 150 && dt < 2000) pushGap(dt);
     if (!beatMs) {
-      if (dt > 150 && dt < 2000) { beatMs = foldBeat(dt); startClock(lastHitMs, now); hitsSinceStart = 0; }   // second hit starts the clock
+      if (dt > 150 && dt < 2000) { beatMs = foldBeat(dt); startClock(lastHitMs, now); hitsSinceStart = 0; if (loopMode()) loopBackfillHats(now); }   // second hit starts the clock
       else { firstHitMs = now; nGaps = 0; }
     } else {
       // Third hit: now there are two gaps, so re-read the tempo from both (a first gap of a beat and a
@@ -139,7 +145,7 @@ void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
       }
       if (manualHat && hatRun >= 6 && nGaps >= 4) {              // six hats in a row: take the tempo straight from them
         float B = solveBeat(gapBuf, nGaps);
-        if (B) { beatMs += 0.6f * (B - beatMs); startClock(now, now); }
+        if (B) { beatMs += 0.6f * (B - beatMs); startClock(now, now); if (loopMode()) loopBackfillHats(now); }
       }
       float e = beatMs / 2;
       int n = (int)roundf(dt / e);                               // gap in 8th notes
