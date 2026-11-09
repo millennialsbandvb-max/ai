@@ -453,26 +453,38 @@ float cursorFrac() {
 // Colour: each pitch has a fixed colour (see PITCH_RGB). The whole screen
 // takes the colour of the note you're on: dim between notes, vivid on the note's centre, full while it plays.
 // Naturals are the rainbow, ROYGBIV: C red, D orange, E yellow, F green, G blue, A indigo, B violet.
-// Sharps/flats follow one rule: the mix of the two naturals they sit between, darkened to 45%, so they read
-// like the black keys of a piano (C# = dark red-orange, D# = dark amber, F# = dark teal, G# = dark blue-indigo,
-// A# = dark purple).
+// Sharps/flats follow one rule: bold diagonal stripes of the two naturals they sit between (C# = red/orange
+// stripes, F# = green/blue ...), so they stand out from the solid naturals and still say where they are.
 static const uint32_t PITCH_RGB[12] = {
   0xE8202A,  // C  red
-  0x6E2709,  // C# dark mix of C + D
+  0xF45615,  // C# C + D (stripes; this mix only for small text)
   0xFF8C00,  // D  orange
-  0x735206,  // D# dark mix of D + E
+  0xFFB70D,  // D# D + E (stripes; this mix only for small text)
   0xFFE21A,  // E  yellow
   0x1DB233,  // F  green
-  0x0E3D45,  // F# dark mix of F + G
+  0x1E8699,  // F# F + G (stripes; this mix only for small text)
   0x1F5BFF,  // G  blue
-  0x1B1F62,  // G# dark mix of G + A
+  0x3C44DA,  // G# G + A (stripes; this mix only for small text)
   0x5A2DB5,  // A  indigo
-  0x3D1B5C,  // A# dark mix of A + B
+  0x873CCE,  // A# A + B (stripes; this mix only for small text)
   0xB44CE6,  // B  violet
 };
 uint16_t pitchColor(int note, float bright) {   // bright 0..1
   uint32_t c = PITCH_RGB[((note % 12) + 12) % 12]; bright = constrain(bright, 0.0f, 1.0f);
   return M5.Display.color565((uint8_t)(((c >> 16) & 255) * bright), (uint8_t)(((c >> 8) & 255) * bright), (uint8_t)((c & 255) * bright));
+}
+bool isSharp(int note) { int pc = ((note % 12) + 12) % 12; return pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10; }
+// fill an area in a note's colour: naturals solid, sharps/flats as 45-degree stripes of the two neighbouring naturals
+void fillPitch(M5Canvas& d, int x, int y, int w, int h, int note, int s) {
+  if (!isSharp(note)) { d.fillRect(x, y, w, h, pitchColor(note, 1)); return; }
+  d.fillRect(x, y, w, h, pitchColor(note - 1, 1));
+  uint16_t hi = pitchColor(note + 1, 1);
+  d.setClipRect(x, y, w, h);
+  for (int k = -h; k < w; k += 2 * s) {   // band between the lines through (x+k, y+h)->(x+k+h, y) and s further right
+    d.fillTriangle(x + k, y + h, x + k + s, y + h, x + k + s + h, y, hi);
+    d.fillTriangle(x + k, y + h, x + k + s + h, y, x + k + h, y, hi);
+  }
+  d.clearClipRect();
 }
 // white text with a black border
 void drawOutlined(M5Canvas& d, const char* t, int x, int y, int b, uint16_t fill) {
@@ -492,7 +504,7 @@ void drawScreen() {
   uint32_t sig = shown * 2654435761u ^ (rootHeld + 1) * 40503u ^ cx * 97u ^ (int)(close * 10) * 50021u ^ cfg.ints * 7919u ^ cfg.scale * 131u ^ cfg.kroot * 31337u ^ cfg.kspan * 613u ^ (bleConnected ? 1 : 0) * 2u ^ battPct * 1009u ^ (WiFi.status() == WL_CONNECTED ? 4099u : 0u);
   if (sig == lastSig) return; lastSig = sig;
   // whole screen in the note's colour
-  d.fillScreen(pitchColor(shown, 1));   // solid colour, no fading
+  fillPitch(d, 0, 0, W, H, shown, 18);   // whole screen in the note colour (sharps striped)
   // scale + key
   d.setFont(&fonts::Font2); d.setTextSize(1); d.setTextDatum(top_center);
   char key[8]; noteName(cfg.kroot, key); key[strcspn(key, "0123456789-")] = 0;
@@ -515,7 +527,7 @@ void drawScreen() {
   { int n = cfg.kspan + 1, rx = 3, rw = W - 6, ry = ty + 5, rh = 14;
     for (int i = 0; i < n; i++) {
       int note = stepToNote(i), xa = rx + i * rw / n, xb = rx + (i + 1) * rw / n - 1;
-      d.fillRect(xa, ry, max(1, xb - xa), NOTE_NAMES[((note % 12) + 12) % 12][1] == '#' ? rh * 2 / 3 : rh, pitchColor(note, 1));   // sharps shorter, like black keys
+      fillPitch(d, xa, ry, max(1, xb - xa), rh, note, 3);   // sharps striped
       for (int q = 0; q < nHeld; q++) if (held[q] == note) d.drawRect(xa, ry, max(1, xb - xa), rh, TFT_WHITE);
     }
     int mk = rx + (int)((xs + 0.5f) / n * rw);
@@ -533,7 +545,7 @@ void drawScreen() {
   // scale: ticks every 1/10 of a note, centre zone glows in the note's colour when you're close
   uint16_t nc = pitchColor(shown, 1);
   d.fillRect(mx - half, my - 1, half * 2, 3, 0x4208);
-  d.fillRect(mx - half / 5, my - 8, half * 2 / 5, 17, close > 0.8f || rootHeld >= 0 ? nc : 0x2104);
+  if (close > 0.8f || rootHeld >= 0) fillPitch(d, mx - half / 5, my - 8, half * 2 / 5, 17, shown, 5); else d.fillRect(mx - half / 5, my - 8, half * 2 / 5, 17, 0x2104);
   for (int t = -5; t <= 5; t++) { int x = mx + t * half / 5; int hgt = t == 0 ? 12 : (t % 5 == 0 ? 10 : 5); d.fillRect(x, my - hgt, 1, hgt * 2 + 1, t == 0 ? TFT_WHITE : TFT_LIGHTGREY); }
   int nx = mx + (int)(off * 2 * half);
   d.fillTriangle(nx - 6, my - 18, nx + 6, my - 18, nx, my - 6, TFT_WHITE);
