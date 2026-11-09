@@ -59,6 +59,7 @@ struct Cfg {
   float kpos = 0.5f;       // where straight-ahead (the centre note) sits: share of the total that is to the left
   int cver = 0;            // settings layout version (1 = centre-note range, 2 = separate left/right note width)
   float kdegR = 4.0f;      // degrees per note on the right (higher) side; kdeg is the left (lower) side
+  int nudge = 1;           // 1: swivelling (or sliding) while a note holds moves it to the new note
 } cfg;
 Preferences prefs;
 // Home Wi-Fi is also kept in a shared "wifi" store, so PocketBeat and Footboard can each use it after a switch.
@@ -141,7 +142,9 @@ void notesOff() {
   char b[64]; snprintf(b, sizeof b, "{\"key\":%d,\"on\":0,\"tip\":%.0f}", rootHeld, keyTip); ws.textAll(b);
   rootHeld = -1; nHeld = 0;
 }
+float heldVel = 0.6f;   // strength of the tap that started the held note (nudged notes reuse it)
 void notesOn(int root, float vel, float swivel) {
+  heldVel = vel;
   if (rootHeld >= 0) { keyTip = -1; notesOff(); }
   rootHeld = root; nHeld = 0;
   held[nHeld++] = root;
@@ -270,6 +273,18 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
     else keyLiftSince = 0;
   } else flatTilt = 0;
 
+  // nudge: while a note holds, moving onto another note switches to it (same strength, same release reference).
+  // It has to be well inside the new note so it doesn't flicker on the border.
+  if (rootHeld >= 0 && cfg.nudge && now - keyOnAt > 150) {
+    int a = aimNote();
+    float xs = rangeFrac(yawDeg) * cfg.kspan, cl = 1.0f - 2.0f * fabsf(xs - roundf(xs));
+    if (a != rootHeld && (cfg.move || cl > 0.4f)) {
+      uint32_t on = keyOnAt; float rx0 = keyQx, ry0 = keyQy, rz0 = keyQz;
+      notesOn(a, heldVel, cfg.move ? slideStep : yawDeg);
+      keyOnAt = on; keyQx = rx0; keyQy = ry0; keyQz = rz0;
+    }
+  }
+
   // tap: an impact spike, played 35 ms after it starts (or when it ends) at its peak strength
   if (mag > cfg.thr) {
     if (now - lastTapT > (uint32_t)max(cfg.gap, 120)) {
@@ -290,8 +305,8 @@ void setScale(int ns) {
 }
 void sendCfg(AsyncWebSocketClient* c) {
   char b[600];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"nLo\":%d,\"ktot\":%.0f,\"kpos\":%.2f,\"kdeg\":%.1f,\"kdegR\":%.1f,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"move\":%d,\"sthr\":%.2f,\"scm\":%.1f,\"rSet\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, nLo(), cfg.ktot, cfg.kpos, cfg.kdeg, cfg.kdegR, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, cfg.move, cfg.sthr, cfg.scm, cfg.rSet ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"nLo\":%d,\"ktot\":%.0f,\"kpos\":%.2f,\"kdeg\":%.1f,\"kdegR\":%.1f,\"nudge\":%d,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"move\":%d,\"sthr\":%.2f,\"scm\":%.1f,\"rSet\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, nLo(), cfg.ktot, cfg.kpos, cfg.kdeg, cfg.kdegR, cfg.nudge, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, cfg.move, cfg.sthr, cfg.scm, cfg.rSet ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 float jsonNum(const char* s, const char* key, bool* found) {
@@ -321,6 +336,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "kroot", &f); if (f) { cfg.kroot = constrain((int)v, 24, 96); keyTip = -1; notesOff(); }
   v = jsonNum(s, "kdeg", &f); if (f) cfg.kdeg = constrain(v, 1.0f, 30.0f);
   v = jsonNum(s, "kdegR", &f); if (f) cfg.kdegR = constrain(v, 1.0f, 30.0f);
+  v = jsonNum(s, "nudge", &f); if (f) cfg.nudge = (int)v ? 1 : 0;
   v = jsonNum(s, "ktot", &f); if (f) cfg.ktot = constrain(v, 5.0f, 180.0f);
   v = jsonNum(s, "kpos", &f); if (f) cfg.kpos = constrain(v, 0.0f, 1.0f);
   updateSpan();
