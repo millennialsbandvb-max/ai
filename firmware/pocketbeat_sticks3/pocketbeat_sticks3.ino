@@ -10,6 +10,7 @@
 
 #include <M5Unified.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <Preferences.h>
@@ -111,6 +112,7 @@ void loadCfg() {
 }
 
 volatile int otaRequest = 0;
+volatile bool wifiReq = false;   // page saved new home Wi-Fi: (re)join it
 volatile int screenReq = -1;   // from the page: 0 = screen off, 1 = on   // 1 = check+update from GitHub (run from loop, not from the websocket task)
 
 // ---------------- Outputs ----------------
@@ -637,6 +639,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }
   if (const char* q = strstr(s, "\"ssid\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.ssid) - 1); memcpy(cfg.ssid, q, n); cfg.ssid[n] = 0; } }
   if (const char* q = strstr(s, "\"pass\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.pass) - 1); memcpy(cfg.pass, q, n); cfg.pass[n] = 0; } }
+  if (strstr(s, "\"ssid\":\"")) wifiReq = true;
   float v;
   v = jsonNum(s, "thr", &f); if (f) cfg.thr = v;
   v = jsonNum(s, "sthr", &f); if (f) cfg.sthr = v;
@@ -673,6 +676,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
 void otaStatus(const char* msg) { char b[160]; snprintf(b, sizeof b, "{\"ota\":\"%s\"}", msg); ws.textAll(b); }
 bool joinHomeWifi() {
   if (!cfg.ssid[0]) { otaStatus("No home Wi-Fi set. Enter it below first."); return false; }
+  if (WiFi.status() == WL_CONNECTED) return true;   // already on it (normal case now)
   WiFi.mode(WIFI_AP_STA);
   WiFi.begin(cfg.ssid, cfg.pass);
   uint32_t t0 = millis();
@@ -723,7 +727,9 @@ void handleUpload(AsyncWebServerRequest* r, const String& filename, size_t index
 }
 
 void setupWeb() {
-  WiFi.mode(WIFI_AP);
+  // Own network "PocketBeat" is always there; the board also joins your Wi-Fi (or phone hotspot) when one is saved,
+  // so the phone can stay on it and open http://pocketbeat.local
+  WiFi.mode(WIFI_AP_STA); WiFi.setAutoReconnect(true);
   WiFi.softAP("PocketBeat");   // open network; the board has nothing worth protecting
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
@@ -745,6 +751,7 @@ void setupWeb() {
   }, handleUpload);
   server.onNotFound([](AsyncWebServerRequest* r) { r->redirect("/"); });  // captive-portal style
   server.begin();
+  if (cfg.ssid[0]) WiFi.begin(cfg.ssid, cfg.pass);
 }
 
 // ---------------- Display ----------------
@@ -795,7 +802,7 @@ void drawScreen() {
   bool flash = lastHitKind >= 0 && now - lastHitAt < 140;
   int big = flash ? lastHitKind : zone >= 0 ? zone : lastHitKind;
   int bpm = beatMs ? (int)roundf(60000.0f / beatMs) : 0;
-  uint32_t sig = (big + 2) * 2654435761u ^ (flash ? 77u : 0) ^ bpm * 40503u ^ (bleConnected ? 3u : 0) ^ battPct * 1009u ^ WiFi.softAPgetStationNum() * 4099u ^ cfg.snare * 131u ^ (calibrating ? 5u : 0) ^ (cfg.cal ? 11u : 0) ^ (cfg.lcal ? 13u : 0) ^ (cfg.rcal ? 17u : 0);
+  uint32_t sig = (big + 2) * 2654435761u ^ (flash ? 77u : 0) ^ bpm * 40503u ^ (bleConnected ? 3u : 0) ^ battPct * 1009u ^ (WiFi.status() == WL_CONNECTED ? 4099u : 0u) ^ cfg.snare * 131u ^ (calibrating ? 5u : 0) ^ (cfg.cal ? 11u : 0) ^ (cfg.lcal ? 13u : 0) ^ (cfg.rcal ? 17u : 0);
   if (sig == lastSig) return; lastSig = sig;
   uint16_t col = big >= 0 ? kindColor(big) : TFT_WHITE;
   d.fillScreen(flash ? col : TFT_BLACK);
@@ -824,7 +831,7 @@ void drawScreen() {
     d.setTextColor(flash ? TFT_BLACK : kindColor(SNARE)); d.drawString("out = snare", 12, H - 20);
     d.setFont(&fonts::Font0); d.setTextColor(dim);
   } else d.drawString(hint, 12, H - 14);
-  snprintf(t, sizeof t, "BLE %s  WiFi %d", bleConnected ? "on" : "--", WiFi.softAPgetStationNum()); d.drawString(t, 12, H - 3);
+  snprintf(t, sizeof t, "BLE %s  WiFi %s", bleConnected ? "on" : "--", WiFi.status() == WL_CONNECTED ? "ok" : "--"); d.drawString(t, 12, H - 3);
   d.pushSprite(0, 0);
 }
 
@@ -880,7 +887,14 @@ void loop() {
   if (M5.Imu.update() && M5.Imu.getAccel(&ax, &ay, &az)) { M5.Imu.getGyro(&wx, &wy, &wz); processMotion(ax, ay, az, wx, wy, wz, now); }
   powerCheck(now, wx, wy, wz);
 
-  if (otaRequest) { int r = otaRequest; otaRequest = 0; screenBufFree(); if (r == 2) doOtaFromGithub(OTHER_URL, OTHER_VER_URL, true); else doOtaFromGithub(OTA_URL, OTA_VER_URL, false); screenBufRestore(); WiFi.mode(WIFI_AP); }
+  if (wifiReq) { wifiReq = false; WiFi.disconnect(); if (cfg.ssid[0]) WiFi.begin(cfg.ssid, cfg.pass); }
+  { static bool mdnsUp = false; static uint32_t lastNet = 0;
+    bool up = WiFi.status() == WL_CONNECTED;
+    if (up && !mdnsUp) { mdnsUp = MDNS.begin("pocketbeat"); if (mdnsUp) MDNS.addService("http", "tcp", 80); }
+    if (!up && mdnsUp) { MDNS.end(); mdnsUp = false; }
+    if (ws.count() && now - lastNet > 3000) { lastNet = now; char b[120];
+      snprintf(b, sizeof b, "{\"net\":\"%s\",\"host\":\"pocketbeat.local\",\"wifi\":\"%s\"}", up ? WiFi.localIP().toString().c_str() : "", up ? cfg.ssid : ""); ws.textAll(b); } }
+  if (otaRequest) { int r = otaRequest; otaRequest = 0; screenBufFree(); if (r == 2) doOtaFromGithub(OTHER_URL, OTHER_VER_URL, true); else doOtaFromGithub(OTA_URL, OTA_VER_URL, false); screenBufRestore(); }
   if (pending.on && now >= pending.at) { pending.on = false; hit(pending.k, pending.vel, pending.g, pending.sw, pending.lift); }
   clockTick(now);
 

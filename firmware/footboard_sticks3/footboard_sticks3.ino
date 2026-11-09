@@ -11,6 +11,7 @@
 
 #include <M5Unified.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <Preferences.h>
@@ -79,6 +80,7 @@ static const char* NOTE_NAMES[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "
 void noteName(int n, char* out) { sprintf(out, "%s%d", NOTE_NAMES[((n % 12) + 12) % 12], n / 12 - 1); }
 
 volatile int otaRequest = 0;
+volatile bool wifiReq = false;   // page saved new home Wi-Fi: (re)join it
 volatile int screenReq = -1;   // from the page: 0 = screen off, 1 = on
 BLEMIDI_CREATE_INSTANCE("Footboard", MIDI);
 AsyncWebServer server(80);
@@ -304,6 +306,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }
   if (const char* q = strstr(s, "\"ssid\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t m = min((size_t)(e - q), sizeof(cfg.ssid) - 1); memcpy(cfg.ssid, q, m); cfg.ssid[m] = 0; } }
   if (const char* q = strstr(s, "\"pass\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t m = min((size_t)(e - q), sizeof(cfg.pass) - 1); memcpy(cfg.pass, q, m); cfg.pass[m] = 0; } }
+  if (strstr(s, "\"ssid\":\"")) wifiReq = true;
   float v;
   v = jsonNum(s, "thr", &f); if (f) cfg.thr = constrain(v, 0.05f, 8.0f);
   v = jsonNum(s, "gap", &f); if (f) cfg.gap = constrain((int)v, 60, 600);
@@ -333,6 +336,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
 void otaStatus(const char* msg) { char b[160]; snprintf(b, sizeof b, "{\"ota\":\"%s\"}", msg); ws.textAll(b); }
 bool joinHomeWifi() {
   if (!cfg.ssid[0]) { otaStatus("No home Wi-Fi set. Enter it below first."); return false; }
+  if (WiFi.status() == WL_CONNECTED) return true;   // already on it (normal case now)
   WiFi.mode(WIFI_AP_STA); WiFi.begin(cfg.ssid, cfg.pass);
   uint32_t t0 = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) { delay(200); M5.update(); }
@@ -381,7 +385,9 @@ void handleUpload(AsyncWebServerRequest* r, const String& filename, size_t index
   if (final) { if (Update.end(true)) otaStatus("Upload installed. Restarting…"); else otaStatus("Upload failed (is it the .app.bin?)."); }
 }
 void setupWeb() {
-  WiFi.mode(WIFI_AP);
+  // Own network "Footboard" is always there; the board also joins your Wi-Fi (or phone hotspot) when one is saved,
+  // so the phone can stay on it and open http://footboard.local
+  WiFi.mode(WIFI_AP_STA); WiFi.setAutoReconnect(true);
   WiFi.softAP("Footboard");
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
@@ -395,6 +401,7 @@ void setupWeb() {
   }, handleUpload);
   server.onNotFound([](AsyncWebServerRequest* r) { r->redirect("/"); });
   server.begin();
+  if (cfg.ssid[0]) WiFi.begin(cfg.ssid, cfg.pass);
 }
 
 // ---------------- Screen ----------------
@@ -443,7 +450,7 @@ void drawScreen() {
   int shown = rootHeld >= 0 ? rootHeld : aimNote();
   int cxp = (int)(cursorFrac() * (W - 5));
   // only redraw when something visible changed, so the motion loop isn't held up
-  uint32_t sig = shown * 2654435761u ^ (rootHeld + 1) * 40503u ^ cxp * 97u ^ cfg.ints * 7919u ^ cfg.scale * 131u ^ cfg.kroot * 31337u ^ cfg.kspan * 613u ^ (bleConnected ? 1 : 0) * 2u ^ battPct * 1009u ^ WiFi.softAPgetStationNum() * 4099u;
+  uint32_t sig = shown * 2654435761u ^ (rootHeld + 1) * 40503u ^ cxp * 97u ^ cfg.ints * 7919u ^ cfg.scale * 131u ^ cfg.kroot * 31337u ^ cfg.kspan * 613u ^ (bleConnected ? 1 : 0) * 2u ^ battPct * 1009u ^ (WiFi.status() == WL_CONNECTED ? 4099u : 0u);
   if (sig == lastSig) return; lastSig = sig;
   d.fillScreen(TFT_BLACK);
   // scale + key
@@ -480,7 +487,7 @@ void drawScreen() {
   d.setTextDatum(top_right); d.drawString(hi, W - 2, y0 + sh + 4);
   // status
   d.setTextDatum(bottom_center);
-  char st[40]; snprintf(st, sizeof st, "BLE %s  WiFi %d  %d%%", bleConnected ? "on" : "--", WiFi.softAPgetStationNum(), battPct);
+  char st[40]; snprintf(st, sizeof st, "BLE %s  WiFi %s  %d%%", bleConnected ? "on" : "--", WiFi.status() == WL_CONNECTED ? "ok" : "--", battPct);
   d.drawString(st, W / 2, H - 2);
   d.pushSprite(0, 0);
 }
@@ -531,7 +538,14 @@ void loop() {
   if (M5.Imu.update() && M5.Imu.getAccel(&ax, &ay, &az)) { M5.Imu.getGyro(&wx, &wy, &wz); processMotion(ax, ay, az, wx, wy, wz, now); }
   powerCheck(now, wx, wy, wz);
 
-  if (otaRequest) { int r = otaRequest; otaRequest = 0; screenBufFree(); if (r == 2) doOtaFromGithub(OTHER_URL, OTHER_VER_URL, true); else doOtaFromGithub(OTA_URL, OTA_VER_URL, false); screenBufRestore(); WiFi.mode(WIFI_AP); }
+  if (wifiReq) { wifiReq = false; WiFi.disconnect(); if (cfg.ssid[0]) WiFi.begin(cfg.ssid, cfg.pass); }
+  { static bool mdnsUp = false; static uint32_t lastNet = 0;
+    bool up = WiFi.status() == WL_CONNECTED;
+    if (up && !mdnsUp) { mdnsUp = MDNS.begin("footboard"); if (mdnsUp) MDNS.addService("http", "tcp", 80); }
+    if (!up && mdnsUp) { MDNS.end(); mdnsUp = false; }
+    if (ws.count() && now - lastNet > 3000) { lastNet = now; char b[120];
+      snprintf(b, sizeof b, "{\"net\":\"%s\",\"host\":\"footboard.local\",\"wifi\":\"%s\"}", up ? WiFi.localIP().toString().c_str() : "", up ? cfg.ssid : ""); ws.textAll(b); } }
+  if (otaRequest) { int r = otaRequest; otaRequest = 0; screenBufFree(); if (r == 2) doOtaFromGithub(OTHER_URL, OTHER_VER_URL, true); else doOtaFromGithub(OTA_URL, OTA_VER_URL, false); screenBufRestore(); }
 
   if (ws.count() && nMeter >= 12 && now - lastMeterSend > 25) {
     char b[240]; int p = snprintf(b, sizeof b, "{\"m\":[");

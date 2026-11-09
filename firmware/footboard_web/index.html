@@ -198,6 +198,7 @@
   <div class="row"><button type="button" id="saveWifi">Save Wi-Fi</button><button type="button" id="otaBtn" class="go">Check for update</button></div>
   <div class="row"><button type="button" id="switchFw">Switch to PocketBeat drums</button></div>
   <div class="row"><input type="file" id="fwFile" accept=".bin" hidden><button type="button" id="pickFw">Upload a .app.bin from this phone</button></div>
+  <p class="hint" id="netInfo"><b>Skip the Wi-Fi swapping:</b> save your home Wi-Fi (or your phone's hotspot) below. The board joins it, and from then on you can stay on that network and open the address shown here.</p>
   <p class="hint" id="otaMsg">Check for update joins your home Wi-Fi, gets the newest Footboard build and installs it (about a minute). "Switch to PocketBeat drums" installs the drum firmware the same way; its settings are kept.</p>
 </section>
 <div class="foot"><span>Board battery <b id="batt">—</b></span><span>Front = center · hold front 1 s = screen off · side = next scale · hold side 3 s = power off</span></div>
@@ -358,6 +359,7 @@
       }
       if (m.edge) $('edgeState').textContent = (m.edge === 'lo' ? 'Low end set' : 'High end set') + (+cfg.kEdge ? '' : ' · now set the other end');
       if (m.batt !== undefined) $('batt').textContent = m.batt + '%';
+      if (m.net !== undefined) $('netInfo').innerHTML = m.net ? '<b>On your Wi-Fi (' + m.wifi + '):</b> stay on it and open <b>http://' + m.host + '</b> (or http://' + m.net + '). Bookmark it.' : '<b>Skip the Wi-Fi swapping:</b> save your home Wi-Fi (or your phone\'s hotspot) below. The board joins it, and from then on you can stay on that network and open the address shown here.';
       if (m.ota) $('otaMsg').textContent = m.ota;
     };
   }
