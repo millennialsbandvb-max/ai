@@ -58,6 +58,8 @@ struct Cfg {
   float kdegR = 4.0f;      // degrees per note on the right (higher) side; kdeg is the left (lower) side
   int nudge = 1;           // 1: swivelling (or sliding) while a note holds moves it to the new note
   int arc = 1;             // 1: auto re-centre: while the foot rests, slowly treat its position as straight ahead
+  float rqx = 0, rqy = 0, rqz = 1; bool restSet = false;   // "resting position": gravity direction with the foot down, however the board is tilted
+  int relRef = 1;          // release is measured from: 0 = where the foot was when you tapped, 1 = the resting position
   // chord mode
   int kmode = 0;           // 0 single notes, 1 chord progression
   int ckey = 0;            // key quality: 0 major, 1 minor (the key's tonic is kroot, the centre note)
@@ -228,7 +230,7 @@ float qx = 0, qy = 0, qz = 0; bool qInit = false;   // gravity direction, tracke
 float gx = 0, gy = 0, gz = 0;                        // slow gravity estimate for the impact detector
 float bwx = 0, bwy = 0, bwz = 0;                     // gyro bias, re-learned whenever the foot is still
 float yawDeg = 0;                                    // swivel from centre (deg)
-float flatTilt = 0;                                  // how far the foot is tipped from where the last note started
+float flatTilt = 0, restTilt = 0;                                  // how far the foot is tipped from where the last note started
 const int GH = 256; uint32_t hT[GH]; float hY[GH]; float hQ[GH][3]; int16_t hS[GH]; int hI = 0;   // recent swivel / slide step / orientation
 // slide tracking: a sideways push starts a slide; speed and distance are added up until the foot is still again
 int slState = 0; uint32_t slT0 = 0, slQuiet = 0, slEnd = 0; float slV = 0, slX = 0; int slDir = 0;
@@ -331,9 +333,12 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   hT[hI] = now; hY[hI] = yawDeg; hQ[hI][0] = qx; hQ[hI][1] = qy; hQ[hI][2] = qz; hI = (hI + 1) % GH;
   if (nMeter < 12) meterBuf[nMeter++] = mag;
 
-  // release: the foot tipped away from where it was when the note started
+  // tilt from the resting position (the board is Velcro'd on at whatever angle the foot has: that angle is "flat")
+  restTilt = cfg.restSet ? acosf(constrain(qx * cfg.rqx + qy * cfg.rqy + qz * cfg.rqz, -1.0f, 1.0f)) * 57.2958f : 0;
+  // release: the foot tipped away from the resting position (or from where it was when the note started)
   if (rootHeld >= 0) {
-    keyTip = acosf(constrain(qx * keyQx + qy * keyQy + qz * keyQz, -1.0f, 1.0f)) * 57.2958f;
+    float fromTap = acosf(constrain(qx * keyQx + qy * keyQy + qz * keyQz, -1.0f, 1.0f)) * 57.2958f;
+    keyTip = (cfg.relRef == 1 && cfg.restSet) ? restTilt : fromTap;
     flatTilt = keyTip;
     bool settled = now - keyOnAt > 250;   // the tap's own jolt can't release it
     if (settled && keyTip > cfg.kflat) { if (!keyLiftSince) keyLiftSince = now; else if (now - keyLiftSince > 100) notesOff(); }
@@ -385,8 +390,8 @@ void setScale(int ns) {
 }
 void sendCfg(AsyncWebSocketClient* c) {
   char b[760];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"nLo\":%d,\"ktot\":%.0f,\"kpos\":%.2f,\"kdeg\":%.1f,\"kdegR\":%.1f,\"nudge\":%d,\"arc\":%d,\"kmode\":%d,\"ckey\":%d,\"cpat\":%d,\"cdeg\":\"%d%d%d%d%d%d%d%d\",\"cpick\":%d,\"cbass\":%d,\"c7\":%d,\"npat\":%d,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"move\":%d,\"sthr\":%.2f,\"scm\":%.1f,\"rSet\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, nLo(), cfg.ktot, cfg.kpos, cfg.kdeg, cfg.kdegR, cfg.nudge, cfg.arc, cfg.kmode, cfg.ckey, cfg.cpat, cfg.cdeg[0], cfg.cdeg[1], cfg.cdeg[2], cfg.cdeg[3], cfg.cdeg[4], cfg.cdeg[5], cfg.cdeg[6], cfg.cdeg[7], cfg.cpick, cfg.cbass, cfg.c7, NPATS, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, cfg.move, cfg.sthr, cfg.scm, cfg.rSet ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"nLo\":%d,\"ktot\":%.0f,\"kpos\":%.2f,\"kdeg\":%.1f,\"kdegR\":%.1f,\"nudge\":%d,\"arc\":%d,\"restSet\":%d,\"relRef\":%d,\"kmode\":%d,\"ckey\":%d,\"cpat\":%d,\"cdeg\":\"%d%d%d%d%d%d%d%d\",\"cpick\":%d,\"cbass\":%d,\"c7\":%d,\"npat\":%d,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"move\":%d,\"sthr\":%.2f,\"scm\":%.1f,\"rSet\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, nLo(), cfg.ktot, cfg.kpos, cfg.kdeg, cfg.kdegR, cfg.nudge, cfg.arc, cfg.restSet ? 1 : 0, cfg.relRef, cfg.kmode, cfg.ckey, cfg.cpat, cfg.cdeg[0], cfg.cdeg[1], cfg.cdeg[2], cfg.cdeg[3], cfg.cdeg[4], cfg.cdeg[5], cfg.cdeg[6], cfg.cdeg[7], cfg.cpick, cfg.cbass, cfg.c7, NPATS, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, cfg.move, cfg.sthr, cfg.scm, cfg.rSet ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 float jsonNum(const char* s, const char* key, bool* found) {
@@ -402,6 +407,10 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   bool f;
   if (strstr(s, "\"get\"")) { sendCfg(client); return; }
   if (strstr(s, "\"keyCenter\"")) { yawDeg = 0; slideStep = nLo(); return; }
+  if (strstr(s, "\"setRest\"")) {   // foot down and still: this orientation is "flat", and this direction is straight ahead
+    if (qInit) { cfg.rqx = qx; cfg.rqy = qy; cfg.rqz = qz; cfg.restSet = true; yawDeg = 0; slideStep = nLo(); saveCfg(); sendCfg(nullptr); ws.textAll("{\"rest\":\"ok\"}"); }
+    return;
+  }
   if (strstr(s, "\"restart\"")) { stepIdx = 0; lastChordTap = millis(); return; }
   if (strstr(s, "\"learnRight\"")) { learnUntil = millis() + 3000; lrnT0 = 0; return; }
   if (strstr(s, "\"allOff\"")) { keyTip = -1; notesOff(); return; }
@@ -420,6 +429,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "kdegR", &f); if (f) cfg.kdegR = constrain(v, 1.0f, 30.0f);
   v = jsonNum(s, "nudge", &f); if (f) cfg.nudge = (int)v ? 1 : 0;
   v = jsonNum(s, "arc", &f); if (f) cfg.arc = (int)v ? 1 : 0;
+  v = jsonNum(s, "relRef", &f); if (f) cfg.relRef = (int)v ? 1 : 0;
   v = jsonNum(s, "kmode", &f); if (f) { cfg.kmode = (int)v ? 1 : 0; keyTip = -1; notesOff(); stepIdx = 0; }
   v = jsonNum(s, "ckey", &f); if (f) { cfg.ckey = (int)v ? 1 : 0; keyTip = -1; notesOff(); }
   v = jsonNum(s, "cpat", &f); if (f) { cfg.cpat = constrain((int)v, 0, NPATS); stepIdx = 0; keyTip = -1; notesOff(); }
@@ -754,7 +764,7 @@ void loop() {
   if (ws.count() && nMeter >= 12 && now - lastMeterSend > 25) {
     char b[240]; int p = snprintf(b, sizeof b, "{\"m\":[");
     for (int i = 0; i < nMeter; i++) p += snprintf(b + p, sizeof b - p, "%s%.2f", i ? "," : "", meterBuf[i]);
-    snprintf(b + p, sizeof b - p, "],\"yaw\":%.1f,\"tip\":%.0f,\"step\":%d,\"sa\":%.2f,\"ci\":%d}", yawDeg, flatTilt, slideStep, saPeak, cfg.kmode == 1 ? aimChord() : -1); saPeak = 0; ws.textAll(b); nMeter = 0; lastMeterSend = now;
+    snprintf(b + p, sizeof b - p, "],\"yaw\":%.1f,\"tip\":%.0f,\"rt\":%.0f,\"step\":%d,\"sa\":%.2f,\"ci\":%d}", yawDeg, flatTilt, restTilt, slideStep, saPeak, cfg.kmode == 1 ? aimChord() : -1); saPeak = 0; ws.textAll(b); nMeter = 0; lastMeterSend = now;
   } else if (nMeter >= 12) nMeter = 0;
 
   if (screenOn && now - lastDraw > 80) { lastDraw = now; drawScreen(); }

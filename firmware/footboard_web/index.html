@@ -220,6 +220,19 @@
 </section>
 
 <section class="card">
+  <h2>Resting position</h2>
+  <div class="row"><button type="button" id="setRest" class="go">Set resting position (foot down &amp; still)</button></div>
+  <span class="pill" id="restState">—</span>
+  <div class="ctl"><label>Tilt from resting position now</label><output id="rtOut">—</output>
+    <div class="tipbar" style="grid-column:1/-1"><i id="rtBar"></i></div></div>
+  <div class="seg" data-key="relRef">
+    <button type="button" data-v="1">Release = tipped from rest</button>
+    <button type="button" data-v="0">Release = tipped from the tap</button>
+  </div>
+  <p class="hint">The board can sit on your foot at any angle: put your foot down the way you play, hold still, and tap Set. That angle becomes "flat" and that direction "straight ahead". With "tipped from rest", a held note lets go when your foot leaves that resting angle by the release amount below.</p>
+</section>
+
+<section class="card">
   <h2>Feel</h2>
   <div class="meter"><canvas id="scope" width="800" height="140"></canvas></div>
   <div class="ctl"><label for="thr">Lightest tap that plays</label><output id="thrOut"></output>
@@ -414,6 +427,7 @@
   $('cpat').addEventListener('change', () => { cfg.cpat = +$('cpat').value; buildStrip(); send({ set: { cpat: cfg.cpat } }); });
   $('cdeg').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; const d = cdegArr(), i = +b.dataset.i; d[i] = (d[i] + 1) % 8; cfg.cdeg = d.join(''); applyCfg({ cdeg: cfg.cdeg }); send({ set: { cdeg: cfg.cdeg } }); });
   $('restart').onclick = () => { send({ restart: 1 }); aimCi = 0; paint(); };
+  $('setRest').onclick = () => { send({ setRest: 1 }); $('restState').textContent = 'Saving…'; };
   $('center').onclick = () => { send({ keyCenter: 1 }); step = nLo(); paint(); };
   $('learnRight').onclick = () => { send({ learnRight: 1 }); $('learnState').textContent = 'Slide your foot to the right now (3 s)…'; };
   $('scrOn').addEventListener('click', () => send({ screen: 1 })); $('scrOff').addEventListener('click', () => send({ screen: 0 }));
@@ -436,6 +450,7 @@
     if (c.cpat !== undefined) $('cpat').value = Math.min(+c.cpat, PATS.length);
     if (c.cdeg !== undefined) { const d = cdegArr(); for (const b of $('cdeg').children) { const v = d[+b.dataset.i]; b.textContent = v ? v : '–'; b.classList.toggle('on', !!v); } }
     if (c.ssid !== undefined && document.activeElement !== $('ssid')) $('ssid').value = c.ssid;
+    if (c.restSet !== undefined) $('restState').textContent = +c.restSet ? 'Resting position saved' : 'Not set yet: tap the button with your foot down';
     paintInts(); buildStrip();
   }
 
@@ -479,6 +494,8 @@
       if (m.cfg) applyCfg(m.cfg);
       if (m.m) for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; }
       if (m.step !== undefined) step = m.step;
+      if (m.rt !== undefined) { $('rtOut').textContent = m.rt + '°'; const f = Math.min(1, m.rt / +$('kflat').value); $('rtBar').style.width = (f * 100) + '%'; $('rtBar').parentElement.classList.toggle('over', f >= 1); }
+      if (m.rest) $('restState').textContent = 'Resting position saved';
       if (m.ci !== undefined && m.ci >= 0) aimCi = m.ci;
       if (m.sa !== undefined && +cfg.move) { const v = m.sa, f = Math.min(1, Math.abs(v) / (2 * +$('sthr').value));
         $('saOut').textContent = (v > 0 ? 'right ' : v < 0 ? 'left ' : '') + Math.abs(v).toFixed(2) + ' g';
