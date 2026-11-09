@@ -444,67 +444,88 @@ float cursorFrac() {
   float h = keyHalf(), t = constrain((yawDeg - keyMid()) * dir, -h, h);
   return h > 0 ? (t + h) / (2 * h) : 0.5f;
 }
-// Colour: notes run blue (lowest) -> red (highest) across the range; the note you're pointing at gets brighter and
-// more vivid the closer you are to its centre, and full strength while it plays.
-uint16_t hsv565(float h, float sat, float val) {
-  h = fmodf(h, 360.0f); if (h < 0) h += 360;
-  float c = val * sat, x = c * (1 - fabsf(fmodf(h / 60.0f, 2) - 1)), m = val - c, r, g, b;
-  if (h < 60) { r = c; g = x; b = 0; } else if (h < 120) { r = x; g = c; b = 0; } else if (h < 180) { r = 0; g = c; b = x; }
-  else if (h < 240) { r = 0; g = x; b = c; } else if (h < 300) { r = x; g = 0; b = c; } else { r = c; g = 0; b = x; }
-  return M5.Display.color565((uint8_t)((r + m) * 255), (uint8_t)((g + m) * 255), (uint8_t)((b + m) * 255));
+// Colour: every pitch has its own, very different colour (neighbouring notes never look alike). The whole screen
+// takes the colour of the note you're on: dim between notes, vivid on the note's centre, full while it plays.
+static const uint32_t PITCH_RGB[12] = {
+  0xE8202A,  // C  red
+  0x9BE000,  // C# lime
+  0x1E50FF,  // D  blue
+  0xFF8A00,  // D# orange
+  0xFFE21A,  // E  yellow
+  0x00A651,  // F  green
+  0xFF2DB4,  // F# magenta
+  0x8A2BE2,  // G  purple
+  0x9C5A1E,  // G# brown
+  0x00D8FF,  // A  cyan
+  0xFF8FC8,  // A# pink
+  0x7DFFB0,  // B  mint
+};
+uint16_t pitchColor(int note, float bright) {   // bright 0..1
+  uint32_t c = PITCH_RGB[((note % 12) + 12) % 12]; bright = constrain(bright, 0.0f, 1.0f);
+  return M5.Display.color565((uint8_t)(((c >> 16) & 255) * bright), (uint8_t)(((c >> 8) & 255) * bright), (uint8_t)((c & 255) * bright));
 }
-float stepHue(int i) { return cfg.kspan ? 240.0f * (1.0f - (float)i / cfg.kspan) : 240.0f; }   // 240 blue .. 0 red
-int noteStep(int note) { for (int i = 0; i <= cfg.kspan; i++) if (stepToNote(i) == note) return i; return -1; }
+// white text with a black border
+void drawOutlined(M5Canvas& d, const char* t, int x, int y, int b) {
+  d.setTextColor(TFT_BLACK);
+  static const int8_t DX[8] = { 1, 1, 0, -1, -1, -1, 0, 1 }, DY[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };   // 8 directions keeps it quick
+  for (int r = b; r > 0; r = (r >= 3 ? r / 2 : 0)) for (int i = 0; i < 8; i++) d.drawString(t, x + DX[i] * r, y + DY[i] * r);
+  d.setTextColor(TFT_WHITE); d.drawString(t, x, y);
+}
 void drawScreen() {
   auto& d = scr; const int W = d.width(), H = d.height();
   static const char* SCN[5] = { "Chromatic", "Major", "Minor", "Major pent", "Minor pent" };
   int shown = rootHeld >= 0 ? rootHeld : aimNote();
   float xs = cursorFrac() * cfg.kspan;                               // continuous position in steps
   float close = cfg.move ? 1.0f : constrain(1.0f - 2.0f * fabsf(xs - roundf(xs)), 0.0f, 1.0f);   // 1 = dead centre of the note
-  int n = cfg.kspan + 1, x0 = 2, sw = W - 4, y0 = 166, sh = 34;
-  int cx = x0 + (int)((xs + 0.5f) / n * sw);
+  int cx = (int)(xs * 40);   // tuner needle position (for redraw detection)
   // only redraw when something visible changed, so the motion loop isn't held up
   uint32_t sig = shown * 2654435761u ^ (rootHeld + 1) * 40503u ^ cx * 97u ^ (int)(close * 10) * 50021u ^ cfg.ints * 7919u ^ cfg.scale * 131u ^ cfg.kroot * 31337u ^ cfg.kspan * 613u ^ (bleConnected ? 1 : 0) * 2u ^ battPct * 1009u ^ (WiFi.status() == WL_CONNECTED ? 4099u : 0u);
   if (sig == lastSig) return; lastSig = sig;
-  d.fillScreen(TFT_BLACK);
+  // whole screen in the note's colour
+  float k = rootHeld >= 0 ? 1.0f : 0.25f + 0.75f * close * close;
+  d.fillScreen(pitchColor(shown, k));
   // scale + key
-  d.setFont(&fonts::Font2); d.setTextSize(1); d.setTextDatum(top_center); d.setTextColor(TFT_DARKGREY);
+  d.setFont(&fonts::Font2); d.setTextSize(1); d.setTextDatum(top_center);
   char key[8]; noteName(cfg.kroot, key); key[strcspn(key, "0123456789-")] = 0;
-  char top[32]; snprintf(top, sizeof top, "%s %s", key, SCN[constrain(cfg.scale, 0, 4)]); d.drawString(top, W / 2, 2);
-  // big note in its own colour: dim when you're between notes, vivid on the centre, full while playing
-  int si = noteStep(shown); float hue = si >= 0 ? stepHue(si) : 30;
-  float k = rootHeld >= 0 ? 1.0f : close;
-  uint16_t col = hsv565(hue, 0.25f + 0.75f * k, 0.35f + 0.65f * k);
-  d.setTextColor(col); d.setTextDatum(middle_center);
-  d.setFont(&fonts::FreeSansBold24pt7b);
+  char top[32]; snprintf(top, sizeof top, "%s %s", key, SCN[constrain(cfg.scale, 0, 4)]); drawOutlined(d, top, W / 2, 3, 1);
+  // big note: white letters, black border
+  d.setTextDatum(middle_center); d.setFont(&fonts::FreeSansBold24pt7b);
   const char* pc = NOTE_NAMES[((shown % 12) + 12) % 12];
-  float sz = min(2.2f, (W - 6) / (float)max((int32_t)1, (int32_t)d.textWidth(pc)));
-  d.setTextSize(sz); d.drawString(pc, W / 2, 62);
+  float sz = min(2.2f, (W - 12) / (float)max((int32_t)1, (int32_t)d.textWidth(pc)));
+  d.setTextSize(sz); drawOutlined(d, pc, W / 2, 64, 4);
   d.setFont(&fonts::FreeSansBold18pt7b); d.setTextSize(1);
-  char oc[6]; snprintf(oc, sizeof oc, "%d", shown / 12 - 1); d.drawString(oc, W / 2, 122);
+  char oc[6]; snprintf(oc, sizeof oc, "%d", shown / 12 - 1); drawOutlined(d, oc, W / 2, 124, 3);
   // harmony
-  d.setFont(&fonts::Font2); d.setTextDatum(top_center); d.setTextColor(TFT_LIGHTGREY);
+  d.setFont(&fonts::Font2); d.setTextDatum(top_center);
   char hb[24] = ""; for (int i = 0; i < 5; i++) if (cfg.ints & (1 << i)) { strcat(hb, "+"); strcat(hb, INT_NAMES[i]); strcat(hb, " "); }
-  d.drawString(hb[0] ? hb : "single notes", W / 2, 144);
-  // key strip: every note in its spectrum colour; the aimed one lights up as you near its centre
-  int aimStep = (int)roundf(xs);
-  for (int i = 0; i < n; i++) {
-    int note = stepToNote(i), xa = x0 + i * sw / n, xb = x0 + (i + 1) * sw / n - 1;
-    bool sharp = NOTE_NAMES[note % 12][1] == '#', on = false, har = false;
-    for (int q = 0; q < nHeld; q++) { if (held[q] == note) { if (q == 0) on = true; else har = true; } }
-    float sat = 0.85f, val = sharp ? 0.2f : 0.32f;
-    if (on || har) { sat = 1; val = 1; }
-    else if (rootHeld < 0 && i == aimStep) { sat = 0.3f + 0.7f * close; val = 0.35f + 0.65f * close; }
-    d.fillRect(xa, y0, max(1, xb - xa), sharp ? sh * 7 / 10 : sh, hsv565(stepHue(i), sat, val));
-    if (on) d.fillRect(xa, y0 - 4, max(1, xb - xa), 3, TFT_WHITE);   // the note you played
-  }
-  d.fillRect(cx - 1, y0 - 6, 3, sh + 12, TFT_WHITE);
+  drawOutlined(d, hb[0] ? hb : "single notes", W / 2, 140, 1);
+  // tuner on a black band: where you are between the previous and next note; centre = dead on the note
+  int ty = 160; d.fillRect(0, ty, W, 62, TFT_BLACK);
+  int aimStep = constrain((int)roundf(xs), 0, cfg.kspan);
+  float off = cfg.move ? 0.0f : constrain(xs - aimStep, -0.5f, 0.5f);   // -0.5 = halfway to the note below, +0.5 = halfway to the one above
+  int mx = W / 2, half = W / 2 - 22, my = ty + 24;
+  // neighbours, each in its own colour
+  d.setFont(&fonts::Font2); d.setTextSize(1); d.setTextDatum(middle_left);
+  char nb[8];
+  if (aimStep > 0) { noteName(stepToNote(aimStep - 1), nb); d.setTextColor(pitchColor(stepToNote(aimStep - 1), 1)); } else { strcpy(nb, "--"); d.setTextColor(TFT_DARKGREY); }
+  d.drawString(nb, 2, my); d.setTextDatum(middle_right);
+  if (aimStep < cfg.kspan) { noteName(stepToNote(aimStep + 1), nb); d.setTextColor(pitchColor(stepToNote(aimStep + 1), 1)); } else { strcpy(nb, "--"); d.setTextColor(TFT_DARKGREY); }
+  d.drawString(nb, W - 2, my);
+  // scale: ticks every 1/10 of a note, centre zone glows in the note's colour when you're close
+  uint16_t nc = pitchColor(shown, 1);
+  d.fillRect(mx - half, my - 1, half * 2, 3, 0x4208);
+  d.fillRect(mx - half / 5, my - 8, half * 2 / 5, 17, close > 0.8f || rootHeld >= 0 ? nc : 0x2104);
+  for (int t = -5; t <= 5; t++) { int x = mx + t * half / 5; int hgt = t == 0 ? 12 : (t % 5 == 0 ? 10 : 5); d.fillRect(x, my - hgt, 1, hgt * 2 + 1, t == 0 ? TFT_WHITE : TFT_LIGHTGREY); }
+  int nx = mx + (int)(off * 2 * half);
+  d.fillTriangle(nx - 6, my - 18, nx + 6, my - 18, nx, my - 6, TFT_WHITE);
+  d.fillRect(nx - 1, my - 18, 3, 36, TFT_WHITE);
+  // range ends
   char lo[8], hi[8]; noteName(cfg.kroot, lo); noteName(stepToNote(cfg.kspan), hi);
-  d.setFont(&fonts::Font0);
-  d.setTextDatum(top_left); d.setTextColor(hsv565(240, 0.7f, 0.9f)); d.drawString(lo, 2, y0 + sh + 4);
-  d.setTextDatum(top_right); d.setTextColor(hsv565(0, 0.7f, 0.9f)); d.drawString(hi, W - 2, y0 + sh + 4);
+  d.setFont(&fonts::Font0); d.setTextColor(TFT_DARKGREY);
+  char rg[24]; snprintf(rg, sizeof rg, "range %s-%s", lo, hi); d.setTextDatum(top_center); d.drawString(rg, W / 2, my + 22);
   // status
-  d.setTextDatum(bottom_center); d.setTextColor(TFT_DARKGREY);
+  d.fillRect(0, H - 13, W, 13, TFT_BLACK);
+  d.setTextDatum(bottom_center); d.setTextColor(TFT_LIGHTGREY);
   char st[40]; snprintf(st, sizeof st, "BLE %s  WiFi %s  %d%%", bleConnected ? "on" : "--", WiFi.status() == WL_CONNECTED ? "ok" : "--", battPct);
   d.drawString(st, W / 2, H - 2);
   d.pushSprite(0, 0);
