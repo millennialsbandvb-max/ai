@@ -53,6 +53,13 @@
     background: var(--fg); color: var(--bg); border: 0; border-radius: 16px; padding: 16px; width: 100%; cursor: pointer; flex: none; }
   .big.live { background: var(--kick); color: #1a0b05; }
   .err { color: var(--snare); font-size: 13px; margin: 0; flex: none; }
+  .zonebar { position: relative; height: 54px; display: flex; border-radius: 10px; overflow: hidden; background: #000; }
+  .zb { display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; letter-spacing: .08em; color: rgba(0,0,0,.75); transition: flex .1s; }
+  .zb.hats { background: #c6c6c6; } .zb.kick { background: #f84a3a; } .zb.snare { background: #2f6bff; }
+  .zb.lit { box-shadow: inset 0 0 0 3px #fff; }
+  .zneedle { position: absolute; top: 0; bottom: 0; width: 3px; margin-left: -1.5px; background: #fff; box-shadow: 0 0 0 1px #000, 0 0 8px rgba(255,255,255,.8); }
+  .zticks { position: absolute; left: 0; right: 0; bottom: 0; height: 6px; pointer-events: none; }
+  .zticks i { position: absolute; bottom: 0; width: 1px; height: 6px; background: rgba(0,0,0,.5); }
 </style>
 </head>
 <body>
@@ -76,6 +83,32 @@
 
 <h2>Recent hits (newest first)</h2>
 <div class="tile" style="flex:none; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.5; min-height: 60px; white-space: pre" id="log">—</div>
+<h2>Swivel kit</h2>
+<div id="zoneBox" style="display:flex;flex-direction:column;gap:10px" hidden>
+<div class="tiles">
+  <div class="tile"><b id="zoneNow">—</b><span>a tap now plays</span></div>
+  <div class="tile"><b id="zoneYaw">—</b><span>swivel</span></div>
+</div>
+<div class="zonebar" id="zonebar">
+  <div class="zb hats" id="zbHats"><span>HATS</span></div><div class="zb kick" id="zbKick"><span>KICK</span></div><div class="zb snare" id="zbSnare"><span>SNARE</span></div>
+  <div class="zneedle" id="zneedle"></div>
+  <div class="zticks" id="zticks"></div>
+</div>
+<div class="row" style="font-size:11px;color:var(--muted);justify-content:space-between"><span>in (toes left) 60°</span><span id="zbMid">0°</span><span>60° out (toes right)</span></div>
+<p class="hint">Swivel kit: lay the board flat on your foot. Foot straight = kick, swivelled out = snare, swivelled in = hi-hat (soft tap closed, hard tap open). Your hats set the tempo: play 6 in a row and the tempo snaps to them; kicks and snares just play on the grid. While you play hats yourself the auto hats stay quiet and come back two beats after you stop. Shake your foot hard for 3 beats to stop everything. "Center here" or the board's front button re-centres if it drifts. Set up for the right foot, USB-C toward the toes.</p>
+<div class="row"><button type="button" id="zoneCenter">Center here</button></div>
+<div class="seg" data-key="zarc">
+  <button type="button" data-v="1">Auto re-centre: resting foot = straight</button>
+  <button type="button" data-v="0">Off</button>
+</div>
+<div class="ctl"><label for="zdeg">Kick zone, right side (toes out): snare starts past</label><output id="zdegOut"></output>
+  <input type="range" id="zdeg" data-key="zdeg" min="3" max="60" step="1" value="15"></div>
+<div class="ctl"><label for="zin">Kick zone, left side (toes in): hats start past</label><output id="zinOut"></output>
+  <input type="range" id="zin" data-key="zin" min="3" max="60" step="1" value="15"></div>
+<div class="ctl"><label for="zoh">Hats: tap harder than this for an open hat</label><output id="zohOut"></output>
+  <input type="range" id="zoh" data-key="zoh" min="0.3" max="8" step="0.1" value="2.5"></div>
+</div>
+<details style="margin-top:6px"><summary style="color:var(--muted);font-size:13px;cursor:pointer">Other modes (heel/toe, swing, tap/stomp, shaker, foot keyboard)</summary>
 <h2>Mode</h2>
 <div class="seg" data-key="snare">
   <button type="button" data-v="8">Heel = kick, toe = snare</button>
@@ -87,20 +120,7 @@
   <button type="button" data-v="10">Foot keyboard</button>
   <button type="button" data-v="11">Swivel kit</button>
 </div>
-<div id="zoneBox" style="display:flex;flex-direction:column;gap:10px" hidden>
-<div class="tiles">
-  <div class="tile"><b id="zoneNow">—</b><span>a tap now plays</span></div>
-  <div class="tile"><b id="zoneYaw">—</b><span>swivel</span></div>
-</div>
-<p class="hint">Swivel kit: lay the board flat on your foot. Foot straight = kick, swivelled out = snare, swivelled in = hi-hat (soft tap closed, hard tap open). Your hats set the tempo: play 6 in a row and the tempo snaps to them; kicks and snares just play on the grid. While you play hats yourself the auto hats stay quiet and come back two beats after you stop. Shake your foot hard for 3 beats to stop everything. "Center here" or the board's front button re-centres if it drifts. Set up for the right foot, USB-C toward the toes.</p>
-<div class="row"><button type="button" id="zoneCenter">Center here</button></div>
-<div class="ctl"><label for="zdeg">Kick zone, right side (toes out): snare starts past</label><output id="zdegOut"></output>
-  <input type="range" id="zdeg" data-key="zdeg" min="3" max="60" step="1" value="15"></div>
-<div class="ctl"><label for="zin">Kick zone, left side (toes in): hats start past</label><output id="zinOut"></output>
-  <input type="range" id="zin" data-key="zin" min="3" max="60" step="1" value="15"></div>
-<div class="ctl"><label for="zoh">Hats: tap harder than this for an open hat</label><output id="zohOut"></output>
-  <input type="range" id="zoh" data-key="zoh" min="0.3" max="8" step="0.1" value="2.5"></div>
-</div>
+</details>
 <div id="keyBox" style="display:flex;flex-direction:column;gap:10px">
 <div class="tiles">
   <div class="tile"><b id="keyAim">—</b><span>pointing at</span></div>
@@ -268,6 +288,15 @@
   }
 
   // ---------- Settings UI ----------
+  // swivel-kit visualizer: -60° (toes in) .. +60° (toes out) across the bar, zones from the sliders, needle = swivel
+  const ZR = 60; let zTicks = false;
+  function paintZones(rel) {
+    if (!zTicks) { zTicks = true; for (let d = -60; d <= 60; d += 10) { const i = document.createElement('i'); i.style.left = ((d + ZR) / (2 * ZR) * 100) + '%'; i.style.height = d % 30 ? '4px' : '8px'; $('zticks').appendChild(i); } }
+    const zin = Math.min(ZR, +$('zin').value), zdeg = Math.min(ZR, +$('zdeg').value);
+    $('zbHats').style.flex = (ZR - zin) + ' 0 0'; $('zbKick').style.flex = (zin + zdeg) + ' 0 0'; $('zbSnare').style.flex = (ZR - zdeg) + ' 0 0';
+    if (rel !== undefined) { const x = Math.max(-ZR, Math.min(ZR, rel)); $('zneedle').style.left = ((x + ZR) / (2 * ZR) * 100) + '%';
+      $('zbHats').classList.toggle('lit', rel < -zin); $('zbKick').classList.toggle('lit', rel >= -zin && rel <= zdeg); $('zbSnare').classList.toggle('lit', rel > zdeg); }
+  }
   const fmt = { zdeg: v => v + '° out', zin: v => v + '° in', zoh: v => (+v).toFixed(1) + ' g', thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', swang: v => v + '°', kroot: v => noteName(+v), kflat: v => v + '°', kspan: v => (+v + 1) + ' notes', kdeg: v => (+v) + '° (ends at ±' + Math.round(+$('kspan').value * v / 2) + '°)', tthr: v => v + '°', othr: v => v + '°', klvl: v => (+v).toFixed(2) + ' g', slvl: v => (+v).toFixed(2) + ' g', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
   function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function applyCfg(c) {
@@ -275,7 +304,7 @@
     for (const el of document.querySelectorAll('input[type=range][data-key]')) { if (c[el.dataset.key] !== undefined) { el.value = c[el.dataset.key]; $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); } }
     for (const seg of document.querySelectorAll('.seg[data-key]')) { const v = String(c[seg.dataset.key]); for (const b of seg.children) b.classList.toggle('on', b.dataset.v === v); }
     kit = +(c.kit || 0);
-    modeUi(+c.snare);
+    modeUi(+c.snare); paintZones();
     const ed = +c.kEdge;
     $('edgeState').textContent = (ed ? 'edges set · ' : 'no edges · ') + Math.round(+c.kspan * +c.kdeg) + '° wide, ' + (+c.kdeg).toFixed(1) + '° per note';
     $('ohatBox').hidden = !+c.ohat;
@@ -289,7 +318,7 @@
     if (c.ssid !== undefined && document.activeElement !== $('ssid')) $('ssid').value = c.ssid;
   }
   for (const el of document.querySelectorAll('input[type=range][data-key]')) {
-    el.addEventListener('input', () => { $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); });
+    el.addEventListener('input', () => { if (el.dataset.key === 'zin' || el.dataset.key === 'zdeg') paintZones(); $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); });
     el.addEventListener('change', () => { send({ set: { [el.dataset.key]: +el.value } }); });
     $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value);
   }
@@ -380,8 +409,8 @@
       if (m.cfg) applyCfg(m.cfg);
       if (m.m) { for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; } }
       if (m.yaw !== undefined && +(cfg.snare) === 11) {
-        const rel = -m.yaw;
-        $('zoneNow').textContent = rel > +$('zdeg').value ? 'SNARE' : rel < -+$('zin').value ? 'HAT (hard = open)' : 'KICK';
+        const rel = -m.yaw; paintZones(rel);
+        $('zoneNow').textContent = rel > +$('zdeg').value ? 'SNARE' : rel < -+$('zin').value ? 'HAT' : 'KICK';
         $('zoneYaw').textContent = (rel > 0 ? 'out ' : rel < 0 ? 'in ' : '') + Math.abs(Math.round(rel)) + '°';
       }
       if (m.yaw !== undefined && +(cfg.snare) === 10) $('keyAim').textContent = noteName(keyForTilt(m.yaw)) + (m.flatT > +$('kflat').value ? ' ·' : '');

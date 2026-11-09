@@ -41,7 +41,7 @@ struct Cfg {
   float kthr = 1.8f;     // kick threshold in bounce/stomp/lift mode; lighter landings are hats
   float swthr = 200.0f;  // swing threshold: rotation along the learned swing (deg/s) = snare
   int gap = 120;         // ms between hits
-  int snare = 8;         // mode: 8 = heel kick / toe snare (default), 7 = toe kick / heel snare, 6 = stomp kick / swing snare, 2 = tap kick / stomp snare, 1 = tap snare / stomp kick. 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare, 3 high lift, 4 bounce=hat/stomp=kick/lift=snare
+  int snare = 11;         // mode: 8 = heel kick / toe snare (default), 7 = toe kick / heel snare, 6 = stomp kick / swing snare, 2 = tap kick / stomp snare, 1 = tap snare / stomp kick. 0 swing right, 1 tap=snare/stomp=kick, 2 tap=kick/stomp=snare, 3 high lift, 4 bounce=hat/stomp=kick/lift=snare
   float lthr = 35.0f;    // lift threshold, degrees of rotation since the foot last went still
   int kit = 0;           // 0 acoustic, 1 electro
   int out = 0;           // 0 board speaker, 1 phone, 2 both
@@ -78,6 +78,7 @@ struct Cfg {
   int zflip = 0;                                   // swivel kit: swap which way is out
   float zin = 15.0f;                               // swivel kit: swivel IN (toes left) past this = hats; zdeg is OUT (toes right) = snare
   float zoh = 2.5f;                                // swivel kit: a hat tap harder than this (g) is an open hat, softer is closed
+  int zarc = 1;                                    // swivel kit: auto re-centre while the foot rests
 } cfg;
 Preferences prefs;
 
@@ -536,7 +537,12 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
     }
     float yr = (wx - bwx) * qx + (wy - bwy) * qy + (wz - bwz) * qz;   // deg/s about vertical
     if (fabsf(yr) > 1.5f) yawDeg += yr * dts;   // ignore sub-noise creep
-    if (cfg.snare == 11) yawDeg = constrain(yawDeg, -70.0f, 70.0f);
+    if (cfg.snare == 11) {
+      yawDeg = constrain(yawDeg, -70.0f, 70.0f);
+      // auto re-centre: after 3 s with no turning and no tap, ease the reading back to straight ahead (~20 s)
+      static uint32_t lastTurn = 0; if (wm > 8) lastTurn = now;
+      if (cfg.zarc && now - lastTurn > 3000 && now - lastStompT > 3000) yawDeg -= yawDeg * min(1.0f, dts / 20.0f);
+    }
     else yawDeg = constrain(yawDeg, keyMid() - keyHalf() - 15, keyMid() + keyHalf() + 15);
   }
   gH[gHi][0] = wx; gH[gHi][1] = wy; gH[gHi][2] = wz; gHT[gHi] = now; pH[gHi] = toeAngle; qH[gHi][0] = qx; qH[gHi][1] = qy; qH[gHi][2] = qz; yH[gHi] = yawDeg; gHi = (gHi + 1) % GH;
@@ -619,8 +625,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[880];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zin\":%.0f,\"zoh\":%.2f,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zin, cfg.zoh, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zin\":%.0f,\"zoh\":%.2f,\"zarc\":%d,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zin, cfg.zoh, cfg.zarc, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -669,6 +675,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "zdeg", &f); if (f) cfg.zdeg = constrain(v, 3.0f, 60.0f);
   v = jsonNum(s, "zin", &f); if (f) cfg.zin = constrain(v, 3.0f, 60.0f);
   v = jsonNum(s, "zoh", &f); if (f) cfg.zoh = constrain(v, 0.3f, 8.0f);
+  v = jsonNum(s, "zarc", &f); if (f) cfg.zarc = (int)v ? 1 : 0;
   v = jsonNum(s, "zflip", &f); if (f) cfg.zflip = (int)v ? 1 : 0;
   v = jsonNum(s, "kflat", &f); if (f) cfg.kflat = constrain(v, 3.0f, 40.0f);
   v = jsonNum(s, "kspan", &f); if (f) cfg.kspan = constrain((int)v, 2, 48);
@@ -787,7 +794,7 @@ void drawScreen() {
   bool flash = lastHitKind >= 0 && now - lastHitAt < 140;
   int big = flash ? lastHitKind : zone >= 0 ? zone : lastHitKind;
   int bpm = beatMs ? (int)roundf(60000.0f / beatMs) : 0;
-  uint32_t sig = (big + 2) * 2654435761u ^ (flash ? 77u : 0) ^ bpm * 40503u ^ (bleConnected ? 3u : 0) ^ battPct * 1009u ^ (WiFi.status() == WL_CONNECTED ? 4099u : 0u) ^ cfg.snare * 131u ^ (calibrating ? 5u : 0) ^ (cfg.cal ? 11u : 0) ^ (cfg.lcal ? 13u : 0) ^ (cfg.rcal ? 17u : 0);
+  uint32_t sig = (cfg.snare == 11 ? (int)roundf(yawDeg * 2) * 7u : 0u) ^ (big + 2) * 2654435761u ^ (flash ? 77u : 0) ^ bpm * 40503u ^ (bleConnected ? 3u : 0) ^ battPct * 1009u ^ (WiFi.status() == WL_CONNECTED ? 4099u : 0u) ^ cfg.snare * 131u ^ (calibrating ? 5u : 0) ^ (cfg.cal ? 11u : 0) ^ (cfg.lcal ? 13u : 0) ^ (cfg.rcal ? 17u : 0);
   if (sig == lastSig) return; lastSig = sig;
   uint16_t col = big >= 0 ? kindColor(big) : TFT_WHITE;
   d.fillScreen(flash ? col : TFT_BLACK);
@@ -809,12 +816,17 @@ void drawScreen() {
   // what each gesture does / status
   d.setFont(&fonts::Font0); d.setTextSize(1); d.setTextDatum(bottom_left); d.setTextColor(dim);
   const char* hint = calibrating ? "swing foot 3x..." : cfg.snare == 10 ? "keys: A = centre" : cfg.snare == 11 ? "in=hats  mid=kick  out=snare" : cfg.snare == 9 ? (cfg.shk == 2 ? "tambourine" : cfg.shk == 1 ? "maracas" : "shaker") : cfg.snare == 7 ? (cfg.lcal && cfg.rcal ? "toe=kick heel=snare" : "SET TOE/HEEL") : cfg.snare == 8 ? (cfg.lcal && cfg.rcal ? "heel=kick toe=snare" : "SET TOE/HEEL") : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A";
-  if (cfg.snare == 11 && !calibrating) {   // swivel kit legend in each drum's colour
-    d.setFont(&fonts::Font2); d.setTextDatum(bottom_left);
-    d.setTextColor(flash ? TFT_BLACK : kindColor(OHAT)); d.drawString("in  = hats (hard=open)", 12, H - 52);
-    d.setTextColor(flash ? TFT_BLACK : kindColor(KICK)); d.drawString("mid = kick", 12, H - 36);
-    d.setTextColor(flash ? TFT_BLACK : kindColor(SNARE)); d.drawString("out = snare", 12, H - 20);
-    d.setFont(&fonts::Font0); d.setTextColor(dim);
+  if (cfg.snare == 11 && !calibrating) {   // swivel kit: zone bar (hats | kick | snare) with the swivel needle
+    const float ZR = 60; int bx = 4, bw = W - 8, by = H - 62, bh = 34;
+    float rel = constrain(-yawDeg, -ZR, ZR);
+    int xHat = bx + (int)((ZR - min(cfg.zin, ZR)) / (2 * ZR) * bw), xSn = bx + (int)((ZR + min(cfg.zdeg, ZR)) / (2 * ZR) * bw);
+    d.fillRect(bx, by, xHat - bx, bh, kindColor(HAT)); d.fillRect(xHat, by, xSn - xHat, bh, kindColor(KICK)); d.fillRect(xSn, by, bx + bw - xSn, bh, kindColor(SNARE));
+    for (int t = -60; t <= 60; t += 10) { int x = bx + (int)((t + ZR) / (2 * ZR) * (bw - 1)); d.fillRect(x, by + bh - (t % 30 ? 4 : 8), 1, t % 30 ? 4 : 8, TFT_BLACK); }
+    int nx = bx + (int)((rel + ZR) / (2 * ZR) * (bw - 1));
+    d.fillRect(nx - 2, by - 4, 5, bh + 8, TFT_BLACK); d.fillRect(nx - 1, by - 3, 3, bh + 6, TFT_WHITE);
+    d.setFont(&fonts::Font0); d.setTextDatum(top_center); d.setTextColor(TFT_WHITE);
+    char zs[16]; snprintf(zs, sizeof zs, "%s%d", rel > 0.5f ? "out " : rel < -0.5f ? "in " : "", (int)fabsf(roundf(rel))); d.drawString(zs, W / 2, by + bh + 3);
+    d.setTextDatum(bottom_left); d.setTextColor(dim);
   } else d.drawString(hint, 12, H - 14);
   snprintf(t, sizeof t, "BLE %s  WiFi %s", bleConnected ? "on" : "--", WiFi.status() == WL_CONNECTED ? "ok" : "--"); d.drawString(t, 12, H - 3);
   d.pushSprite(0, 0);
