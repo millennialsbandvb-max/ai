@@ -30,18 +30,18 @@
   .stage { padding: 16px 14px 14px; }
   .now { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; }
   .note { font-family: var(--display); font-weight: 700; font-size: 84px; line-height: .9; letter-spacing: .01em; font-variant-numeric: tabular-nums; min-width: 3ch; }
-  .note.held { color: var(--hold); }
+  .note.held { }
   .chord { text-align: right; font-size: 13px; color: var(--muted); line-height: 1.5; }
   .chord b { color: var(--fg); font-weight: 600; font-size: 15px; }
   .strip { position: relative; height: 64px; display: flex; gap: 2px; touch-action: none; }
   .strip .k { flex: 1; border-radius: 5px; background: var(--nat); position: relative; transition: background .08s; }
   .strip .k.s { background: var(--sharp); height: 72%; align-self: flex-start; }
   .strip .k.aim { background: var(--fg); }
-  .strip .k.on { background: var(--hold); }
+  .strip .k.on { box-shadow: 0 -4px 0 #fff; }
   .strip .k.har { background: var(--accent); }
   .strip .k span { position: absolute; bottom: 3px; left: 0; right: 0; text-align: center; font-size: 9px; color: var(--muted); }
   .strip .k.aim span, .strip .k.on span, .strip .k.har span { color: #111; font-weight: 700; }
-  .cursor { position: absolute; top: -6px; bottom: -6px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: var(--accent); pointer-events: none; box-shadow: 0 0 10px var(--accent); }
+  .cursor { position: absolute; top: -6px; bottom: -6px; width: 3px; margin-left: -1.5px; border-radius: 2px; background: #fff; pointer-events: none; box-shadow: 0 0 8px rgba(255,255,255,.7); }
   .ends { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
   .tipbar { height: 6px; border-radius: 3px; background: var(--panel2); overflow: hidden; }
   .tipbar i { display: block; height: 100%; width: 0; background: var(--ok); transition: width .05s linear; }
@@ -243,10 +243,18 @@
     $('edgeState').textContent = (+cfg.kEdge ? 'Edges set · ' : 'No edges, centred · ') + Math.round(span * +$('kdeg').value) + '° wide';
     paint();
   }
+  // colour: blue (lowest) -> red (highest); the aimed note brightens as you near its centre, full while playing
+  const stepHue = i => { const sp = +$('kspan').value; return sp ? 240 * (1 - i / sp) : 240; };
   function paint() {
-    const aim = +cfg.move ? stepToNote(Math.max(0, Math.min(+$('kspan').value, step))) : keyForTilt(yaw), har = held.slice(1);
-    for (const k of cells) { const n = +k.dataset.n; k.classList.toggle('on', n === held[0]); k.classList.toggle('har', har.includes(n)); k.classList.toggle('aim', !held.length && n === aim); }
-    $('cursor').style.left = (cursorFrac(yaw) * 100) + '%';
+    const span = +$('kspan').value, xs = cursorFrac(yaw) * span, close = +cfg.move ? 1 : Math.max(0, 1 - 2 * Math.abs(xs - Math.round(xs)));
+    const aim = +cfg.move ? stepToNote(Math.max(0, Math.min(span, step))) : keyForTilt(yaw), har = held.slice(1);
+    cells.forEach((k, i) => { const n = +k.dataset.n, on = n === held[0], hh = har.includes(n), isAim = !held.length && n === aim, sh = k.classList.contains('s');
+      k.classList.toggle('on', on); k.classList.toggle('har', hh); k.classList.toggle('aim', isAim);
+      const sat = on || hh ? 100 : isAim ? 30 + 70 * close : 70, lit = on || hh ? 55 : isAim ? 24 + 34 * close : sh ? 14 : 22;
+      k.style.background = 'hsl(' + stepHue(i).toFixed(0) + ',' + sat.toFixed(0) + '%,' + lit.toFixed(0) + '%)'; });
+    $('cursor').style.left = ((xs + 0.5) / (span + 1) * 100) + '%';
+    const si = cells.findIndex(c => +c.dataset.n === (held.length ? held[0] : aim)), kk = held.length ? 1 : close;
+    $('note').style.color = si < 0 ? '' : 'hsl(' + stepHue(si).toFixed(0) + ',' + (25 + 75 * kk).toFixed(0) + '%,' + (38 + 24 * kk).toFixed(0) + '%)';
     if (held.length) { $('note').textContent = noteName(held[0]); $('note').classList.add('held'); $('nowLabel').textContent = 'playing'; $('chordNames').textContent = held.map(noteName).join(' · '); }
     else { $('note').textContent = noteName(aim); $('note').classList.remove('held'); $('nowLabel').textContent = 'pointing at'; $('chordNames').textContent = chordOf(aim).map(noteName).join(' · '); }
   }
