@@ -453,20 +453,20 @@ float cursorFrac() {
 // Colour: each pitch has a fixed colour (see PITCH_RGB). The whole screen
 // takes the colour of the note you're on: dim between notes, vivid on the note's centre, full while it plays.
 // Naturals are the rainbow, ROYGBIV: C red, D orange, E yellow, F green, G blue, A indigo, B violet.
-// Sharps/flats follow one rule: bold diagonal stripes of the two naturals they sit between (C# = red/orange
-// stripes, F# = green/blue ...), so they stand out from the solid naturals and still say where they are.
+// Sharps/flats follow one rule: the mix of the two naturals they sit between (C# = red+orange, F# = green+blue ...)
+// crossed with bold white stripes, so they stand out from the solid naturals and still say where they are.
 static const uint32_t PITCH_RGB[12] = {
   0xE8202A,  // C  red
-  0xF45615,  // C# C + D (stripes; this mix only for small text)
+  0xF45615,  // C# C + D (mix, with white stripes)
   0xFF8C00,  // D  orange
-  0xFFB70D,  // D# D + E (stripes; this mix only for small text)
+  0xFFB70D,  // D# D + E (mix, with white stripes)
   0xFFE21A,  // E  yellow
   0x1DB233,  // F  green
-  0x1E8699,  // F# F + G (stripes; this mix only for small text)
+  0x1E8699,  // F# F + G (mix, with white stripes)
   0x1F5BFF,  // G  blue
-  0x3C44DA,  // G# G + A (stripes; this mix only for small text)
+  0x3C44DA,  // G# G + A (mix, with white stripes)
   0x5A2DB5,  // A  indigo
-  0x873CCE,  // A# A + B (stripes; this mix only for small text)
+  0x873CCE,  // A# A + B (mix, with white stripes)
   0xB44CE6,  // B  violet
 };
 uint16_t pitchColor(int note, float bright) {   // bright 0..1
@@ -474,15 +474,16 @@ uint16_t pitchColor(int note, float bright) {   // bright 0..1
   return M5.Display.color565((uint8_t)(((c >> 16) & 255) * bright), (uint8_t)(((c >> 8) & 255) * bright), (uint8_t)((c & 255) * bright));
 }
 bool isSharp(int note) { int pc = ((note % 12) + 12) % 12; return pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10; }
-// fill an area in a note's colour: naturals solid, sharps/flats as 45-degree stripes of the two neighbouring naturals
+// fill an area in a note's colour: naturals solid; sharps/flats = the mix of their two neighbouring naturals,
+// crossed with bold white 45-degree stripes (s = colour band width, white bands are 0.6 s)
 void fillPitch(M5Canvas& d, int x, int y, int w, int h, int note, int s) {
-  if (!isSharp(note)) { d.fillRect(x, y, w, h, pitchColor(note, 1)); return; }
-  d.fillRect(x, y, w, h, pitchColor(note - 1, 1));
-  uint16_t hi = pitchColor(note + 1, 1);
+  d.fillRect(x, y, w, h, pitchColor(note, 1));
+  if (!isSharp(note)) return;
+  int ws = max(1, s * 3 / 5);
   d.setClipRect(x, y, w, h);
-  for (int k = -h; k < w; k += 2 * s) {   // band between the lines through (x+k, y+h)->(x+k+h, y) and s further right
-    d.fillTriangle(x + k, y + h, x + k + s, y + h, x + k + s + h, y, hi);
-    d.fillTriangle(x + k, y + h, x + k + s + h, y, x + k + h, y, hi);
+  for (int k = -h; k < w; k += s + ws) {   // white band between the lines through (x+k, y+h)->(x+k+h, y) and ws further right
+    d.fillTriangle(x + k, y + h, x + k + ws, y + h, x + k + ws + h, y, TFT_WHITE);
+    d.fillTriangle(x + k, y + h, x + k + ws + h, y, x + k + h, y, TFT_WHITE);
   }
   d.clearClipRect();
 }

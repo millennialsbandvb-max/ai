@@ -263,9 +263,10 @@
     paint();
   }
   // colour: every pitch its own, very different colour (same as the board)
-  const PC = ['#E8202A','#F45615','#FF8C00','#FFB70D','#FFE21A','#1DB233','#1E8699','#1F5BFF','#3C44DA','#5A2DB5','#873CCE','#B44CE6'];  // naturals ROYGBIV; sharps striped with their two neighbours
+  const PC = ['#E8202A','#F45615','#FF8C00','#FFB70D','#FFE21A','#1DB233','#1E8699','#1F5BFF','#3C44DA','#5A2DB5','#873CCE','#B44CE6'];  // naturals ROYGBIV; sharps = mix of neighbours + white stripes
   const isSharp = n => [1, 3, 6, 8, 10].includes(((n % 12) + 12) % 12);
-  const pfill = (n, w) => isSharp(n) ? 'repeating-linear-gradient(135deg,' + pcol(n - 1, 1) + ' 0 ' + w + 'px,' + pcol(n + 1, 1) + ' ' + w + 'px ' + (2 * w) + 'px)' : pcol(n, 1);
+  // naturals solid; sharps = mix of the two neighbours (PC) crossed with bold white stripes
+  const pfill = (n, w) => isSharp(n) ? 'repeating-linear-gradient(135deg,' + pcol(n, 1) + ' 0 ' + w + 'px,#fff ' + w + 'px ' + (1.6 * w) + 'px)' : pcol(n, 1);
   const pcol = (n, b) => { const h = PC[((n % 12) + 12) % 12], v = Math.max(0, Math.min(1, b)); return 'rgb(' + [1, 3, 5].map(i => Math.round(parseInt(h.substr(i, 2), 16) * v)).join(',') + ')'; };
   const stepHue = i => 0;
   for (let t = -5; t <= 5; t++) { const e = document.createElement('div'); e.className = 'tick' + (t === 0 ? ' c' : ''); e.style.left = (50 + t * 10) + '%'; $('meter2').insertBefore(e, $('needle')); }
