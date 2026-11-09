@@ -34,7 +34,12 @@
   .stage { transition: background .08s; }
   .stage .note { color: #fff; -webkit-text-stroke: 5px #000; paint-order: stroke fill; }
   .stage .chord, .stage .chord b, .stage .ends { color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; }
-  .tuner { display: grid; grid-template-columns: 3.2em 1fr 3.2em; align-items: center; gap: 8px; background: #000; border-radius: 12px; padding: 12px 10px; }
+  .tunerBox { background: #000; border-radius: 12px; padding: 12px 10px 6px; display: flex; flex-direction: column; gap: 10px; }
+  .tunerBox .strip { height: 34px; gap: 1px; }
+  .tunerBox .strip .k, .tunerBox .strip .k.s { height: 100%; align-self: stretch; border-radius: 3px; }
+  .tunerBox .strip .k span { color: #000 !important; font-weight: 700; font-size: 9px; }
+  .tunerBox .strip .k.on, .tunerBox .strip .k.har { box-shadow: inset 0 0 0 2px #fff; }
+  .tuner { display: grid; grid-template-columns: 3.2em 1fr 3.2em; align-items: center; gap: 8px; }
   .tuner span { font-weight: 700; font-size: 15px; text-align: center; }
   .meter2 { position: relative; height: 40px; }
   .meter2 .base { position: absolute; left: 0; right: 0; top: 19px; height: 2px; background: #444; }
@@ -101,8 +106,10 @@
     <div class="note" id="note">—</div>
     <div class="chord"><div id="nowLabel">pointing at</div><b id="chordNames">—</b></div>
   </div>
+  <div class="tunerBox">
+  <div class="strip" id="strip"><div class="cursor" id="cursor"></div></div>
   <div class="tuner"><span id="tPrev">—</span><div class="meter2" id="meter2"><div class="base"></div><div class="zone" id="tZone"></div><div class="needle" id="needle"></div></div><span id="tNext">—</span></div>
-  <div class="strip" id="strip" hidden><div class="cursor" id="cursor"></div></div>
+  </div>
   <div class="ends"><span id="endLo">—</span><span id="width">—</span><span id="endHi">—</span></div>
   <div class="tipbar" id="tipbar"><i id="tipfill"></i></div>
   <div class="row">
@@ -266,10 +273,10 @@
     cells.forEach((k, i) => { const n = +k.dataset.n, on = n === held[0], hh = har.includes(n), isAim = !held.length && n === aim, sh = k.classList.contains('s');
       k.classList.toggle('on', on); k.classList.toggle('har', hh); k.classList.toggle('aim', isAim);
       const sat = on || hh ? 100 : isAim ? 30 + 70 * close : 70, lit = on || hh ? 55 : isAim ? 24 + 34 * close : sh ? 14 : 22;
-      k.style.background = pcol(n, on || hh ? 1 : isAim ? 0.45 + 0.55 * close : 0.38); });
+      k.style.background = pcol(n, 1); });
     $('cursor').style.left = ((xs + 0.5) / (span + 1) * 100) + '%';
     // whole stage in the note's colour (dim between notes, vivid on the centre, full while playing); tuner below
-    const shownN = held.length ? held[0] : aim, kk = held.length ? 1 : 0.25 + 0.75 * close * close;
+    const shownN = held.length ? held[0] : aim, kk = 1;
     document.querySelector('.stage').style.background = pcol(shownN, kk);
     const as = Math.max(0, Math.min(span, Math.round(xs))), off = +cfg.move ? 0 : Math.max(-0.5, Math.min(0.5, xs - as));
     $('needle').style.left = (50 + off * 100) + '%';

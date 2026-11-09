@@ -482,8 +482,7 @@ void drawScreen() {
   uint32_t sig = shown * 2654435761u ^ (rootHeld + 1) * 40503u ^ cx * 97u ^ (int)(close * 10) * 50021u ^ cfg.ints * 7919u ^ cfg.scale * 131u ^ cfg.kroot * 31337u ^ cfg.kspan * 613u ^ (bleConnected ? 1 : 0) * 2u ^ battPct * 1009u ^ (WiFi.status() == WL_CONNECTED ? 4099u : 0u);
   if (sig == lastSig) return; lastSig = sig;
   // whole screen in the note's colour
-  float k = rootHeld >= 0 ? 1.0f : 0.25f + 0.75f * close * close;
-  d.fillScreen(pitchColor(shown, k));
+  d.fillScreen(pitchColor(shown, 1));   // solid colour, no fading
   // scale + key
   d.setFont(&fonts::Font2); d.setTextSize(1); d.setTextDatum(top_center);
   char key[8]; noteName(cfg.kroot, key); key[strcspn(key, "0123456789-")] = 0;
@@ -498,12 +497,21 @@ void drawScreen() {
   // harmony
   d.setFont(&fonts::Font2); d.setTextDatum(top_center);
   char hb[24] = ""; for (int i = 0; i < 5; i++) if (cfg.ints & (1 << i)) { strcat(hb, "+"); strcat(hb, INT_NAMES[i]); strcat(hb, " "); }
-  drawOutlined(d, hb[0] ? hb : "single notes", W / 2, 140, 1);
+  drawOutlined(d, hb[0] ? hb : "single notes", W / 2, 136, 1);
   // tuner on a black band: where you are between the previous and next note; centre = dead on the note
-  int ty = 160; d.fillRect(0, ty, W, 62, TFT_BLACK);
+  int ty = 154; d.fillRect(0, ty, W, 72, TFT_BLACK);
+  // whole range: every note as a solid block in its colour, white marker = where the foot points
+  { int n = cfg.kspan + 1, rx = 3, rw = W - 6, ry = ty + 5, rh = 14;
+    for (int i = 0; i < n; i++) {
+      int note = stepToNote(i), xa = rx + i * rw / n, xb = rx + (i + 1) * rw / n - 1;
+      d.fillRect(xa, ry, max(1, xb - xa), rh, pitchColor(note, 1));
+      for (int q = 0; q < nHeld; q++) if (held[q] == note) d.drawRect(xa, ry, max(1, xb - xa), rh, TFT_WHITE);
+    }
+    int mk = rx + (int)((xs + 0.5f) / n * rw);
+    d.fillRect(mk - 2, ry - 4, 5, rh + 8, TFT_BLACK); d.fillRect(mk - 1, ry - 3, 3, rh + 6, TFT_WHITE); }
   int aimStep = constrain((int)roundf(xs), 0, cfg.kspan);
   float off = cfg.move ? 0.0f : constrain(xs - aimStep, -0.5f, 0.5f);   // -0.5 = halfway to the note below, +0.5 = halfway to the one above
-  int mx = W / 2, half = W / 2 - 22, my = ty + 24;
+  int mx = W / 2, half = W / 2 - 22, my = ty + 44;
   // neighbours, each in its own colour
   d.setFont(&fonts::Font2); d.setTextSize(1); d.setTextDatum(middle_left);
   char nb[8];
@@ -519,10 +527,6 @@ void drawScreen() {
   int nx = mx + (int)(off * 2 * half);
   d.fillTriangle(nx - 6, my - 18, nx + 6, my - 18, nx, my - 6, TFT_WHITE);
   d.fillRect(nx - 1, my - 18, 3, 36, TFT_WHITE);
-  // range ends
-  char lo[8], hi[8]; noteName(cfg.kroot, lo); noteName(stepToNote(cfg.kspan), hi);
-  d.setFont(&fonts::Font0); d.setTextColor(TFT_DARKGREY);
-  char rg[24]; snprintf(rg, sizeof rg, "range %s-%s", lo, hi); d.setTextDatum(top_center); d.drawString(rg, W / 2, my + 22);
   // status
   d.fillRect(0, H - 13, W, 13, TFT_BLACK);
   d.setTextDatum(bottom_center); d.setTextColor(TFT_LIGHTGREY);
