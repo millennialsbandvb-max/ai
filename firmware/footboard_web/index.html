@@ -146,17 +146,13 @@
   <div class="row"><button type="button" id="keyClear">Clear edges</button></div>
   <span class="pill" id="edgeState">—</span>
   </div>
-  <div class="seg" data-key="kflip">
-    <button type="button" data-v="0">Normal</button>
-    <button type="button" data-v="1">Swap left / right</button>
-  </div>
   <div class="ctl"><label for="kroot">Lowest note (key)</label><output id="krootOut"></output>
     <input type="range" id="kroot" data-key="kroot" min="24" max="84" step="1" value="48"></div>
   <div class="ctl"><label for="kspan">Notes in range</label><output id="kspanOut"></output>
     <input type="range" id="kspan" data-key="kspan" min="2" max="48" step="1" value="18"></div>
   <div class="ctl" id="kdegCtl"><label for="kdeg">Degrees of swivel per note</label><output id="kdegOut"></output>
     <input type="range" id="kdeg" data-key="kdeg" min="1" max="15" step="0.5" value="4"></div>
-  <p class="hint" id="swivelHint">Swivel to where you want your lowest note and tap "Set low end here", then to the highest and tap "Set high end here". The notes spread evenly between them. Degrees per note and Notes in range still widen or narrow it around the same centre. Swap reverses which end is low.</p>
+  <p class="hint" id="swivelHint">Swivel to where you want your lowest note and tap "Set low end here", then to the highest and tap "Set high end here". The notes spread evenly between them. Degrees per note and Notes in range still widen or narrow it around the same centre.</p>
 </section>
 
 <section class="card">
@@ -218,7 +214,7 @@
 
   // ---------- note mapping (same as the board) ----------
   function geom() {
-    const ed = +cfg.kEdge, dir = (ed ? (cfg.kHi >= cfg.kLo ? 1 : -1) : 1) * (+cfg.kflip ? -1 : 1), mid = ed ? (cfg.kLo + cfg.kHi) / 2 : 0;
+    const ed = +cfg.kEdge, dir = ed ? (cfg.kHi >= cfg.kLo ? 1 : -1) : -1, mid = ed ? (cfg.kLo + cfg.kHi) / 2 : 0;
     const d = +$('kdeg').value, h = +$('kspan').value * d / 2; return { dir, mid, d, h };
   }
   function keyForTilt(t) { const g = geom(), c = Math.max(-g.h, Math.min(g.h, (t - g.mid) * g.dir)); return stepToNote(Math.round((c + g.h) / g.d)); }

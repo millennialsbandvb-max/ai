@@ -92,12 +92,8 @@
   <div class="tile"><b id="zoneNow">—</b><span>a tap now plays</span></div>
   <div class="tile"><b id="zoneYaw">—</b><span>swivel</span></div>
 </div>
-<p class="hint">Swivel kit: lay the board flat on your foot. Tap with your foot pointing straight = kick, swivelled out = snare, swivelled in = open hi-hat. The auto hi-hats and tempo work as usual (kicks and snares set the tempo; the open hat doesn't). "Center here" or the board's front button re-centres if it drifts. If in and out are the wrong way round, tap Swap.</p>
+<p class="hint">Swivel kit: lay the board flat on your foot. Tap with your foot pointing straight = kick, swivelled out = snare, swivelled in = open hi-hat. The auto hi-hats and tempo work as usual (kicks and snares set the tempo; the open hat doesn't). "Center here" or the board's front button re-centres if it drifts. Set up for the right foot, USB-C toward the toes.</p>
 <div class="row"><button type="button" id="zoneCenter">Center here</button></div>
-<div class="seg" data-key="zflip">
-  <button type="button" data-v="0">Normal</button>
-  <button type="button" data-v="1">Swap in / out</button>
-</div>
 <div class="ctl"><label for="zdeg">Swivel past this for snare / open hat</label><output id="zdegOut"></output>
   <input type="range" id="zdeg" data-key="zdeg" min="3" max="45" step="1" value="15"></div>
 </div>
@@ -356,7 +352,7 @@
       if (m.cfg) applyCfg(m.cfg);
       if (m.m) { for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; } }
       if (m.yaw !== undefined && +(cfg.snare) === 11) {
-        const rel = (+cfg.zflip ? -m.yaw : m.yaw), z = +$('zdeg').value;
+        const rel = -m.yaw, z = +$('zdeg').value;
         $('zoneNow').textContent = rel > z ? 'SNARE' : rel < -z ? 'OPEN HAT' : 'KICK';
         $('zoneYaw').textContent = (rel > 0 ? 'out ' : rel < 0 ? 'in ' : '') + Math.abs(Math.round(rel)) + '°';
       }

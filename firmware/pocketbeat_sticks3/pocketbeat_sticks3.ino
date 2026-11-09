@@ -409,7 +409,7 @@ void fireStomp(float p, float now) {
   if (cfg.snare == 11) {   // Swivel kit: centre = kick, swivelled out = snare, swivelled in = open hi-hat
     float a = yawDeg; int32_t bestAge = 1 << 30;
     for (int i = 0; i < GH; i++) { int32_t age = (int32_t)(onsetT - gHT[i]); if (age >= 10 && age < bestAge) { bestAge = age; a = yH[i]; } }
-    float rel = cfg.zflip ? -a : a;
+    float rel = -a;   // worn on the right foot: toes turning right (out) = yaw falling
     float vel = constrain(0.5f + 0.5f * ((p - cfg.thr) / (cfg.thr * 3)), 0.0f, 1.0f);
     if (rel < -cfg.zdeg) hit(OHAT, vel, p);                 // open hat: plays straight away, doesn't move the tempo
     else onHit(rel > cfg.zdeg ? SNARE : KICK, vel, p, -1, now);
@@ -779,7 +779,7 @@ void drawScreen() {
   auto& d = scr; const int W = d.width(), H = d.height(); uint32_t now = millis();
   // big word: in swivel kit, the drum a tap would play right now; otherwise the last drum played
   int zone = -1;
-  if (cfg.snare == 11) { float rel = cfg.zflip ? -yawDeg : yawDeg; zone = rel < -cfg.zdeg ? OHAT : rel > cfg.zdeg ? SNARE : KICK; }
+  if (cfg.snare == 11) { float rel = -yawDeg; zone = rel < -cfg.zdeg ? OHAT : rel > cfg.zdeg ? SNARE : KICK; }
   bool flash = lastHitKind >= 0 && now - lastHitAt < 140;
   int big = flash ? lastHitKind : zone >= 0 ? zone : lastHitKind;
   int bpm = beatMs ? (int)roundf(60000.0f / beatMs) : 0;

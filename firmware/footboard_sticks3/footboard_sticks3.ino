@@ -41,7 +41,7 @@ struct Cfg {
   int kroot = 48;          // lowest note (MIDI, 48 = C3)
   int kspan = 18;          // semitones from lowest to highest note (18 = 1.5 octaves)
   float kdeg = 4.0f;       // degrees of swivel per note
-  int kflip = 1;           // swap which way is up
+  int kflip = 1;           // (unused: the mount is fixed, higher notes are always to the right)
   float kflat = 10.0f;     // tip away from where you tapped by more than this (deg) = release
   bool kEdge = false; float kLo = 0, kHi = 0;   // swivel positions of the lowest and highest note, when set
   int ints = 0;            // harmony intervals above the note: bit 0 m3, 1 M3, 2 4th, 3 5th, 4 octave
@@ -102,7 +102,7 @@ static const int SC_LEN[5] = { 12, 7, 7, 5, 5 };
 static const int SC_STEPS[5][12] = { { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }, { 0, 2, 4, 5, 7, 9, 11 }, { 0, 2, 3, 5, 7, 8, 10 }, { 0, 2, 4, 7, 9 }, { 0, 3, 5, 7, 10 } };
 int stepToNote(int i) { int sc = constrain(cfg.scale, 0, 4), n = SC_LEN[sc]; return cfg.kroot + 12 * (i / n) + SC_STEPS[sc][i % n]; }
 int keyForTilt(float a) {
-  float dir = (cfg.kEdge ? (cfg.kHi >= cfg.kLo ? 1.0f : -1.0f) : 1.0f) * (cfg.kflip ? -1.0f : 1.0f);
+  float dir = cfg.kEdge ? (cfg.kHi >= cfg.kLo ? 1.0f : -1.0f) : -1.0f;   // no edges: higher notes as the toes turn right (yaw falls)
   float h = keyHalf(), t = constrain((a - keyMid()) * dir, -h, h);
   return stepToNote((int)roundf((t + h) / cfg.kdeg));
 }
@@ -229,7 +229,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
         if ((slQuiet && now - slQuiet > 80) || now - slT0 > 800) {
           float cm = fabsf(slX) * 100;
           int steps = cfg.scm > 0 ? max(1, min(6, (int)roundf(cm / cfg.scm))) : 1;
-          int dir = slDir * (cfg.kflip ? -1 : 1);
+          int dir = slDir;   // slide right = higher
           slideStep = constrain(slideStep + dir * steps, 0, cfg.kspan);
           char b[80]; snprintf(b, sizeof b, "{\"slide\":%d,\"cm\":%.0f,\"step\":%d}", slDir * steps, cm, slideStep); ws.textAll(b);
           slState = 0; slEnd = now;
@@ -421,7 +421,7 @@ M5Canvas scr(&M5.Display);   // draw off-screen, then push in one go (no flicker
 // where the cursor sits along the range, 0 = lowest note .. 1 = highest (same as the page's strip)
 float cursorFrac() {
   if (cfg.move) return cfg.kspan ? constrain((float)slideStep / cfg.kspan, 0.0f, 1.0f) : 0.5f;
-  float dir = (cfg.kEdge ? (cfg.kHi >= cfg.kLo ? 1.0f : -1.0f) : 1.0f) * (cfg.kflip ? -1.0f : 1.0f);
+  float dir = cfg.kEdge ? (cfg.kHi >= cfg.kLo ? 1.0f : -1.0f) : -1.0f;   // no edges: higher notes as the toes turn right (yaw falls)
   float h = keyHalf(), t = constrain((yawDeg - keyMid()) * dir, -h, h);
   return h > 0 ? (t + h) / (2 * h) : 0.5f;
 }
