@@ -15,7 +15,6 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <Preferences.h>
-#include <Update.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <BLEMIDI_Transport.h>
@@ -28,12 +27,9 @@ USBMIDI usbMidi;
 #endif
 #include "fb_web.h"
 #include "version.h"
-#include "dualboot.h"
+#define FW_ID "fb"
+#include "slots.h"
 
-static const char* OTA_URL = "https://raw.githubusercontent.com/millennialsbandvb-max/ai/main/firmware/bin/footboard_sticks3.app.bin";
-static const char* OTA_VER_URL = "https://raw.githubusercontent.com/millennialsbandvb-max/ai/main/firmware/bin/footboard_version.txt";
-static const char* OTHER_URL = "https://raw.githubusercontent.com/millennialsbandvb-max/ai/main/firmware/bin/pocketbeat_sticks3.app.bin";   // "Switch to PocketBeat drums"
-static const char* OTHER_VER_URL = "https://raw.githubusercontent.com/millennialsbandvb-max/ai/main/firmware/bin/version.txt";
 
 // ---------------- Settings (persisted; append new fields at the end) ----------------
 struct Cfg {
@@ -102,7 +98,7 @@ static const char* INT_NAMES[5] = { "m3", "M3", "4", "5", "8" };
 static const char* NOTE_NAMES[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
 void noteName(int n, char* out) { sprintf(out, "%s%d", NOTE_NAMES[((n % 12) + 12) % 12], n / 12 - 1); }
 
-volatile int otaRequest = 0;
+volatile int otaRequest = 0; char reqId[8] = "";   // 1 self-update, 2 switch to reqId, 3 install reqId
 volatile bool wifiReq = false;   // page saved new home Wi-Fi: (re)join it
 volatile int screenReq = -1;   // from the page: 0 = screen off, 1 = on
 BLEMIDI_CREATE_INSTANCE("Footboard", MIDI);
@@ -409,8 +405,8 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   if (strstr(s, "\"restart\"")) { stepIdx = 0; lastChordTap = millis(); return; }
   if (strstr(s, "\"learnRight\"")) { learnUntil = millis() + 3000; lrnT0 = 0; return; }
   if (strstr(s, "\"allOff\"")) { keyTip = -1; notesOff(); return; }
-  if (strstr(s, "\"switchFw\"")) { otaRequest = 2; return; }
-  if (strstr(s, "\"installOther\"")) { otaRequest = 3; return; }
+  if (const char* q = strstr(s, "\"switchFw\":\"")) { strlcpy(reqId, q + 12, sizeof reqId); if (char* e = strchr(reqId, '"')) *e = 0; otaRequest = 2; return; }
+  if (const char* q = strstr(s, "\"install\":\"")) { strlcpy(reqId, q + 11, sizeof reqId); if (char* e = strchr(reqId, '"')) *e = 0; otaRequest = 3; return; }
   if (const char* q = strstr(s, "\"screen\":")) { screenReq = atoi(q + 9) ? 1 : 0; return; }
   if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }
   if (const char* q = strstr(s, "\"ssid\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t m = min((size_t)(e - q), sizeof(cfg.ssid) - 1); memcpy(cfg.ssid, q, m); cfg.ssid[m] = 0; } }
@@ -455,54 +451,23 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
 
 // ---------------- OTA ----------------
 void otaStatus(const char* msg) { char b[160]; snprintf(b, sizeof b, "{\"ota\":\"%s\"}", msg); ws.textAll(b); }
-bool joinHomeWifi() { return dual::netJoinNow(); }
-// url/verUrl: which firmware to fetch. force: install even if the version matches (switching firmware).
-void doOtaFromGithub(const char* url, const char* verUrl, bool force) {
-  otaStatus("Joining home Wi-Fi…");
-  if (!joinHomeWifi()) return;
-  WiFiClientSecure client; client.setInsecure();
-  HTTPClient http;
-  otaStatus("Checking latest version…");
-  int code = 0; String remote;
-  for (int tries = 0; tries < 3 && code != 200; tries++) {   // DNS/TLS can fail the first time right after joining
-    if (tries) { otaStatus("Retrying GitHub…"); delay(1500); }
-    http.begin(client, verUrl); code = http.GET();
-    remote = code == 200 ? http.getString() : ""; remote.trim(); http.end();
-  }
-  if (code != 200) {
-    char b[120]; snprintf(b, sizeof b, "Could not reach GitHub (error %d, %u KB free). Try again, or use your phone's hotspot.", code, (unsigned)(ESP.getFreeHeap() / 1024));
-    otaStatus(b); return;
-  }
-  if (!force && remote == FW_VERSION) { char b[96]; snprintf(b, sizeof b, "Already up to date (%s).", FW_VERSION); otaStatus(b); return; }
-  otaStatus("Downloading update…");
-  http.begin(client, url); code = http.GET();
-  if (code != 200) { otaStatus("Download failed."); http.end(); return; }
-  int len = http.getSize();
-  if (!Update.begin(len > 0 ? len : UPDATE_SIZE_UNKNOWN)) { otaStatus("Not enough space for update."); http.end(); return; }
-  WiFiClient* stream = http.getStreamPtr();
-  uint8_t buf[2048]; size_t done = 0; uint32_t lastMsg = 0;
-  while (http.connected() && (len < 0 || done < (size_t)len)) {
-    size_t n = stream->available(); if (!n) { delay(1); continue; }
-    n = stream->readBytes(buf, min(n, sizeof buf));
-    if (Update.write(buf, n) != n) { otaStatus("Write failed."); Update.abort(); http.end(); return; }
-    done += n;
-    if (millis() - lastMsg > 500) { char b[64]; snprintf(b, sizeof b, "Installing… %d%%", len > 0 ? (int)(done * 100 / len) : 0); otaStatus(b); lastMsg = millis(); }
-  }
-  http.end();
-  if (Update.end(true)) { dual::beforeSelfUpdateReboot(); otaStatus("Update installed. Restarting… (the other firmware is put back automatically once on home Wi-Fi)"); delay(800); ESP.restart(); }
-  else otaStatus("Update failed to finish.");
+bool joinHomeWifi() { return slots::netJoinNow(); }
+// Self-update from GitHub: goes into a free slot and boots it.
+void doOtaFromGithub() { otaStatus("Joining home Wi-Fi…"); if (joinHomeWifi()) slots::installFromGithub(FW_ID, false, true); }
+// Upload a .app.bin: /update boots it (any firmware), /updateother?id=xx installs it without booting.
+static char uploadId[8] = FW_ID;
+void uploadTo(const char* id, bool boot, size_t index, uint8_t* data, size_t len, bool final) {
+  if (index == 0) { if (!slots::writeBegin(id, 0)) { otaStatus("No slot to write into."); return; } otaStatus("Receiving file…"); }
+  if (len) slots::writeChunk(data, len);
+  if (final) { if (boot) otaStatus("Installed. Restarting…"); if (!slots::writeEnd(boot)) otaStatus("Upload failed (not a valid .app.bin?)."); else { char b[96]; snprintf(b, sizeof b, "%s installed. Use Switch to boot it.", slots::fwById(id) ? slots::fwById(id)->name : id); otaStatus(b); } }
 }
-// Upload a .app.bin and boot it (replaces this firmware; the other slot is then re-filled automatically).
 void handleUpload(AsyncWebServerRequest* r, const String& filename, size_t index, uint8_t* data, size_t len, bool final) {
-  if (index == 0) { if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { otaStatus("Could not start upload."); return; } otaStatus("Receiving file…"); }
-  if (Update.isRunning() && len) Update.write(data, len);
-  if (final) { if (Update.end(true)) { dual::beforeSelfUpdateReboot(); otaStatus("Upload installed. Restarting…"); } else otaStatus("Upload failed (is it the .app.bin?)."); }
+  if (index == 0) strlcpy(uploadId, r->hasParam("id") ? r->getParam("id")->value().c_str() : FW_ID, sizeof uploadId);
+  uploadTo(uploadId, true, index, data, len, final);
 }
-// Upload the OTHER firmware's .app.bin into the spare slot, keeping this one running.
 void handleUploadOther(AsyncWebServerRequest* r, const String& filename, size_t index, uint8_t* data, size_t len, bool final) {
-  if (index == 0) { if (!dual::writeBegin(0)) { otaStatus("Could not open the other slot."); return; } otaStatus("Receiving file for the other slot…"); }
-  if (len) dual::writeChunk(data, len);
-  if (final) { if (dual::writeEnd("uploaded")) { char b[96]; snprintf(b, sizeof b, "%s installed alongside. Use Switch to boot it.", dual::OTHER_NAME); otaStatus(b); } else otaStatus("Upload failed (not a valid .app.bin?)."); }
+  if (index == 0) { strlcpy(uploadId, r->hasParam("id") ? r->getParam("id")->value().c_str() : "", sizeof uploadId); if (!slots::fwById(uploadId) || !strcmp(uploadId, FW_ID)) { otaStatus("Pick which firmware this file is."); uploadId[0] = 0; } }
+  if (uploadId[0]) uploadTo(uploadId, false, index, data, len, final);
 }
 void setupWeb() {
   // Own network "Footboard" is always there; the board also joins your Wi-Fi (or phone hotspot) when one is saved,
@@ -515,14 +480,11 @@ void setupWeb() {
     AsyncWebServerResponse* res = r->beginResponse(200, "text/html", FB_INDEX_GZ, FB_INDEX_GZ_LEN);
     res->addHeader("Content-Encoding", "gzip"); r->send(res);
   });
-  server.on("/update", HTTP_POST, [](AsyncWebServerRequest* r) {
-    bool ok = !Update.hasError(); r->send(200, "text/plain", ok ? "ok" : "fail");
-    if (ok) { delay(500); ESP.restart(); }
-  }, handleUpload);
+  server.on("/update", HTTP_POST, [](AsyncWebServerRequest* r) { r->send(200, "text/plain", "ok"); }, handleUpload);
   server.on("/updateother", HTTP_POST, [](AsyncWebServerRequest* r) { r->send(200, "text/plain", "ok"); }, handleUploadOther);
   server.onNotFound([](AsyncWebServerRequest* r) { r->redirect("/"); });
   server.begin();
-  dual::netBegin("footboard", cfg.ssid, cfg.pass);
+  slots::netBegin("footboard", cfg.ssid, cfg.pass);
 }
 
 // ---------------- Screen ----------------
@@ -735,7 +697,7 @@ void setup() {
   scr.setPsram(true); scr.setColorDepth(16); scr.createSprite(M5.Display.width(), M5.Display.height());
   lastButtonMs = millis();
   loadCfg();
-  dual::begin("fb", "Footboard", "pb", "PocketBeat", OTHER_URL, OTHER_VER_URL, FW_VERSION, otaStatus);
+  slots::begin(otaStatus);
   M5.Speaker.setVolume(cfg.vol);
   M5.Imu.init();
   BLEMIDI.setHandleConnected([]() { bleConnected = true; });
@@ -775,19 +737,19 @@ void loop() {
   if (M5.Imu.update() && M5.Imu.getAccel(&ax, &ay, &az)) { M5.Imu.getGyro(&wx, &wy, &wz); processMotion(ax, ay, az, wx, wy, wz, now); }
   powerCheck(now, wx, wy, wz);
 
-  if (wifiReq) { wifiReq = false; dual::netSet(cfg.ssid, cfg.pass); }
-  dual::netTick(now, ws.count() > 0 || WiFi.softAPgetStationNum() > 0);
+  if (wifiReq) { wifiReq = false; slots::netSet(cfg.ssid, cfg.pass); }
+  slots::netTick(now, ws.count() > 0 || WiFi.softAPgetStationNum() > 0);
   { static uint32_t lastNet = 0;
-    if (ws.count() && now - lastNet > 3000) { lastNet = now; char b[320], dj[160]; dual::json(dj, sizeof dj);
-      bool up = dual::netUp();
+    if (ws.count() && now - lastNet > 3000) { lastNet = now; char b[520], dj[360]; slots::json(dj, sizeof dj);
+      bool up = slots::netUp();
       snprintf(b, sizeof b, "{\"net\":\"%s\",\"host\":\"footboard.local\",\"wifi\":\"%s\",%s}", up ? WiFi.localIP().toString().c_str() : "", up ? cfg.ssid : "", dj); ws.textAll(b); } }
-  // after a self-update the other firmware was overwritten: put it back once home Wi-Fi is up
+  // after an update that overwrote another firmware: put it back once home Wi-Fi is up
   { static uint32_t lastTry = 0;
-    if (dual::reinstallPending() && now - lastTry > 30000) { lastTry = now;
-      if (dual::netUp() || (!ws.count() && dual::netJoinNow(8000))) { screenBufFree(); if (dual::installOther()) dual::setReinstall(false); screenBufRestore(); } } }
+    if (slots::restorePending().length() && now - lastTry > 30000) { lastTry = now;
+      if (slots::netUp() || (!ws.count() && slots::netJoinNow(8000))) { screenBufFree(); slots::restoreTick(true); screenBufRestore(); } } }
   if (otaRequest) { int r = otaRequest; otaRequest = 0;
-    if (r == 2) { if (!dual::switchToOther()) { char b[120]; snprintf(b, sizeof b, "%s is not installed yet. Install it alongside first.", dual::OTHER_NAME); otaStatus(b); } }
-    else { screenBufFree(); if (r == 3) { if (joinHomeWifi()) dual::installOther(); } else doOtaFromGithub(OTA_URL, OTA_VER_URL, false); screenBufRestore(); } }
+    if (r == 2) { if (!slots::switchTo(reqId)) { char b[120]; snprintf(b, sizeof b, "%s is not installed yet. Install it first.", slots::fwById(reqId) ? slots::fwById(reqId)->name : reqId); otaStatus(b); } }
+    else { screenBufFree(); if (r == 3) { if (joinHomeWifi()) slots::installFromGithub(reqId, true, false); } else doOtaFromGithub(); screenBufRestore(); } }
 
   if (ws.count() && nMeter >= 12 && now - lastMeterSend > 25) {
     char b[240]; int p = snprintf(b, sizeof b, "{\"m\":[");

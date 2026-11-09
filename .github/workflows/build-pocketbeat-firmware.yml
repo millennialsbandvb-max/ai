@@ -2,6 +2,7 @@ name: Build PocketBeat firmware
 
 on:
   push:
+    branches: [main]
     paths: ['firmware/**', '.github/workflows/build-pocketbeat-firmware.yml']
   workflow_dispatch:
 
@@ -38,7 +39,7 @@ jobs:
         run: |
           echo "#define FW_VERSION \"${GITHUB_SHA::7}\"" > firmware/pocketbeat_sticks3/version.h
           arduino-cli compile \
-            --fqbn "esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,USBMode=default,CDCOnBoot=cdc" \
+            --fqbn "esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=opi,USBMode=default,CDCOnBoot=cdc" \
             --build-property "compiler.cpp.extra_flags=-DBLEMIDI_ESP32_NIMBLE" \
             --output-dir build \
             firmware/pocketbeat_sticks3
@@ -46,7 +47,7 @@ jobs:
       - name: Compile lite (no samples/speaker, for M5Launcher)
         run: |
           arduino-cli compile \
-            --fqbn "esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,USBMode=default,CDCOnBoot=cdc" \
+            --fqbn "esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=opi,USBMode=default,CDCOnBoot=cdc" \
             --build-property "compiler.cpp.extra_flags=-DBLEMIDI_ESP32_NIMBLE -DPB_LITE" \
             --output-dir build_lite \
             firmware/pocketbeat_sticks3
@@ -55,11 +56,34 @@ jobs:
         run: |
           echo "#define FW_VERSION \"${GITHUB_SHA::7}\"" > firmware/footboard_sticks3/version.h
           arduino-cli compile \
-            --fqbn "esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=enabled,USBMode=default,CDCOnBoot=cdc" \
+            --fqbn "esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=opi,USBMode=default,CDCOnBoot=cdc" \
             --build-property "compiler.cpp.extra_flags=-DBLEMIDI_ESP32_NIMBLE" \
             --output-dir build_fb \
             firmware/footboard_sticks3
           ls -la build_fb
+      - name: Compile ChiPet
+        if: hashFiles('firmware/chipet_sticks3/chipet_sticks3.ino') != ''
+        run: |
+          echo "#define FW_VERSION \"${GITHUB_SHA::7}\"" > firmware/chipet_sticks3/version.h
+          arduino-cli compile \
+            --fqbn "esp32:esp32:esp32s3:FlashSize=8M,PartitionScheme=default_8MB,PSRAM=opi,USBMode=default,CDCOnBoot=cdc" \
+            --build-property "compiler.cpp.extra_flags=-DBLEMIDI_ESP32_NIMBLE" \
+            --output-dir build_pet \
+            firmware/chipet_sticks3
+          ls -la build_pet
+      - name: Merge one full image with all firmwares (3-slot layout)
+        run: |
+          for f in build/pocketbeat_sticks3.ino.bin build_fb/footboard_sticks3.ino.bin build_pet/chipet_sticks3.ino.bin; do
+            [ -f "$f" ] || continue; sz=$(stat -c %s "$f"); echo "$f: $sz bytes"
+            [ "$sz" -le 2228224 ] || { echo "::error::$f is larger than a 2176K slot"; exit 1; }
+          done
+          pip install --quiet esptool
+          CORE=$(ls -d ~/.arduino15/packages/esp32/hardware/esp32/*/ | head -1)
+          BOOTAPP0="$CORE/tools/partitions/boot_app0.bin"
+          ARGS="0x0 build/pocketbeat_sticks3.ino.bootloader.bin 0x8000 build/pocketbeat_sticks3.ino.partitions.bin 0xe000 $BOOTAPP0 0x10000 build/pocketbeat_sticks3.ino.bin 0x230000 build_fb/footboard_sticks3.ino.bin"
+          [ -f build_pet/chipet_sticks3.ino.bin ] && ARGS="$ARGS 0x450000 build_pet/chipet_sticks3.ino.bin"
+          python -m esptool --chip esp32s3 merge_bin -o all_in_one.bin --flash_mode dio --flash_size 8MB $ARGS
+          ls -la all_in_one.bin
       - name: Package
         run: |
           mkdir -p out
@@ -68,6 +92,8 @@ jobs:
           cp build_lite/pocketbeat_sticks3.ino.bin out/pocketbeat_sticks3_lite.app.bin
           cp build_fb/footboard_sticks3.ino.merged.bin out/footboard_sticks3.bin
           cp build_fb/footboard_sticks3.ino.bin out/footboard_sticks3.app.bin
+          cp all_in_one.bin out/sticks3_all_in_one.bin
+          [ -f build_pet/chipet_sticks3.ino.bin ] && cp build_pet/chipet_sticks3.ino.bin out/chipet_sticks3.app.bin || true
           cp firmware/README.md out/
       - uses: actions/upload-artifact@v4
         with:
@@ -85,6 +111,8 @@ jobs:
           cp out/pocketbeat_sticks3_lite.app.bin firmware/bin/pocketbeat_sticks3_lite.app.bin
           cp out/footboard_sticks3.bin firmware/bin/footboard_sticks3.bin
           cp out/footboard_sticks3.app.bin firmware/bin/footboard_sticks3.app.bin
+          cp out/sticks3_all_in_one.bin firmware/bin/sticks3_all_in_one.bin
+          [ -f out/chipet_sticks3.app.bin ] && cp out/chipet_sticks3.app.bin firmware/bin/chipet_sticks3.app.bin && echo "${GITHUB_SHA::7}" > firmware/bin/chipet_version.txt || true
           echo "${GITHUB_SHA::7}" > firmware/bin/version.txt
           echo "${GITHUB_SHA::7}" > firmware/bin/footboard_version.txt
           git add firmware/bin/

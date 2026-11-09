@@ -260,12 +260,12 @@
   <div class="ctl"><label for="ssid">Home Wi-Fi name</label><output></output><input type="text" id="ssid" placeholder="your Wi-Fi network"></div>
   <div class="ctl"><label for="pass">Home Wi-Fi password</label><output></output><input type="password" id="pass" placeholder="password"></div>
   <div class="row"><button type="button" id="saveWifi">Save Wi-Fi</button><button type="button" id="otaBtn" class="go">Check for update</button></div>
-  <p class="hint" id="dualInfo"><b>Other firmware:</b> checking…</p>
-<div class="row"><button type="button" id="switchFw">Switch to PocketBeat</button><button type="button" id="installOther">Install / update PocketBeat alongside</button></div>
-<div class="row"><input type="file" id="fwOtherFile" accept=".bin" hidden><button type="button" id="pickOther">Upload PocketBeat .app.bin into the spare slot</button></div>
+  <p class="hint"><b>Firmware on this board</b> (three slots; switching takes a few seconds and keeps every firmware's settings):</p>
+<div id="fwList" style="display:flex;flex-direction:column;gap:8px"></div>
+<input type="file" id="fwOtherFile" accept=".bin" hidden>
   <div class="row"><input type="file" id="fwFile" accept=".bin" hidden><button type="button" id="pickFw">Upload a .app.bin from this phone</button></div>
   <p class="hint" id="netInfo"><b>Skip the Wi-Fi swapping:</b> save your home Wi-Fi (or your phone's hotspot) below. The board joins it, and from then on you can stay on that network and open the address shown here.</p>
-  <p class="hint" id="otaMsg">Check for update joins your home Wi-Fi, gets the newest Footboard build and installs it (about a minute). Both firmwares can live on the board at once; Switch reboots into the other one in a few seconds.</p>
+  <p class="hint" id="otaMsg">Check for update joins your home Wi-Fi, gets the newest Footboard build and installs it (about a minute). All three firmwares can live on the board at once.</p>
 </section>
 <div class="foot"><span>Board battery <b id="batt">—</b></span><span>Front = center · hold front 1 s = screen off · side = next scale · hold side 3 s = power off</span></div>
 
@@ -501,20 +501,32 @@
         }
       }
       if (m.batt !== undefined) $('batt').textContent = m.batt + '%';
-      if (m.other !== undefined) $('dualInfo').innerHTML = '<b>Other firmware (PocketBeat):</b> ' + (+m.otherOk ? 'installed' + (m.otherVer ? ' (' + m.otherVer + ')' : '') + ' in the spare slot. Switch boots it; your settings for both are kept.' : 'not installed. Install it alongside from GitHub (needs home Wi-Fi), or upload its .app.bin into the spare slot.') + (+m.reinst ? ' Re-installing it after the update as soon as home Wi-Fi is up…' : '');
+      if (m.slots) { window.__me = (m.slots.find(x => +x.run) || {}).id; renderSlots(m); }
       if (m.net !== undefined) $('netInfo').innerHTML = m.net ? '<b>On your Wi-Fi (' + m.wifi + '):</b> stay on it and open <b>http://' + m.host + '</b> (or http://' + m.net + '). Bookmark it.' : '<b>Skip the Wi-Fi swapping:</b> save your home Wi-Fi (or your phone\'s hotspot) below. The board joins it, and from then on you can stay on that network and open the address shown here.';
       if (m.ota) $('otaMsg').textContent = m.ota;
     };
   }
   $('saveWifi').onclick = () => { send({ set: { ssid: $('ssid').value, pass: $('pass').value } }); $('otaMsg').textContent = 'Wi-Fi saved on the board.'; };
-  let confirmSwitch = false; const SWITCH_LABEL = 'Switch to PocketBeat';
-  $('switchFw').addEventListener('click', () => { if (!confirmSwitch) { confirmSwitch = true; $('switchFw').textContent = 'Tap again to switch'; setTimeout(() => { confirmSwitch = false; $('switchFw').textContent = SWITCH_LABEL; }, 4000); return; } send({ switchFw: 1 }); $('otaMsg').textContent = 'Switching… the board restarts into PocketBeat. Join its Wi-Fi (or open pocketbeat.local) afterwards.'; });
-  $('installOther').addEventListener('click', () => { send({ installOther: 1 }); $('otaMsg').textContent = 'Installing PocketBeat into the spare slot…'; });
-  $('pickOther').onclick = () => $('fwOtherFile').click();
+  const FWN = { pb: 'PocketBeat (drums)', fb: 'Footboard (keyboard)', pet: 'ChiPet (chihuahua)' };
+  let uploadFor = '', confirmId = '';
+  function renderSlots(m) {
+    const me = m.slots.find(x => +x.run) || {};
+    $('fwList').innerHTML = m.fws.map(id => { const sl = m.slots.find(x => x.id === id); const here = sl && +sl.run;
+      return '<div class="row" style="align-items:center"><div style="flex:1.4;font-size:14px"><b>' + FWN[id] + '</b><br><span style="color:var(--muted);font-size:12px">' + (here ? 'running now · ' + sl.ver : sl ? 'installed · ' + sl.ver : 'not installed') + '</span></div>'
+        + (here ? '' : '<button type="button" data-sw="' + id + '"' + (sl ? '' : ' disabled') + '>' + (confirmId === id ? 'Tap again' : 'Switch') + '</button>')
+        + '<button type="button" data-inst="' + id + '">' + (here ? 'Update' : sl ? 'Update' : 'Install') + '</button>'
+        + (here ? '' : '<button type="button" data-up="' + id + '">Upload</button>') + '</div>'; }).join('')
+      + (m.restore ? '<p class="hint">' + (FWN[m.restore] || m.restore) + ' was overwritten by the last update and will be put back once the board is on home Wi-Fi.</p>' : '');
+  }
+  $('fwList').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.sw) { if (confirmId !== b.dataset.sw) { confirmId = b.dataset.sw; b.textContent = 'Tap again'; setTimeout(() => { confirmId = ''; }, 4000); return; } send({ switchFw: b.dataset.sw }); $('otaMsg').textContent = 'Switching… the board restarts into ' + FWN[b.dataset.sw] + '. Join its Wi-Fi (or its .local address) afterwards.'; }
+    if (b.dataset.inst) { if (b.dataset.inst === (window.__me || '')) { send({ ota: 1 }); $('otaMsg').textContent = 'Starting…'; } else { send({ install: b.dataset.inst }); $('otaMsg').textContent = 'Installing ' + FWN[b.dataset.inst] + ' from GitHub…'; } }
+    if (b.dataset.up) { uploadFor = b.dataset.up; $('fwOtherFile').click(); } });
   $('fwOtherFile').onchange = async () => {
-    const f = $('fwOtherFile').files[0]; if (!f) return; $('otaMsg').textContent = 'Uploading ' + f.name + ' into the spare slot…';
+    const f = $('fwOtherFile').files[0]; if (!f) return; $('otaMsg').textContent = 'Uploading ' + f.name + ' as ' + FWN[uploadFor] + '…';
     const fd = new FormData(); fd.append('fw', f, f.name);
-    try { await fetch('/updateother', { method: 'POST', body: fd }); } catch (e) { $('otaMsg').textContent = 'Upload ended unexpectedly.'; }
+    try { await fetch('/updateother?id=' + uploadFor, { method: 'POST', body: fd }); } catch (e) { $('otaMsg').textContent = 'Upload ended unexpectedly.'; }
+    $('fwOtherFile').value = '';
   };
   $('otaBtn').onclick = () => { send({ ota: 1 }); $('otaMsg').textContent = 'Starting…'; };
   $('pickFw').onclick = () => $('fwFile').click();
