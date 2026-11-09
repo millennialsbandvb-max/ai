@@ -49,13 +49,13 @@ static bool scanSlot(const esp_partition_t* p, char* id, char* ver) {
   esp_app_desc_t d; if (esp_ota_get_partition_description(p, &d) != ESP_OK) return false;   // no valid image
   size_t carry = 0;
   for (size_t off = 0; off < p->size; off += 4096) {
-    size_t n = min((size_t)4096, p->size - off);
+    size_t n = min((size_t)4096, (size_t)(p->size - off));
     if (esp_partition_read(p, off, buf + carry, n) != ESP_OK) return false;
     size_t tot = carry + n;
     for (size_t i = 0; i + 6 < tot; i++) {
       if (buf[i] == 0x7f && !memcmp(buf + i, needle, 6)) {
         // need the rest of the marker: "<id>:<ver>:" — refetch a small window from flash to be safe
-        uint8_t w[48]; size_t at = off - carry + i; size_t wn = min((size_t)48, p->size - at);
+        uint8_t w[48]; size_t at = off - carry + i; size_t wn = min((size_t)48, (size_t)(p->size - at));
         if (esp_partition_read(p, at, w, wn) != ESP_OK) return false;
         char* s = (char*)w + 6; char* c1 = (char*)memchr(s, ':', wn - 6); if (!c1) return false;
         char* c2 = (char*)memchr(c1 + 1, ':', wn - 6 - (c1 + 1 - s)); if (!c2) return false;
