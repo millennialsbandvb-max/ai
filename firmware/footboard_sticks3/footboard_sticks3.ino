@@ -346,9 +346,16 @@ void doOtaFromGithub(const char* url, const char* verUrl, bool force) {
   WiFiClientSecure client; client.setInsecure();
   HTTPClient http;
   otaStatus("Checking latest version…");
-  http.begin(client, verUrl); int code = http.GET();
-  String remote = code == 200 ? http.getString() : ""; remote.trim(); http.end();
-  if (code != 200) { otaStatus("Could not reach GitHub."); return; }
+  int code = 0; String remote;
+  for (int tries = 0; tries < 3 && code != 200; tries++) {   // DNS/TLS can fail the first time right after joining
+    if (tries) { otaStatus("Retrying GitHub…"); delay(1500); }
+    http.begin(client, verUrl); code = http.GET();
+    remote = code == 200 ? http.getString() : ""; remote.trim(); http.end();
+  }
+  if (code != 200) {
+    char b[120]; snprintf(b, sizeof b, "Could not reach GitHub (error %d, %u KB free). Try again, or use your phone's hotspot.", code, (unsigned)(ESP.getFreeHeap() / 1024));
+    otaStatus(b); return;
+  }
   if (!force && remote == FW_VERSION) { char b[96]; snprintf(b, sizeof b, "Already up to date (%s).", FW_VERSION); otaStatus(b); return; }
   otaStatus("Downloading update…");
   http.begin(client, url); code = http.GET();
@@ -418,8 +425,11 @@ void screenSet(bool on) {
   if (on) { M5.Display.wakeup(); M5.Display.setBrightness(96); } else { M5.Display.setBrightness(0); M5.Display.sleep(); }
 }
 int battPct = -1;
-uint32_t lastSig = 0;   // what the screen last showed; 0 forces a redraw   // read every 2 s, not on every redraw
-M5Canvas scr(&M5.Display);   // draw off-screen, then push in one go (no flicker)
+uint32_t lastSig = 0;   // what the screen last showed; 0 forces a redraw
+M5Canvas scr(&M5.Display);
+// The screen buffer is released during updates so the secure (TLS) connection has enough memory.
+void screenBufFree() { scr.deleteSprite(); }
+void screenBufRestore() { scr.setPsram(true); scr.setColorDepth(16); scr.createSprite(M5.Display.width(), M5.Display.height()); lastSig = 0; }
 // where the cursor sits along the range, 0 = lowest note .. 1 = highest (same as the page's strip)
 float cursorFrac() {
   if (cfg.move) return cfg.kspan ? constrain((float)slideStep / cfg.kspan, 0.0f, 1.0f) : 0.5f;
@@ -521,7 +531,7 @@ void loop() {
   if (M5.Imu.update() && M5.Imu.getAccel(&ax, &ay, &az)) { M5.Imu.getGyro(&wx, &wy, &wz); processMotion(ax, ay, az, wx, wy, wz, now); }
   powerCheck(now, wx, wy, wz);
 
-  if (otaRequest) { int r = otaRequest; otaRequest = 0; if (r == 2) doOtaFromGithub(OTHER_URL, OTHER_VER_URL, true); else doOtaFromGithub(OTA_URL, OTA_VER_URL, false); WiFi.mode(WIFI_AP); }
+  if (otaRequest) { int r = otaRequest; otaRequest = 0; screenBufFree(); if (r == 2) doOtaFromGithub(OTHER_URL, OTHER_VER_URL, true); else doOtaFromGithub(OTA_URL, OTA_VER_URL, false); screenBufRestore(); WiFi.mode(WIFI_AP); }
 
   if (ws.count() && nMeter >= 12 && now - lastMeterSend > 25) {
     char b[240]; int p = snprintf(b, sizeof b, "{\"m\":[");

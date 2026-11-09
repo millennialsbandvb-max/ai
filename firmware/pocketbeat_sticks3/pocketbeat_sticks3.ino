@@ -687,9 +687,16 @@ void doOtaFromGithub(const char* url, const char* verUrl, bool force) {
   WiFiClientSecure client; client.setInsecure();   // GitHub over TLS without a bundled root cert
   HTTPClient http;
   otaStatus("Checking latest version…");
-  http.begin(client, verUrl); int code = http.GET();
-  String remote = code == 200 ? http.getString() : ""; remote.trim(); http.end();
-  if (code != 200) { otaStatus("Could not reach GitHub."); return; }
+  int code = 0; String remote;
+  for (int tries = 0; tries < 3 && code != 200; tries++) {   // DNS/TLS can fail the first time right after joining
+    if (tries) { otaStatus("Retrying GitHub…"); delay(1500); }
+    http.begin(client, verUrl); code = http.GET();
+    remote = code == 200 ? http.getString() : ""; remote.trim(); http.end();
+  }
+  if (code != 200) {
+    char b[120]; snprintf(b, sizeof b, "Could not reach GitHub (error %d, %u KB free). Try again, or use your phone's hotspot.", code, (unsigned)(ESP.getFreeHeap() / 1024));
+    otaStatus(b); return;
+  }
   if (!force && remote == FW_VERSION) { char b[96]; snprintf(b, sizeof b, "Already up to date (%s).", FW_VERSION); otaStatus(b); return; }
   otaStatus("Downloading update…");
   http.begin(client, url); code = http.GET();
@@ -776,7 +783,10 @@ const char* kindLabel(int k) {
   switch (k) { case KICK: return "KICK"; case SNARE: return "SNARE"; case OHAT: return "OPEN HAT"; case SHAKE: return cfg.shk == 2 ? "TAMB" : "SHAKER"; case HAT: return "HAT"; default: return "TAP"; }
 }
 int battPct = -1; uint32_t lastSig = 0;
-M5Canvas scr(&M5.Display);   // draw off-screen, then push in one go (no flicker)
+M5Canvas scr(&M5.Display);
+// The screen buffer is released during updates so the secure (TLS) connection has enough memory.
+void screenBufFree() { scr.deleteSprite(); }
+void screenBufRestore() { scr.setPsram(true); scr.setColorDepth(16); scr.createSprite(M5.Display.width(), M5.Display.height()); lastSig = 0; }
 void drawScreen() {
   auto& d = scr; const int W = d.width(), H = d.height(); uint32_t now = millis();
   // big word: in swivel kit, the drum a tap would play right now; otherwise the last drum played
@@ -870,7 +880,7 @@ void loop() {
   if (M5.Imu.update() && M5.Imu.getAccel(&ax, &ay, &az)) { M5.Imu.getGyro(&wx, &wy, &wz); processMotion(ax, ay, az, wx, wy, wz, now); }
   powerCheck(now, wx, wy, wz);
 
-  if (otaRequest) { int r = otaRequest; otaRequest = 0; if (r == 2) doOtaFromGithub(OTHER_URL, OTHER_VER_URL, true); else doOtaFromGithub(OTA_URL, OTA_VER_URL, false); WiFi.mode(WIFI_AP); }
+  if (otaRequest) { int r = otaRequest; otaRequest = 0; screenBufFree(); if (r == 2) doOtaFromGithub(OTHER_URL, OTHER_VER_URL, true); else doOtaFromGithub(OTA_URL, OTA_VER_URL, false); screenBufRestore(); WiFi.mode(WIFI_AP); }
   if (pending.on && now >= pending.at) { pending.on = false; hit(pending.k, pending.vel, pending.g, pending.sw, pending.lift); }
   clockTick(now);
 
