@@ -76,7 +76,8 @@ struct Cfg {
   bool kEdge = false; float kLo = 0, kHi = 0;      // foot keyboard: swivel positions of the lowest and highest note, when set
   float zdeg = 15.0f;                              // swivel kit: swivel past this (deg) from centre = snare (out) / open hat (in)
   int zflip = 0;                                   // swivel kit: swap which way is out
-  float zin = 15.0f;                               // swivel kit: swivel IN (toes left) past this = open hat; zdeg is OUT (toes right) = snare
+  float zin = 15.0f;                               // swivel kit: swivel IN (toes left) past this = hats; zdeg is OUT (toes right) = snare
+  float zoh = 2.5f;                                // swivel kit: a hat tap harder than this (g) is an open hat, softer is closed
 } cfg;
 Preferences prefs;
 
@@ -220,7 +221,7 @@ void sendMidi(Kind k, float vel) {
 }
 int lastHitKind = -1; uint32_t lastHitAt = 0;   // for the screen's colour flash
 void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
-  if (k != HAT) { lastKind = kindName[k]; lastHitKind = k; lastHitAt = millis(); }
+  if (k != HAT || (cfg.snare == 11 && millis() - lastManualHatMs < 120)) { lastKind = kindName[k]; lastHitKind = k; lastHitAt = millis(); }   // auto hats don't flash the screen
   playBoard(k, vel);
   sendMidi(k, vel);
   if (ws.count()) {
@@ -250,6 +251,7 @@ float qx = 0, qy = 0, qz = 0; bool qInit = false;   // gravity direction tracked
 //          Only that direction (and sign) counts, so the toe lift before a stomp and the swing back don't trigger it.
 float gx = 0, gy = 0, gz = 0;        // gravity estimate (g units)
 float peak = 0; uint32_t peakT = 0, lastStompT = 0;
+bool shaking = false; uint32_t quietUntil = 0;   // violent-shake stop gesture
 uint32_t lastSwingT = 0; bool inSwing = false; float swingPeak = 0;
 float swingAngle = 0; uint32_t swingStill = 0;   // degrees swung (net) along the learned direction since the foot was last at rest
 float meterBuf[12]; int nMeter = 0; uint32_t lastMeterSend = 0;
@@ -412,8 +414,9 @@ void fireStomp(float p, float now) {
     for (int i = 0; i < GH; i++) { int32_t age = (int32_t)(onsetT - gHT[i]); if (age >= 10 && age < bestAge) { bestAge = age; a = yH[i]; } }
     float rel = -a;   // worn on the right foot: toes turning right (out) = yaw falling
     float vel = constrain(0.5f + 0.5f * ((p - cfg.thr) / (cfg.thr * 3)), 0.0f, 1.0f);
-    if (rel < -cfg.zin) hit(OHAT, vel, p);                 // open hat: plays straight away, doesn't move the tempo
-    else onHit(rel > cfg.zdeg ? SNARE : KICK, vel, p, -1, now);
+    // in = hats (soft tap closed, hard tap open) and they set the tempo; kick and snare just play on the grid
+    if (rel < -cfg.zin) onHit(p > cfg.zoh ? OHAT : HAT, vel, p, -1, now);
+    else playOnGrid(rel > cfg.zdeg ? SNARE : KICK, vel, p, now);
     return;
   }
   if (cfg.snare == 9) {   // Shaker: every shake is a hit; strength sets the velocity (lightest = thr, full at 4x thr)
@@ -585,6 +588,21 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
     else keyLiftSince = 0;
   }
 
+  // ---- stop: a violent shake of the foot held for 3 beats stops the hats and the tempo (not in shaker mode) ----
+  if (cfg.snare != 9) {
+    static uint32_t shakeSince = 0, shakeCalm = 0;
+    if (wm > 400) { if (!shakeSince) shakeSince = now; shakeCalm = 0; }
+    else if (shakeSince && wm < 150) { if (!shakeCalm) shakeCalm = now; else if (now - shakeCalm > 200) { shakeSince = 0; shakeCalm = 0; } }
+    shaking = shakeSince && now - shakeSince > 250;   // after a quarter second it's a shake, not a stomp: taps are ignored
+    float need = clockOn && beatMs > 0 ? 3.0f * beatMs : 1500.0f;
+    if (shakeSince && now - shakeSince > need) {
+      shakeSince = 0; shakeCalm = 0; quietUntil = now + 700;   // and ignore the foot settling afterwards
+      if (clockOn) stopClock(); pending.on = false; keyOff();
+      ws.textAll("{\"stopped\":1}");
+    }
+  } else shaking = false;
+  if (shaking || now < quietUntil) { peak = 0; peakT = 0; return; }
+
   // ---- kick: impact spike; not right after a swing (the foot landing from a swing isn't a stomp) ----
   float gate = (cfg.snare == 7 || cfg.snare == 8) ? min(cfg.klvl, cfg.slvl) : cfg.thr;
   if (mag > gate) {
@@ -600,8 +618,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[880];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zin\":%.0f,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zin, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zin\":%.0f,\"zoh\":%.2f,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zin, cfg.zoh, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -649,6 +667,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "kflip", &f); if (f) cfg.kflip = (int)v ? 1 : 0;
   v = jsonNum(s, "zdeg", &f); if (f) cfg.zdeg = constrain(v, 3.0f, 60.0f);
   v = jsonNum(s, "zin", &f); if (f) cfg.zin = constrain(v, 3.0f, 60.0f);
+  v = jsonNum(s, "zoh", &f); if (f) cfg.zoh = constrain(v, 0.3f, 8.0f);
   v = jsonNum(s, "zflip", &f); if (f) cfg.zflip = (int)v ? 1 : 0;
   v = jsonNum(s, "kflat", &f); if (f) cfg.kflat = constrain(v, 3.0f, 40.0f);
   v = jsonNum(s, "kspan", &f); if (f) cfg.kspan = constrain((int)v, 2, 48);
@@ -749,7 +768,7 @@ void screenSet(bool on) {
 }
 // Each drum has its own colour on the screen: kick red, snare blue, open hat gold, shaker green.
 uint16_t kindColor(int k) {
-  switch (k) { case KICK: return 0xF8E4; case SNARE: return 0x2D7F; case OHAT: return TFT_GOLD; case SHAKE: return 0x87E0; case HAT: return TFT_DARKGREY; default: return TFT_WHITE; }
+  switch (k) { case KICK: return 0xF8E4; case SNARE: return 0x2D7F; case OHAT: return TFT_GOLD; case SHAKE: return 0x87E0; case HAT: return 0xC618; default: return TFT_WHITE; }
 }
 const char* kindLabel(int k) {
   switch (k) { case KICK: return "KICK"; case SNARE: return "SNARE"; case OHAT: return "OPEN HAT"; case SHAKE: return cfg.shk == 2 ? "TAMB" : "SHAKER"; case HAT: return "HAT"; default: return "TAP"; }
@@ -763,7 +782,7 @@ void drawScreen() {
   auto& d = scr; const int W = d.width(), H = d.height(); uint32_t now = millis();
   // big word: in swivel kit, the drum a tap would play right now; otherwise the last drum played
   int zone = -1;
-  if (cfg.snare == 11) { float rel = -yawDeg; zone = rel < -cfg.zin ? OHAT : rel > cfg.zdeg ? SNARE : KICK; }
+  if (cfg.snare == 11) { float rel = -yawDeg; zone = rel < -cfg.zin ? HAT : rel > cfg.zdeg ? SNARE : KICK; }
   bool flash = lastHitKind >= 0 && now - lastHitAt < 140;
   int big = flash ? lastHitKind : zone >= 0 ? zone : lastHitKind;
   int bpm = beatMs ? (int)roundf(60000.0f / beatMs) : 0;
@@ -788,10 +807,10 @@ void drawScreen() {
   else d.drawString(nm, W / 2 + 3, cy);
   // what each gesture does / status
   d.setFont(&fonts::Font0); d.setTextSize(1); d.setTextDatum(bottom_left); d.setTextColor(dim);
-  const char* hint = calibrating ? "swing foot 3x..." : cfg.snare == 10 ? "keys: A = centre" : cfg.snare == 11 ? "in=open hat  mid=kick  out=snare" : cfg.snare == 9 ? (cfg.shk == 2 ? "tambourine" : cfg.shk == 1 ? "maracas" : "shaker") : cfg.snare == 7 ? (cfg.lcal && cfg.rcal ? "toe=kick heel=snare" : "SET TOE/HEEL") : cfg.snare == 8 ? (cfg.lcal && cfg.rcal ? "heel=kick toe=snare" : "SET TOE/HEEL") : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A";
+  const char* hint = calibrating ? "swing foot 3x..." : cfg.snare == 10 ? "keys: A = centre" : cfg.snare == 11 ? "in=hats  mid=kick  out=snare" : cfg.snare == 9 ? (cfg.shk == 2 ? "tambourine" : cfg.shk == 1 ? "maracas" : "shaker") : cfg.snare == 7 ? (cfg.lcal && cfg.rcal ? "toe=kick heel=snare" : "SET TOE/HEEL") : cfg.snare == 8 ? (cfg.lcal && cfg.rcal ? "heel=kick toe=snare" : "SET TOE/HEEL") : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A";
   if (cfg.snare == 11 && !calibrating) {   // swivel kit legend in each drum's colour
     d.setFont(&fonts::Font2); d.setTextDatum(bottom_left);
-    d.setTextColor(flash ? TFT_BLACK : kindColor(OHAT)); d.drawString("in  = open hat", 12, H - 52);
+    d.setTextColor(flash ? TFT_BLACK : kindColor(OHAT)); d.drawString("in  = hats (hard=open)", 12, H - 52);
     d.setTextColor(flash ? TFT_BLACK : kindColor(KICK)); d.drawString("mid = kick", 12, H - 36);
     d.setTextColor(flash ? TFT_BLACK : kindColor(SNARE)); d.drawString("out = snare", 12, H - 20);
     d.setFont(&fonts::Font0); d.setTextColor(dim);

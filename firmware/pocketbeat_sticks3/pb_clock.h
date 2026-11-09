@@ -14,6 +14,7 @@ float gapBuf[4]; int nGaps = 0;        // recent raw gaps between hits (ms), new
 int hitsSinceStart = 0;
 bool locked = false; int lockHits = 0; float countStart = 0;   // Locked tempo: count-in hits so far, first count-in hit, and whether the tempo is held
 const int COUNT_IN = 8;
+float lastManualHatMs = -1e9; int hatRun = 0;   // hand-played hats (swivel kit): auto hats step aside, 6 in a row re-set the tempo
 
 static float foldBeat(float ms) {      // put a gap into a normal beat range (70-160 bpm)
   if (ms <= 0) return 0;
@@ -39,7 +40,7 @@ void startClock(float anchor, float now) {
   while (lastEighth + e <= now) { lastEighth += e; eighthIdx++; }
   nextEighth = lastEighth + e; drift = 0; offGrid = 0; clockOn = true;
 }
-void stopClock() { clockOn = false; lastHitMs = 0; firstHitMs = 0; beatMs = 0; offGrid = 0; nGaps = 0; locked = false; lockHits = 0; ws.textAll("{\"bpm\":0}"); }
+void stopClock() { clockOn = false; lastHitMs = 0; firstHitMs = 0; beatMs = 0; offGrid = 0; nGaps = 0; locked = false; lockHits = 0; hatRun = 0; ws.textAll("{\"bpm\":0}"); }
 
 void clockTick(float now) {
   if (!clockOn) return;
@@ -51,6 +52,7 @@ void clockTick(float now) {
     bool onBeat = (eighthIdx % 2) == 0;
     bool play = cfg.hat == 2 || (cfg.hat == 1 && onBeat);
     // never two hats closer than ~60% of an 8th (re-locking the grid can otherwise double one up)
+    if (now - lastManualHatMs < 2.0f * beatMs) play = false;   // you're playing the hats yourself: auto hats wait
     if (play && now - nextEighth < 40 && nextEighth - lastHatPlayed > 0.6f * e) {
       hit(cfg.ohat && hatIsOpen ? OHAT : HAT, onBeat ? 0.7f : 0.45f);   // toe raised past the angle: open hat
       lastHatPlayed = nextEighth;
@@ -69,8 +71,26 @@ void nudgeGrid(float now) {
 // Pending quantized hit (held back to the next grid line, at most 90 ms)
 struct Pending { bool on = false; float at = 0; Kind k; float vel, g, sw, lift; } pending;
 
+// Plays a hit without touching the tempo (swivel kit: kicks and snares; the hats own the tempo there).
+// Quantized to the running grid if quantize is on; keeps the clock alive.
+void playOnGrid(Kind k, float vel, float g, float now) {
+  float when = now;
+  if (clockOn && cfg.quant) {
+    float gsub = beatMs / cfg.quant;
+    float grid = lastEighth + roundf((now - lastEighth) / gsub) * gsub;
+    if (grid - now < 90 && grid >= now - 5) when = grid;
+  }
+  if (clockOn) lastHitMs = now;
+  if (when > now + 1) pending = { true, when, k, vel, g, -1, -1 }; else hit(k, vel, g);
+}
 void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
   float when = now;
+  bool manualHat = (k == HAT || k == OHAT);
+  if (manualHat) {
+    // hats played by foot: a run of 6 evenly spaced ones re-sets the tempo to exactly what was played
+    if (lastHitMs && now - lastHitMs > 150 && now - lastHitMs < 2000) hatRun++; else hatRun = 1;
+    lastManualHatMs = now;
+  }
   if (cfg.tlock) {
     if (locked && clockOn) {
       // Locked: the tempo and the hats' timing are fixed; hits just play (quantized if on).
@@ -116,6 +136,10 @@ void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
       if (++hitsSinceStart == 1 && nGaps >= 2) {
         float B = solveBeat(gapBuf + nGaps - 2, 2);
         if (B && fabsf(B - beatMs) / beatMs > 0.08f) { beatMs = B; startClock(firstHitMs, now); }
+      }
+      if (manualHat && hatRun >= 6 && nGaps >= 4) {              // six hats in a row: take the tempo straight from them
+        float B = solveBeat(gapBuf, nGaps);
+        if (B) { beatMs += 0.6f * (B - beatMs); startClock(now, now); }
       }
       float e = beatMs / 2;
       int n = (int)roundf(dt / e);                               // gap in 8th notes

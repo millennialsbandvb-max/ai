@@ -92,12 +92,14 @@
   <div class="tile"><b id="zoneNow">—</b><span>a tap now plays</span></div>
   <div class="tile"><b id="zoneYaw">—</b><span>swivel</span></div>
 </div>
-<p class="hint">Swivel kit: lay the board flat on your foot. Tap with your foot pointing straight = kick, swivelled out = snare, swivelled in = open hi-hat. The auto hi-hats and tempo work as usual (kicks and snares set the tempo; the open hat doesn't). "Center here" or the board's front button re-centres if it drifts. Set up for the right foot, USB-C toward the toes.</p>
+<p class="hint">Swivel kit: lay the board flat on your foot. Foot straight = kick, swivelled out = snare, swivelled in = hi-hat (soft tap closed, hard tap open). Your hats set the tempo: play 6 in a row and the tempo snaps to them; kicks and snares just play on the grid. While you play hats yourself the auto hats stay quiet and come back two beats after you stop. Shake your foot hard for 3 beats to stop everything. "Center here" or the board's front button re-centres if it drifts. Set up for the right foot, USB-C toward the toes.</p>
 <div class="row"><button type="button" id="zoneCenter">Center here</button></div>
 <div class="ctl"><label for="zdeg">Kick zone, right side (toes out): snare starts past</label><output id="zdegOut"></output>
   <input type="range" id="zdeg" data-key="zdeg" min="3" max="60" step="1" value="15"></div>
-<div class="ctl"><label for="zin">Kick zone, left side (toes in): open hat starts past</label><output id="zinOut"></output>
+<div class="ctl"><label for="zin">Kick zone, left side (toes in): hats start past</label><output id="zinOut"></output>
   <input type="range" id="zin" data-key="zin" min="3" max="60" step="1" value="15"></div>
+<div class="ctl"><label for="zoh">Hats: tap harder than this for an open hat</label><output id="zohOut"></output>
+  <input type="range" id="zoh" data-key="zoh" min="0.3" max="8" step="0.1" value="2.5"></div>
 </div>
 <div id="keyBox" style="display:flex;flex-direction:column;gap:10px">
 <div class="tiles">
@@ -266,7 +268,7 @@
   }
 
   // ---------- Settings UI ----------
-  const fmt = { zdeg: v => v + '° out', zin: v => v + '° in', thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', swang: v => v + '°', kroot: v => noteName(+v), kflat: v => v + '°', kspan: v => (+v + 1) + ' notes', kdeg: v => (+v) + '° (ends at ±' + Math.round(+$('kspan').value * v / 2) + '°)', tthr: v => v + '°', othr: v => v + '°', klvl: v => (+v).toFixed(2) + ' g', slvl: v => (+v).toFixed(2) + ' g', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
+  const fmt = { zdeg: v => v + '° out', zin: v => v + '° in', zoh: v => (+v).toFixed(1) + ' g', thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', swang: v => v + '°', kroot: v => noteName(+v), kflat: v => v + '°', kspan: v => (+v + 1) + ' notes', kdeg: v => (+v) + '° (ends at ±' + Math.round(+$('kspan').value * v / 2) + '°)', tthr: v => v + '°', othr: v => v + '°', klvl: v => (+v).toFixed(2) + ' g', slvl: v => (+v).toFixed(2) + ' g', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
   function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function applyCfg(c) {
     cfg = c;
@@ -379,7 +381,7 @@
       if (m.m) { for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; } }
       if (m.yaw !== undefined && +(cfg.snare) === 11) {
         const rel = -m.yaw;
-        $('zoneNow').textContent = rel > +$('zdeg').value ? 'SNARE' : rel < -+$('zin').value ? 'OPEN HAT' : 'KICK';
+        $('zoneNow').textContent = rel > +$('zdeg').value ? 'SNARE' : rel < -+$('zin').value ? 'HAT (hard = open)' : 'KICK';
         $('zoneYaw').textContent = (rel > 0 ? 'out ' : rel < 0 ? 'in ' : '') + Math.abs(Math.round(rel)) + '°';
       }
       if (m.yaw !== undefined && +(cfg.snare) === 10) $('keyAim').textContent = noteName(keyForTilt(m.yaw)) + (m.flatT > +$('kflat').value ? ' ·' : '');
@@ -404,6 +406,7 @@
       if (m.batt !== undefined) $('batt').textContent = m.batt + '%';
       if (m.slots) { window.__me = (m.slots.find(x => +x.run) || {}).id; renderSlots(m); }
       if (m.net !== undefined) $('netInfo').innerHTML = m.net ? '<b>On your Wi-Fi (' + m.wifi + '):</b> stay on it and open <b>http://' + m.host + '</b> (or http://' + m.net + '). Bookmark it.' : '<b>Skip the Wi-Fi swapping:</b> save your home Wi-Fi (or your phone\'s hotspot) below. The board joins it, and from then on you can stay on that network and open the address shown here.';
+      if (m.stopped) { logRows.unshift('── stopped (shake) ──'); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); }
       if (m.ota) $('otaMsg').textContent = m.ota;
       if (m.edge) $('edgeState').textContent = (m.edge === 'lo' ? 'low end set' : 'high end set') + (+cfg.kEdge ? '' : ', now set the other end');
       if (m.learn) { if (/^(toe|heel)/.test(m.learn)) $('thState').textContent = 'learning ' + m.learn; else $('calState').textContent = m.learn; }
