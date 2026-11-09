@@ -166,9 +166,11 @@
     <input type="range" id="ktot" data-key="ktot" min="5" max="180" step="1" value="72"></div>
   <div class="ctl"><label for="kpos">Where straight-ahead sits</label><output id="kposOut"></output>
     <input type="range" id="kpos" min="0" max="100" step="1" value="50"></div>
-  <div class="ctl" id="kdegCtl"><label for="kdeg">Degrees of swivel per note</label><output id="kdegOut"></output>
+  <div class="ctl" id="kdegCtl"><label for="kdeg">Degrees per note, left side (lower notes)</label><output id="kdegOut"></output>
     <input type="range" id="kdeg" data-key="kdeg" min="1" max="30" step="0.5" value="4"></div>
-  <p class="hint" id="swivelHint">Straight ahead always plays the centre note. Turn your toes left for lower notes, right for higher. Total swivel sets how far you can go; "Where straight-ahead sits" moves the centre toward one side when your foot turns further one way than the other. The number of notes comes from these and Degrees per note.</p>
+  <div class="ctl"><label for="kdegR">Degrees per note, right side (higher notes)</label><output id="kdegROut"></output>
+    <input type="range" id="kdegR" data-key="kdegR" min="1" max="30" step="0.5" value="4"></div>
+  <p class="hint" id="swivelHint">Straight ahead always plays the centre note. Turn your toes left for lower notes, right for higher. Total swivel sets how far you can go; "Where straight-ahead sits" moves the centre toward one side when your foot turns further one way than the other. The number of notes on each side comes from its reach and its degrees per note, so a shorter side can have tighter notes.</p>
   </div>
 </section>
 
@@ -226,7 +228,7 @@
   const NN = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   const noteName = n => NN[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1);
   const INT = [3, 4, 5, 7, 12], INTN = ['m3', 'M3', '4', '5', '8'];
-  let cfg = { kroot: 60, kdeg: 4, ktot: 72, kpos: 0.5, ints: 0, out: 0 };
+  let cfg = { kroot: 60, kdeg: 4, kdegR: 4, ktot: 72, kpos: 0.5, ints: 0, out: 0 };
   let ws = null, yaw = 0, step = 9, held = [], phone = false;
   const logRows = [];
   const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
@@ -234,9 +236,9 @@
   // ---------- note mapping (same as the board) ----------
   // range (same as the board): centre note straight ahead, kdeg per note, ktot total, kpos of it to the left
   const reachL = () => +$('ktot').value * +$('kpos').value / 100, reachR = () => +$('ktot').value * (1 - +$('kpos').value / 100);
-  const nLo = () => Math.floor(reachL() / +$('kdeg').value + 0.5), nHi = () => Math.floor(reachR() / +$('kdeg').value + 0.5);
+  const nLo = () => Math.floor(reachL() / +$('kdeg').value + 0.5), nHi = () => Math.floor(reachR() / +$('kdegR').value + 0.5);
   const spanN = () => Math.max(1, nLo() + nHi());
-  function rangeFrac(a) { return Math.max(0, Math.min(1, (nLo() - a / +$('kdeg').value) / spanN())); }
+  function rangeFrac(a) { const st = nLo() - (a > 0 ? a / +$('kdeg').value : a / +$('kdegR').value); return Math.max(0, Math.min(1, st / spanN())); }
   function keyForTilt(t) { return stepToNote(Math.round(rangeFrac(t) * spanN())); }
   function cursorFrac(t) { if (+cfg.move) return spanN() ? Math.max(0, Math.min(1, step / spanN())) : .5; return rangeFrac(t); }
   const SC = [[0,1,2,3,4,5,6,7,8,9,10,11],[0,2,4,5,7,9,11],[0,2,3,5,7,8,10],[0,2,4,7,9],[0,3,5,7,10]];
@@ -303,9 +305,9 @@
   });
 
   // ---------- controls ----------
-  const fmt = { thr: v => (+v).toFixed(2) + ' g', kroot: v => noteName(+v), ktot: v => v + '°', kdeg: v => (+v).toFixed(1) + '°', kflat: v => v + '°', scm: v => +v ? (+v).toFixed(1) + ' cm' : 'one note per slide', sthr: v => (+v).toFixed(2) + ' g', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%', chan: v => 'ch ' + v };
+  const fmt = { thr: v => (+v).toFixed(2) + ' g', kroot: v => noteName(+v), ktot: v => v + '°', kdeg: v => (+v).toFixed(1) + '°', kdegR: v => (+v).toFixed(1) + '°', kflat: v => v + '°', scm: v => +v ? (+v).toFixed(1) + ' cm' : 'one note per slide', sthr: v => (+v).toFixed(2) + ' g', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%', chan: v => 'ch ' + v };
   for (const el of document.querySelectorAll('input[type=range][data-key]')) {
-    el.addEventListener('input', () => { $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); if (['kroot', 'ktot', 'kdeg'].includes(el.dataset.key)) buildStrip(); });
+    el.addEventListener('input', () => { $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); if (['kroot', 'ktot', 'kdeg', 'kdegR'].includes(el.dataset.key)) buildStrip(); });
     el.addEventListener('change', () => { cfg[el.dataset.key] = +el.value; send({ set: { [el.dataset.key]: +el.value } }); });
     $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value);
   }

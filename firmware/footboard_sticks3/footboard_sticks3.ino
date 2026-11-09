@@ -57,7 +57,8 @@ struct Cfg {
   float rx = 1, ry = 0, rz = 0; bool rSet = false;   // slide: board direction that points to the foot's right (learned)
   float ktot = 72.0f;      // total swivel (deg) from the far left to the far right
   float kpos = 0.5f;       // where straight-ahead (the centre note) sits: share of the total that is to the left
-  int cver = 0;            // settings layout version (1 = centre-note range)
+  int cver = 0;            // settings layout version (1 = centre-note range, 2 = separate left/right note width)
+  float kdegR = 4.0f;      // degrees per note on the right (higher) side; kdeg is the left (lower) side
 } cfg;
 Preferences prefs;
 // Home Wi-Fi is also kept in a shared "wifi" store, so PocketBeat and Footboard can each use it after a switch.
@@ -80,6 +81,7 @@ void loadCfg() {
       cfg.ktot = constrain(cfg.kspan * cfg.kdeg, 5.0f, 180.0f); cfg.kpos = 0.5f; }
     cfg.cver = 1;
   }
+  if (cfg.cver < 2) { cfg.kdegR = cfg.kdeg; cfg.cver = 2; }   // start both sides the same
   updateSpan();
   syncWifi();
 }
@@ -113,7 +115,7 @@ static const int SC_STEPS[5][12] = { { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }, {
 float reachL() { return cfg.ktot * cfg.kpos; }
 float reachR() { return cfg.ktot * (1 - cfg.kpos); }
 int nLo() { return (int)floorf(reachL() / cfg.kdeg + 0.5f); }   // notes below the centre note
-int nHi() { return (int)floorf(reachR() / cfg.kdeg + 0.5f); }   // notes above
+int nHi() { return (int)floorf(reachR() / cfg.kdegR + 0.5f); }   // notes above (right side has its own note width)
 void updateSpan() { cfg.kspan = max(1, nLo() + nHi()); }
 // step i = 0 (far left, lowest) .. kspan (far right, highest); step nLo() is the centre note
 int stepToNote(int i) {
@@ -122,7 +124,7 @@ int stepToNote(int i) {
   return cfg.kroot + 12 * q + SC_STEPS[sc][r];
 }
 // 0..1 along the range (0 = lowest note) for a swivel angle (+ = toes left)
-float rangeFrac(float a) { return cfg.kspan ? constrain((nLo() - a / cfg.kdeg) / cfg.kspan, 0.0f, 1.0f) : 0.5f; }
+float rangeFrac(float a) { float st = nLo() - (a > 0 ? a / cfg.kdeg : a / cfg.kdegR); return cfg.kspan ? constrain(st / cfg.kspan, 0.0f, 1.0f) : 0.5f; }   // + = toes left (lower)
 int keyForTilt(float a) { return stepToNote((int)roundf(rangeFrac(a) * cfg.kspan)); }
 
 int slideStep = 0;   // slide mode: which step of the range the foot is on
@@ -288,8 +290,8 @@ void setScale(int ns) {
 }
 void sendCfg(AsyncWebSocketClient* c) {
   char b[600];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"nLo\":%d,\"ktot\":%.0f,\"kpos\":%.2f,\"kdeg\":%.1f,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"move\":%d,\"sthr\":%.2f,\"scm\":%.1f,\"rSet\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, nLo(), cfg.ktot, cfg.kpos, cfg.kdeg, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, cfg.move, cfg.sthr, cfg.scm, cfg.rSet ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"nLo\":%d,\"ktot\":%.0f,\"kpos\":%.2f,\"kdeg\":%.1f,\"kdegR\":%.1f,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"move\":%d,\"sthr\":%.2f,\"scm\":%.1f,\"rSet\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, nLo(), cfg.ktot, cfg.kpos, cfg.kdeg, cfg.kdegR, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, cfg.move, cfg.sthr, cfg.scm, cfg.rSet ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 float jsonNum(const char* s, const char* key, bool* found) {
@@ -318,6 +320,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "gap", &f); if (f) cfg.gap = constrain((int)v, 60, 600);
   v = jsonNum(s, "kroot", &f); if (f) { cfg.kroot = constrain((int)v, 24, 96); keyTip = -1; notesOff(); }
   v = jsonNum(s, "kdeg", &f); if (f) cfg.kdeg = constrain(v, 1.0f, 30.0f);
+  v = jsonNum(s, "kdegR", &f); if (f) cfg.kdegR = constrain(v, 1.0f, 30.0f);
   v = jsonNum(s, "ktot", &f); if (f) cfg.ktot = constrain(v, 5.0f, 180.0f);
   v = jsonNum(s, "kpos", &f); if (f) cfg.kpos = constrain(v, 0.0f, 1.0f);
   updateSpan();
@@ -597,7 +600,7 @@ void loop() {
   static bool factoryDone = false;
   if (M5.BtnA.wasReleased()) factoryDone = false;
   if (M5.BtnA.pressedFor(6000) && !factoryDone) {   // hold front button 6 s: reset settings, keep Wi-Fi
-    factoryDone = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.cver = 1; cfg = d; updateSpan(); saveCfg(); sendCfg(nullptr);
+    factoryDone = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.cver = 2; cfg = d; updateSpan(); saveCfg(); sendCfg(nullptr);
   }
 
   float ax, ay, az, wx = 0, wy = 0, wz = 0;
