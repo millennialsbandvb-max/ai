@@ -32,6 +32,7 @@
   .note { font-family: var(--display); font-weight: 700; font-size: 84px; line-height: .9; letter-spacing: .01em; font-variant-numeric: tabular-nums; min-width: 3ch; }
   .note.held { }
   .stage { transition: background .08s; }
+  .stage .note.held { color: #ff5a50 !important; }
   .stage .note { color: #fff; -webkit-text-stroke: 5px #000; paint-order: stroke fill; }
   .stage .chord, .stage .chord b, .stage .ends { color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; }
   .tunerBox { background: #000; border-radius: 12px; padding: 12px 10px 6px; display: flex; flex-direction: column; gap: 10px; }
@@ -132,7 +133,7 @@
 </section>
 
 <section class="card">
-  <h2>Scale · key = lowest note</h2>
+  <h2>Scale · key = centre note</h2>
   <div class="seg" data-key="scale" id="scaleSeg">
     <button type="button" data-v="0">Chromatic</button>
     <button type="button" data-v="1">Major</button>
@@ -157,25 +158,17 @@
     <p class="hint">Each slide moves you up or down the range from wherever you are; Center puts you back in the middle. The board can only roughly measure how far you slid, so if notes jump by the wrong amount, set distance to 0 for exactly one note per slide.</p>
   </div>
   <h2>Playing range</h2>
+  <div class="ctl"><label for="kroot">Centre note (straight ahead, also the key)</label><output id="krootOut"></output>
+    <input type="range" id="kroot" data-key="kroot" min="24" max="96" step="1" value="60"></div>
   <div id="swivelBox">
-  <div class="row">
-    <button type="button" id="keyLo">Set low end here</button>
-    <button type="button" id="keyHi">Set high end here</button>
-  </div>
-  <div class="row"><button type="button" id="keyClear">Clear edges</button></div>
-  <span class="pill" id="edgeState">—</span>
-  </div>
-  <div class="ctl"><label for="kroot">Lowest note (key)</label><output id="krootOut"></output>
-    <input type="range" id="kroot" data-key="kroot" min="24" max="84" step="1" value="48"></div>
-  <div class="ctl"><label for="kspan">Notes in range</label><output id="kspanOut"></output>
-    <input type="range" id="kspan" data-key="kspan" min="2" max="48" step="1" value="18"></div>
-  <div class="ctl" id="kLCtl"><label for="kL">Reach to the left (toes in)</label><output id="kLOut"></output>
-    <input type="range" id="kL" min="2" max="80" step="1" value="36"></div>
-  <div class="ctl" id="kRCtl"><label for="kR">Reach to the right (toes out)</label><output id="kROut"></output>
-    <input type="range" id="kR" min="2" max="80" step="1" value="36"></div>
+  <div class="ctl"><label for="ktot">Total swivel, far left to far right</label><output id="ktotOut"></output>
+    <input type="range" id="ktot" data-key="ktot" min="5" max="180" step="1" value="72"></div>
+  <div class="ctl"><label for="kpos">Where straight-ahead sits</label><output id="kposOut"></output>
+    <input type="range" id="kpos" min="0" max="100" step="1" value="50"></div>
   <div class="ctl" id="kdegCtl"><label for="kdeg">Degrees of swivel per note</label><output id="kdegOut"></output>
-    <input type="range" id="kdeg" data-key="kdeg" min="1" max="15" step="0.5" value="4"></div>
-  <p class="hint" id="swivelHint">Swivel to where you want your lowest note and tap "Set low end here", then to the highest and tap "Set high end here". The notes spread evenly between them. Degrees per note and Notes in range still widen or narrow it around the same centre.</p>
+    <input type="range" id="kdeg" data-key="kdeg" min="1" max="30" step="0.5" value="4"></div>
+  <p class="hint" id="swivelHint">Straight ahead always plays the centre note. Turn your toes left for lower notes, right for higher. Total swivel sets how far you can go; "Where straight-ahead sits" moves the centre toward one side when your foot turns further one way than the other. The number of notes comes from these and Degrees per note.</p>
+  </div>
 </section>
 
 <section class="card">
@@ -232,42 +225,40 @@
   const NN = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   const noteName = n => NN[((n % 12) + 12) % 12] + (Math.floor(n / 12) - 1);
   const INT = [3, 4, 5, 7, 12], INTN = ['m3', 'M3', '4', '5', '8'];
-  let cfg = { kroot: 48, kspan: 18, kdeg: 4, kflip: 1, kEdge: 0, kLo: 0, kHi: 0, ints: 0, out: 0 };
+  let cfg = { kroot: 60, kdeg: 4, ktot: 72, kpos: 0.5, ints: 0, out: 0 };
   let ws = null, yaw = 0, step = 9, held = [], phone = false;
   const logRows = [];
   const send = o => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); };
 
   // ---------- note mapping (same as the board) ----------
-  // 0..1 along the range for a swivel angle (same as the board): edges = lowest note at kLo, highest at kHi
-  function rangeFrac(a) {
-    if (+cfg.kEdge && Math.abs(cfg.kHi - cfg.kLo) > 0.5) return Math.max(0, Math.min(1, (a - cfg.kLo) / (cfg.kHi - cfg.kLo)));
-    const h = +$('kspan').value * +$('kdeg').value / 2; return h ? Math.max(0, Math.min(1, (h - a) / (2 * h))) : .5;
-  }
-  function keyForTilt(t) { return stepToNote(Math.round(rangeFrac(t) * +$('kspan').value)); }
-  function cursorFrac(t) { if (+cfg.move) return +$('kspan').value ? Math.max(0, Math.min(1, step / +$('kspan').value)) : .5; return rangeFrac(t); }
+  // range (same as the board): centre note straight ahead, kdeg per note, ktot total, kpos of it to the left
+  const reachL = () => +$('ktot').value * +$('kpos').value / 100, reachR = () => +$('ktot').value * (1 - +$('kpos').value / 100);
+  const nLo = () => Math.floor(reachL() / +$('kdeg').value + 0.5), nHi = () => Math.floor(reachR() / +$('kdeg').value + 0.5);
+  const spanN = () => Math.max(1, nLo() + nHi());
+  function rangeFrac(a) { return Math.max(0, Math.min(1, (nLo() - a / +$('kdeg').value) / spanN())); }
+  function keyForTilt(t) { return stepToNote(Math.round(rangeFrac(t) * spanN())); }
+  function cursorFrac(t) { if (+cfg.move) return spanN() ? Math.max(0, Math.min(1, step / spanN())) : .5; return rangeFrac(t); }
   const SC = [[0,1,2,3,4,5,6,7,8,9,10,11],[0,2,4,5,7,9,11],[0,2,3,5,7,8,10],[0,2,4,7,9],[0,3,5,7,10]];
   const scl = () => SC[Math.max(0, Math.min(4, +cfg.scale || 0))];
-  const stepToNote = i => { const sc = scl(); return +$('kroot').value + 12 * Math.floor(i / sc.length) + sc[i % sc.length]; };
+  const stepToNote = i => { const sc = scl(), o = i - nLo(), q = Math.floor(o / sc.length); return +$('kroot').value + 12 * q + sc[o - q * sc.length]; };
   const chordOf = r => [r, ...INT.filter((_, i) => cfg.ints & (1 << i)).map(s => r + s)];
 
   // ---------- strip ----------
   let cells = [];
   function buildStrip() {
-    const s = $('strip'), root = +$('kroot').value, span = +$('kspan').value;
+    const s = $('strip'), root = +$('kroot').value, span = spanN();
     cells.forEach(c => c.remove()); cells = [];
     for (let i = 0; i <= span; i++) { const n = stepToNote(i);
       const k = document.createElement('div'); k.className = 'k' + (NN[n % 12].includes('#') ? ' s' : ''); k.dataset.n = n;
       if (span <= 14 || n % 12 === root % 12) { const l = document.createElement('span'); l.textContent = noteName(n); k.appendChild(l); }
       s.insertBefore(k, $('cursor')); cells.push(k);
     }
-    $('endLo').textContent = noteName(root); $('endHi').textContent = noteName(stepToNote(span));
-    { const ed = +cfg.kEdge, h = span * +$('kdeg').value / 2, L = ed ? cfg.kLo : h, R = ed ? -cfg.kHi : h;
-      if (document.activeElement !== $('kL')) $('kL').value = Math.round(L); if (document.activeElement !== $('kR')) $('kR').value = Math.round(R);
-      $('kLOut').textContent = Math.round(L) + '°'; $('kROut').textContent = Math.round(R) + '°';
-      $('width').textContent = +cfg.move ? (span + 1) + ' notes · slide to move' : Math.round(L) + '° left · ' + Math.round(R) + '° right · ' + ((L + R) / Math.max(1, span)).toFixed(1) + '° per note'; }
-    $('swivelBox').hidden = $('kdegCtl').hidden = $('kLCtl').hidden = $('kRCtl').hidden = $('swivelHint').hidden = !!+cfg.move; $('slideBox').hidden = !+cfg.move;
+    $('endLo').textContent = noteName(stepToNote(0)); $('endHi').textContent = noteName(stepToNote(span));
+    { const L = reachL(), R = reachR();
+      $('kposOut').textContent = Math.round(L) + '° left · ' + Math.round(R) + '° right';
+      $('width').textContent = +cfg.move ? (span + 1) + ' notes · slide to move' : (nLo() + ' below · ' + nHi() + ' above the centre note'); }
+    $('swivelBox').hidden = !!+cfg.move; $('slideBox').hidden = !+cfg.move;
     $('learnState').textContent = +cfg.rSet ? 'Right direction learned' : 'Not learned yet: tap Learn right first';
-    $('edgeState').textContent = (+cfg.kEdge ? 'Edges set · ' : 'No edges, centred · ') + Math.round(span * +$('kdeg').value) + '° wide';
     paint();
   }
   // colour: every pitch its own, very different colour (same as the board)
@@ -276,7 +267,7 @@
   const stepHue = i => 0;
   for (let t = -5; t <= 5; t++) { const e = document.createElement('div'); e.className = 'tick' + (t === 0 ? ' c' : ''); e.style.left = (50 + t * 10) + '%'; $('meter2').insertBefore(e, $('needle')); }
   function paint() {
-    const span = +$('kspan').value, xs = cursorFrac(yaw) * span, close = +cfg.move ? 1 : Math.max(0, 1 - 2 * Math.abs(xs - Math.round(xs)));
+    const span = spanN(), xs = cursorFrac(yaw) * span, close = +cfg.move ? 1 : Math.max(0, 1 - 2 * Math.abs(xs - Math.round(xs)));
     const aim = +cfg.move ? stepToNote(Math.max(0, Math.min(span, step))) : keyForTilt(yaw), har = held.slice(1);
     cells.forEach((k, i) => { const n = +k.dataset.n, on = n === held[0], hh = har.includes(n), isAim = !held.length && n === aim, sh = k.classList.contains('s');
       k.classList.toggle('on', on); k.classList.toggle('har', hh); k.classList.toggle('aim', isAim);
@@ -308,9 +299,9 @@
   });
 
   // ---------- controls ----------
-  const fmt = { thr: v => (+v).toFixed(2) + ' g', kroot: v => noteName(+v), kspan: v => (+v + 1) + ' notes', kdeg: v => (+v).toFixed(1) + '°', kflat: v => v + '°', scm: v => +v ? (+v).toFixed(1) + ' cm' : 'one note per slide', sthr: v => (+v).toFixed(2) + ' g', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%', chan: v => 'ch ' + v };
+  const fmt = { thr: v => (+v).toFixed(2) + ' g', kroot: v => noteName(+v), ktot: v => v + '°', kdeg: v => (+v).toFixed(1) + '°', kflat: v => v + '°', scm: v => +v ? (+v).toFixed(1) + ' cm' : 'one note per slide', sthr: v => (+v).toFixed(2) + ' g', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%', chan: v => 'ch ' + v };
   for (const el of document.querySelectorAll('input[type=range][data-key]')) {
-    el.addEventListener('input', () => { $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); if (['kroot', 'kspan', 'kdeg'].includes(el.dataset.key)) buildStrip(); });
+    el.addEventListener('input', () => { $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); if (['kroot', 'ktot', 'kdeg'].includes(el.dataset.key)) buildStrip(); });
     el.addEventListener('change', () => { cfg[el.dataset.key] = +el.value; send({ set: { [el.dataset.key]: +el.value } }); });
     $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value);
   }
@@ -321,13 +312,10 @@
   });
   const oct = d => { const r = $('kroot'), v = Math.max(+r.min, Math.min(+r.max, +r.value + 12 * d)); r.value = v; $('krootOut').textContent = noteName(v); cfg.kroot = v; buildStrip(); send({ set: { kroot: v } }); };
   $('octDown').onclick = () => oct(-1); $('octUp').onclick = () => oct(1);
-  for (const [id, key] of [['kL', 'kL'], ['kR', 'kR']]) {
-    $(id).addEventListener('input', () => { $(id + 'Out').textContent = $(id).value + '°'; });
-    $(id).addEventListener('change', () => send({ set: { [key]: +$(id).value } }));
-  }
-  $('center').onclick = () => { send({ keyCenter: 1 }); step = Math.floor(+$('kspan').value / 2); paint(); };
+  $('kpos').addEventListener('input', () => buildStrip());
+  $('kpos').addEventListener('change', () => send({ set: { kpos: +$('kpos').value / 100 } }));
+  $('center').onclick = () => { send({ keyCenter: 1 }); step = nLo(); paint(); };
   $('learnRight').onclick = () => { send({ learnRight: 1 }); $('learnState').textContent = 'Slide your foot to the right now (3 s)…'; };
-  $('keyLo').onclick = () => send({ keyLo: 1 }); $('keyHi').onclick = () => send({ keyHi: 1 }); $('keyClear').onclick = () => send({ keyClear: 1 });
   $('scrOn').addEventListener('click', () => send({ screen: 1 })); $('scrOff').addEventListener('click', () => send({ screen: 0 }));
   $('allOff').onclick = () => { send({ allOff: 1 }); phoneOff(); };
   for (const r of document.querySelectorAll('.ctl input[type=range]')) {   // −/+ nudges
@@ -339,6 +327,7 @@
   }
   function applyCfg(c) {
     cfg = Object.assign(cfg, c);
+    if (c.kpos !== undefined && document.activeElement !== $('kpos')) $('kpos').value = Math.round(c.kpos * 100);
     for (const el of document.querySelectorAll('input[type=range][data-key]')) if (c[el.dataset.key] !== undefined) { el.value = c[el.dataset.key]; $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); }
     for (const seg of document.querySelectorAll('.seg[data-key]')) { const v = String(c[seg.dataset.key]); for (const b of seg.children) b.classList.toggle('on', b.dataset.v === v); }
     if (c.ver) $('ver').textContent = c.ver;
@@ -406,7 +395,6 @@
           if (m.tip >= 0) log('   released (tipped ' + Math.round(m.tip) + '°)');
         }
       }
-      if (m.edge) $('edgeState').textContent = (m.edge === 'lo' ? 'Low end set' : 'High end set') + (+cfg.kEdge ? '' : ' · now set the other end');
       if (m.batt !== undefined) $('batt').textContent = m.batt + '%';
       if (m.net !== undefined) $('netInfo').innerHTML = m.net ? '<b>On your Wi-Fi (' + m.wifi + '):</b> stay on it and open <b>http://' + m.host + '</b> (or http://' + m.net + '). Bookmark it.' : '<b>Skip the Wi-Fi swapping:</b> save your home Wi-Fi (or your phone\'s hotspot) below. The board joins it, and from then on you can stay on that network and open the address shown here.';
       if (m.ota) $('otaMsg').textContent = m.ota;

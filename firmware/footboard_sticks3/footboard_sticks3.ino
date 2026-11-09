@@ -39,8 +39,8 @@ struct Cfg {
   int ver = 1;
   float thr = 1.2f;        // lightest tap that plays (g of impact)
   int gap = 200;           // ms before another tap can play
-  int kroot = 48;          // lowest note (MIDI, 48 = C3)
-  int kspan = 18;          // semitones from lowest to highest note (18 = 1.5 octaves)
+  int kroot = 60;          // centre note: plays with the foot straight ahead (MIDI, 60 = C4); also the key
+  int kspan = 18;          // (worked out) number of note steps across the range
   float kdeg = 4.0f;       // degrees of swivel per note
   int kflip = 1;           // (unused: the mount is fixed, higher notes are always to the right)
   float kflat = 10.0f;     // tip away from where you tapped by more than this (deg) = release
@@ -50,11 +50,14 @@ struct Cfg {
   int vol = 200;           // board speaker volume 0-255
   int chan = 1;            // MIDI channel 1-16
   char ssid[33] = ""; char pass[65] = "";
-  int scale = 0;           // 0 chromatic, 1 major, 2 minor, 3 major pentatonic, 4 minor pentatonic (key = lowest note)
+  int scale = 0;           // 0 chromatic, 1 major, 2 minor, 3 major pentatonic, 4 minor pentatonic (key = centre note)
   int move = 0;            // how notes are picked: 0 swivel (angle), 1 slide (move the foot left/right)
   float sthr = 0.12f;      // slide: sideways push (g) that counts as a slide
   float scm = 5.0f;        // slide: cm of movement per note (0 = one note per slide)
   float rx = 1, ry = 0, rz = 0; bool rSet = false;   // slide: board direction that points to the foot's right (learned)
+  float ktot = 72.0f;      // total swivel (deg) from the far left to the far right
+  float kpos = 0.5f;       // where straight-ahead (the centre note) sits: share of the total that is to the left
+  int cver = 0;            // settings layout version (1 = centre-note range)
 } cfg;
 Preferences prefs;
 // Home Wi-Fi is also kept in a shared "wifi" store, so PocketBeat and Footboard can each use it after a switch.
@@ -71,6 +74,13 @@ void loadCfg() {
   if (n > 0 && n <= sizeof(cfg)) prefs.getBytes("cfg", &cfg, n);
   prefs.end();
   cfg.chan = constrain(cfg.chan, 1, 16);
+  if (cfg.cver < 1) {   // old layout: kroot was the lowest note -> make the middle of the old range the centre note
+    if (n > 0) { static const int L[5] = { 12, 7, 7, 5, 5 }, S[5][12] = { { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }, { 0, 2, 4, 5, 7, 9, 11 }, { 0, 2, 3, 5, 7, 8, 10 }, { 0, 2, 4, 7, 9 }, { 0, 3, 5, 7, 10 } };
+      int sc = constrain(cfg.scale, 0, 4), m = cfg.kspan / 2; cfg.kroot = cfg.kroot + 12 * (m / L[sc]) + S[sc][m % L[sc]];
+      cfg.ktot = constrain(cfg.kspan * cfg.kdeg, 5.0f, 180.0f); cfg.kpos = 0.5f; }
+    cfg.cver = 1;
+  }
+  updateSpan();
   syncWifi();
 }
 
@@ -93,26 +103,29 @@ int rootHeld = -1;                       // the swivelled note of the chord, -1 
 float keyQx = 0, keyQy = 0, keyQz = 1;   // foot orientation when the note started
 uint32_t keyOnAt = 0, keyLiftSince = 0;
 float keyTip = 0;
-bool loSet = false, hiSet = false;
 char lastName[8] = "--";
 
-// Range: without edges it's centred, kdeg per note. With edges, the lowest note sits at kLo and the highest at kHi
-// (swivel degrees; + = toes left). The Left/Right reach sliders set kLo = +left and kHi = -right, so the two sides
-// can be different sizes.
-float keyHalf() { return cfg.kEdge ? fabsf(cfg.kHi - cfg.kLo) / 2 : cfg.kspan * cfg.kdeg / 2; }
-float keyMid() { return cfg.kEdge ? (cfg.kLo + cfg.kHi) / 2 : 0; }
-// 0..1 along the range (0 = lowest note) for a swivel angle
-float rangeFrac(float a) {
-  if (cfg.kEdge && fabsf(cfg.kHi - cfg.kLo) > 0.5f) return constrain((a - cfg.kLo) / (cfg.kHi - cfg.kLo), 0.0f, 1.0f);
-  float h = keyHalf(); return h > 0 ? constrain((h - a) / (2 * h), 0.0f, 1.0f) : 0.5f;   // higher notes as the toes turn right (yaw falls)
-}
-// Scales: semitones above the key for each step. "Notes in range" counts steps of the chosen scale.
+// Range: the centre note plays with the foot straight ahead; each note is kdeg degrees of swivel; the range runs
+// ktot degrees in total, kpos of it to the left (toes in = lower notes) and the rest to the right (higher).
+// Notes are counted in steps of the chosen scale, with the centre note as the key.
 static const int SC_LEN[5] = { 12, 7, 7, 5, 5 };
 static const int SC_STEPS[5][12] = { { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }, { 0, 2, 4, 5, 7, 9, 11 }, { 0, 2, 3, 5, 7, 8, 10 }, { 0, 2, 4, 7, 9 }, { 0, 3, 5, 7, 10 } };
-int stepToNote(int i) { int sc = constrain(cfg.scale, 0, 4), n = SC_LEN[sc]; return cfg.kroot + 12 * (i / n) + SC_STEPS[sc][i % n]; }
+float reachL() { return cfg.ktot * cfg.kpos; }
+float reachR() { return cfg.ktot * (1 - cfg.kpos); }
+int nLo() { return (int)floorf(reachL() / cfg.kdeg + 0.5f); }   // notes below the centre note
+int nHi() { return (int)floorf(reachR() / cfg.kdeg + 0.5f); }   // notes above
+void updateSpan() { cfg.kspan = max(1, nLo() + nHi()); }
+// step i = 0 (far left, lowest) .. kspan (far right, highest); step nLo() is the centre note
+int stepToNote(int i) {
+  int sc = constrain(cfg.scale, 0, 4), n = SC_LEN[sc], o = i - nLo();
+  int q = o >= 0 ? o / n : -((-o + n - 1) / n), r = o - q * n;
+  return cfg.kroot + 12 * q + SC_STEPS[sc][r];
+}
+// 0..1 along the range (0 = lowest note) for a swivel angle (+ = toes left)
+float rangeFrac(float a) { return cfg.kspan ? constrain((nLo() - a / cfg.kdeg) / cfg.kspan, 0.0f, 1.0f) : 0.5f; }
 int keyForTilt(float a) { return stepToNote((int)roundf(rangeFrac(a) * cfg.kspan)); }
 
-int slideStep = 9;   // slide mode: which step of the range the foot is on
+int slideStep = 0;   // slide mode: which step of the range the foot is on
 
 void notesOff() {
   if (rootHeld < 0) return;
@@ -196,7 +209,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   if (wm < 6 && fabsf(am - 1.0f) < 0.03f) { const float b = 0.01f; bwx += b * (wx - bwx); bwy += b * (wy - bwy); bwz += b * (wz - bwz); }
   float yr = (wx - bwx) * qx + (wy - bwy) * qy + (wz - bwz) * qz;
   if (fabsf(yr) > 1.5f) yawDeg += yr * dts;
-  yawDeg = constrain(yawDeg, keyMid() - keyHalf() - 15, keyMid() + keyHalf() + 15);
+  yawDeg = constrain(yawDeg, -reachR() - 15, reachL() + 15);
   // ---- slide: sideways movement of the whole foot ----
   {
     // Gravity for slides: turned with the gyro, but only nudged toward the accelerometer very slowly (and not at all
@@ -270,14 +283,13 @@ int aimNote() { return cfg.move ? stepToNote(constrain(slideStep, 0, cfg.kspan))
 void notesOff();
 // change scale, keeping about the same span in octaves
 void setScale(int ns) {
-  float oct = (stepToNote(cfg.kspan) - cfg.kroot) / 12.0f;
-  cfg.scale = constrain(ns, 0, 4); cfg.kspan = constrain((int)roundf(oct * SC_LEN[cfg.scale]), 2, 48);
+  cfg.scale = constrain(ns, 0, 4); updateSpan();
   slideStep = constrain(slideStep, 0, cfg.kspan); keyTip = -1; notesOff();
 }
 void sendCfg(AsyncWebSocketClient* c) {
   char b[600];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"kdeg\":%.1f,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"move\":%d,\"sthr\":%.2f,\"scm\":%.1f,\"rSet\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, cfg.kdeg, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, cfg.move, cfg.sthr, cfg.scm, cfg.rSet ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"nLo\":%d,\"ktot\":%.0f,\"kpos\":%.2f,\"kdeg\":%.1f,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"move\":%d,\"sthr\":%.2f,\"scm\":%.1f,\"rSet\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, nLo(), cfg.ktot, cfg.kpos, cfg.kdeg, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, cfg.move, cfg.sthr, cfg.scm, cfg.rSet ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 float jsonNum(const char* s, const char* key, bool* found) {
@@ -292,16 +304,8 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   char s[256]; size_t n = min(len, sizeof(s) - 1); memcpy(s, data, n); s[n] = 0;
   bool f;
   if (strstr(s, "\"get\"")) { sendCfg(client); return; }
-  if (strstr(s, "\"keyCenter\"")) { yawDeg = 0; slideStep = cfg.kspan / 2; return; }
+  if (strstr(s, "\"keyCenter\"")) { yawDeg = 0; slideStep = nLo(); return; }
   if (strstr(s, "\"learnRight\"")) { learnUntil = millis() + 3000; lrnT0 = 0; return; }
-  if (strstr(s, "\"keyLo\"") || strstr(s, "\"keyHi\"")) {
-    bool lo = strstr(s, "\"keyLo\"") != nullptr;
-    if (lo) { cfg.kLo = yawDeg; loSet = true; } else { cfg.kHi = yawDeg; hiSet = true; }
-    cfg.kEdge = (loSet || cfg.kEdge) && (hiSet || cfg.kEdge) && fabsf(cfg.kHi - cfg.kLo) >= 6;
-    if (cfg.kEdge) cfg.kdeg = constrain(fabsf(cfg.kHi - cfg.kLo) / max(1, cfg.kspan), 1.0f, 15.0f);
-    saveCfg(); sendCfg(nullptr); ws.textAll(lo ? "{\"edge\":\"lo\"}" : "{\"edge\":\"hi\"}"); return;
-  }
-  if (strstr(s, "\"keyClear\"")) { cfg.kEdge = false; cfg.kLo = cfg.kHi = 0; loSet = hiSet = false; yawDeg = 0; saveCfg(); sendCfg(nullptr); return; }
   if (strstr(s, "\"allOff\"")) { keyTip = -1; notesOff(); return; }
   if (strstr(s, "\"switchFw\"")) { otaRequest = 2; return; }
   if (const char* q = strstr(s, "\"screen\":")) { screenReq = atoi(q + 9) ? 1 : 0; return; }
@@ -313,17 +317,10 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "thr", &f); if (f) cfg.thr = constrain(v, 0.05f, 8.0f);
   v = jsonNum(s, "gap", &f); if (f) cfg.gap = constrain((int)v, 60, 600);
   v = jsonNum(s, "kroot", &f); if (f) { cfg.kroot = constrain((int)v, 24, 96); keyTip = -1; notesOff(); }
-  v = jsonNum(s, "kspan", &f); if (f) { cfg.kspan = constrain((int)v, 2, 48); if (cfg.kEdge) cfg.kdeg = fabsf(cfg.kHi - cfg.kLo) / cfg.kspan; }
-  v = jsonNum(s, "kdeg", &f);
-  if (f) { float nd = constrain(v, 1.0f, 15.0f);   // with edges: widen/narrow both sides in proportion
-    if (cfg.kEdge && cfg.kdeg > 0) { float k = nd / cfg.kdeg; cfg.kLo *= k; cfg.kHi *= k; } cfg.kdeg = nd; }
-  { bool fl, fr; float L = jsonNum(s, "kL", &fl), R = jsonNum(s, "kR", &fr);   // reach to the left / right of centre (deg)
-    if (fl || fr) {
-      if (!cfg.kEdge) { float h = cfg.kspan * cfg.kdeg / 2; cfg.kLo = h; cfg.kHi = -h; cfg.kEdge = true; }
-      if (fl) cfg.kLo = constrain(L, 2.0f, 80.0f);
-      if (fr) cfg.kHi = -constrain(R, 2.0f, 80.0f);
-      cfg.kdeg = fabsf(cfg.kHi - cfg.kLo) / max(1, cfg.kspan);
-    } }
+  v = jsonNum(s, "kdeg", &f); if (f) cfg.kdeg = constrain(v, 1.0f, 30.0f);
+  v = jsonNum(s, "ktot", &f); if (f) cfg.ktot = constrain(v, 5.0f, 180.0f);
+  v = jsonNum(s, "kpos", &f); if (f) cfg.kpos = constrain(v, 0.0f, 1.0f);
+  updateSpan();
   v = jsonNum(s, "kflip", &f); if (f) cfg.kflip = (int)v ? 1 : 0;
   v = jsonNum(s, "kflat", &f); if (f) cfg.kflat = constrain(v, 3.0f, 40.0f);
   v = jsonNum(s, "ints", &f); if (f) cfg.ints = constrain((int)v, 0, 31);
@@ -334,7 +331,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
     int ns = constrain((int)v, 0, 4);
     if (ns != cfg.scale) setScale(ns);
   }
-  v = jsonNum(s, "move", &f); if (f) { cfg.move = (int)v ? 1 : 0; slideStep = cfg.kspan / 2; slState = 0; }
+  v = jsonNum(s, "move", &f); if (f) { cfg.move = (int)v ? 1 : 0; slideStep = nLo(); slState = 0; }
   v = jsonNum(s, "sthr", &f); if (f) cfg.sthr = constrain(v, 0.03f, 1.0f);
   v = jsonNum(s, "scm", &f); if (f) cfg.scm = constrain(v, 0.0f, 30.0f);
   slideStep = constrain(slideStep, 0, cfg.kspan);
@@ -474,11 +471,11 @@ uint16_t pitchColor(int note, float bright) {   // bright 0..1
   return M5.Display.color565((uint8_t)(((c >> 16) & 255) * bright), (uint8_t)(((c >> 8) & 255) * bright), (uint8_t)((c & 255) * bright));
 }
 // white text with a black border
-void drawOutlined(M5Canvas& d, const char* t, int x, int y, int b) {
+void drawOutlined(M5Canvas& d, const char* t, int x, int y, int b, uint16_t fill) {
   d.setTextColor(TFT_BLACK);
   static const int8_t DX[8] = { 1, 1, 0, -1, -1, -1, 0, 1 }, DY[8] = { 0, 1, 1, 1, 0, -1, -1, -1 };   // 8 directions keeps it quick
   for (int r = b; r > 0; r = (r >= 3 ? r / 2 : 0)) for (int i = 0; i < 8; i++) d.drawString(t, x + DX[i] * r, y + DY[i] * r);
-  d.setTextColor(TFT_WHITE); d.drawString(t, x, y);
+  d.setTextColor(fill); d.drawString(t, x, y);
 }
 void drawScreen() {
   auto& d = scr; const int W = d.width(), H = d.height();
@@ -495,18 +492,19 @@ void drawScreen() {
   // scale + key
   d.setFont(&fonts::Font2); d.setTextSize(1); d.setTextDatum(top_center);
   char key[8]; noteName(cfg.kroot, key); key[strcspn(key, "0123456789-")] = 0;
-  char top[32]; snprintf(top, sizeof top, "%s %s", key, SCN[constrain(cfg.scale, 0, 4)]); drawOutlined(d, top, W / 2, 3, 1);
+  char top[32]; snprintf(top, sizeof top, "%s %s", key, SCN[constrain(cfg.scale, 0, 4)]); drawOutlined(d, top, W / 2, 3, 1, TFT_WHITE);
   // big note: white letters, black border
   d.setTextDatum(middle_center); d.setFont(&fonts::FreeSansBold24pt7b);
   const char* pc = NOTE_NAMES[((shown % 12) + 12) % 12];
   float sz = min(2.2f, (W - 12) / (float)max((int32_t)1, (int32_t)d.textWidth(pc)));
-  d.setTextSize(sz); drawOutlined(d, pc, W / 2, 64, 4);
+  uint16_t letter = rootHeld >= 0 ? M5.Display.color565(255, 90, 80) : TFT_WHITE;   // reddish while the note sounds
+  d.setTextSize(sz); drawOutlined(d, pc, W / 2, 64, 4, letter);
   d.setFont(&fonts::FreeSansBold18pt7b); d.setTextSize(1);
-  char oc[6]; snprintf(oc, sizeof oc, "%d", shown / 12 - 1); drawOutlined(d, oc, W / 2, 124, 3);
+  char oc[6]; snprintf(oc, sizeof oc, "%d", shown / 12 - 1); drawOutlined(d, oc, W / 2, 124, 3, letter);
   // harmony
   d.setFont(&fonts::Font2); d.setTextDatum(top_center);
   char hb[24] = ""; for (int i = 0; i < 5; i++) if (cfg.ints & (1 << i)) { strcat(hb, "+"); strcat(hb, INT_NAMES[i]); strcat(hb, " "); }
-  drawOutlined(d, hb[0] ? hb : "single notes", W / 2, 136, 1);
+  drawOutlined(d, hb[0] ? hb : "single notes", W / 2, 136, 1, TFT_WHITE);
   // tuner on a black band: where you are between the previous and next note; centre = dead on the note
   int ty = 154; d.fillRect(0, ty, W, 72, TFT_BLACK);
   // whole range: every note as a solid block in its colour, white marker = where the foot points
@@ -578,12 +576,12 @@ void loop() {
   if (M5.BtnB.wasReleased() && !wakeOnly) {   // side button: next scale (chromatic > major > minor > major pent > minor pent)
     setScale((cfg.scale + 1) % 5); saveCfg(); sendCfg(nullptr); lastDraw = 0;
   }
-  if (M5.BtnA.wasReleased()) { if (!wakeOnly && !resetHeld) { yawDeg = 0; slideStep = cfg.kspan / 2; } resetHeld = false; }
+  if (M5.BtnA.wasReleased()) { if (!wakeOnly && !resetHeld) { yawDeg = 0; slideStep = nLo(); } resetHeld = false; }
   if ((M5.BtnA.wasReleased() || M5.BtnB.wasReleased()) && wakeOnly) wakeOnly = false;
   static bool factoryDone = false;
   if (M5.BtnA.wasReleased()) factoryDone = false;
   if (M5.BtnA.pressedFor(6000) && !factoryDone) {   // hold front button 6 s: reset settings, keep Wi-Fi
-    factoryDone = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); cfg = d; saveCfg(); sendCfg(nullptr);
+    factoryDone = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.cver = 1; cfg = d; updateSpan(); saveCfg(); sendCfg(nullptr);
   }
 
   float ax, ay, az, wx = 0, wy = 0, wz = 0;
