@@ -450,21 +450,25 @@ float cursorFrac() {
   if (cfg.move) return cfg.kspan ? constrain((float)slideStep / cfg.kspan, 0.0f, 1.0f) : 0.5f;
   return rangeFrac(yawDeg);
 }
-// Colour: every pitch has its own, very different colour (neighbouring notes never look alike). The whole screen
+// Colour: each pitch has a fixed colour (see PITCH_RGB). The whole screen
 // takes the colour of the note you're on: dim between notes, vivid on the note's centre, full while it plays.
-static const uint32_t PITCH_RGB[12] = {   // rainbow round the octave, C red -> B rose
-  0xFF0000,  // C  red
-  0xFF8000,  // C# orange
-  0xFFFF00,  // D  yellow
-  0x80FF00,  // D# chartreuse
-  0x00F200,  // E  green
-  0x00F279,  // F  spring green
-  0x00F2F2,  // F# cyan
-  0x0080FF,  // G  azure
-  0x0000FF,  // G# blue
-  0x8000FF,  // A  violet
-  0xFF00FF,  // A# magenta
-  0xFF0080,  // B  rose
+// Naturals are the rainbow, ROYGBIV: C red, D orange, E yellow, F green, G blue, A indigo, B violet.
+// Sharps/flats follow one rule: the mix of the two naturals they sit between, darkened to 45%, so they read
+// like the black keys of a piano (C# = dark red-orange, D# = dark amber, F# = dark teal, G# = dark blue-indigo,
+// A# = dark purple).
+static const uint32_t PITCH_RGB[12] = {
+  0xE8202A,  // C  red
+  0x6E2709,  // C# dark mix of C + D
+  0xFF8C00,  // D  orange
+  0x735206,  // D# dark mix of D + E
+  0xFFE21A,  // E  yellow
+  0x1DB233,  // F  green
+  0x0E3D45,  // F# dark mix of F + G
+  0x1F5BFF,  // G  blue
+  0x1B1F62,  // G# dark mix of G + A
+  0x5A2DB5,  // A  indigo
+  0x3D1B5C,  // A# dark mix of A + B
+  0xB44CE6,  // B  violet
 };
 uint16_t pitchColor(int note, float bright) {   // bright 0..1
   uint32_t c = PITCH_RGB[((note % 12) + 12) % 12]; bright = constrain(bright, 0.0f, 1.0f);
@@ -511,7 +515,7 @@ void drawScreen() {
   { int n = cfg.kspan + 1, rx = 3, rw = W - 6, ry = ty + 5, rh = 14;
     for (int i = 0; i < n; i++) {
       int note = stepToNote(i), xa = rx + i * rw / n, xb = rx + (i + 1) * rw / n - 1;
-      d.fillRect(xa, ry, max(1, xb - xa), rh, pitchColor(note, 1));
+      d.fillRect(xa, ry, max(1, xb - xa), NOTE_NAMES[((note % 12) + 12) % 12][1] == '#' ? rh * 2 / 3 : rh, pitchColor(note, 1));   // sharps shorter, like black keys
       for (int q = 0; q < nHeld; q++) if (held[q] == note) d.drawRect(xa, ry, max(1, xb - xa), rh, TFT_WHITE);
     }
     int mk = rx + (int)((xs + 0.5f) / n * rw);
