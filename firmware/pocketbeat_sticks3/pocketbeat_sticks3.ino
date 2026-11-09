@@ -217,8 +217,9 @@ void sendMidi(Kind k, float vel) {
   usbMidi.noteOff(midiNote[k], 0, 10);
 #endif
 }
+int lastHitKind = -1; uint32_t lastHitAt = 0;   // for the screen's colour flash
 void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
-  if (k != HAT) lastKind = kindName[k];
+  if (k != HAT) { lastKind = kindName[k]; lastHitKind = k; lastHitAt = millis(); }
   playBoard(k, vel);
   sendMidi(k, vel);
   if (ws.count()) {
@@ -765,17 +766,54 @@ void screenSet(bool on) {
   if (on) { M5.Display.wakeup(); M5.Display.setBrightness(96); }
   else { M5.Display.setBrightness(0); M5.Display.sleep(); }
 }
+// Each drum has its own colour on the screen: kick red, snare blue, open hat gold, shaker green.
+uint16_t kindColor(int k) {
+  switch (k) { case KICK: return 0xF8E4; case SNARE: return 0x2D7F; case OHAT: return TFT_GOLD; case SHAKE: return 0x87E0; case HAT: return TFT_DARKGREY; default: return TFT_WHITE; }
+}
+const char* kindLabel(int k) {
+  switch (k) { case KICK: return "KICK"; case SNARE: return "SNARE"; case OHAT: return "OPEN HAT"; case SHAKE: return cfg.shk == 2 ? "TAMB" : "SHAKER"; case HAT: return "HAT"; default: return "TAP"; }
+}
+int battPct = -1; uint32_t lastSig = 0;
+M5Canvas scr(&M5.Display);   // draw off-screen, then push in one go (no flicker)
 void drawScreen() {
-  auto& d = M5.Display;
-  d.startWrite(); d.fillScreen(TFT_BLACK);
-  d.setTextColor(TFT_WHITE, TFT_BLACK); d.setTextSize(2);
-  d.setCursor(4, 4); d.printf("%d bpm", beatMs ? (int)roundf(60000.0f / beatMs) : 0);
-  d.setCursor(4, 30); d.setTextColor(TFT_ORANGE); d.print(lastKind);
-  d.setTextSize(1); d.setTextColor(TFT_DARKGREY);
-  d.setCursor(4, 60); d.printf("BLE %s  WiFi %d", bleConnected ? "on" : "--", WiFi.softAPgetStationNum());
-  d.setCursor(4, 72); d.printf("batt %d%%  v%s", M5.Power.getBatteryLevel(), FW_VERSION);
-  d.setCursor(4, 84); d.print(calibrating ? "swing foot 3x..." : cfg.snare == 10 ? "keys: A = centre" : cfg.snare == 11 ? "in=hat mid=kick out=snr" : cfg.snare == 9 ? (cfg.shk == 2 ? "tambourine" : cfg.shk == 1 ? "maracas" : "shaker") : cfg.snare == 7 ? (cfg.lcal && cfg.rcal ? "toe=kick heel=snare" : "SET TOE/HEEL") : cfg.snare == 8 ? (cfg.lcal && cfg.rcal ? "heel=kick toe=snare" : "SET TOE/HEEL") : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A");
-  d.endWrite();
+  auto& d = scr; const int W = d.width(), H = d.height(); uint32_t now = millis();
+  // big word: in swivel kit, the drum a tap would play right now; otherwise the last drum played
+  int zone = -1;
+  if (cfg.snare == 11) { float rel = cfg.zflip ? -yawDeg : yawDeg; zone = rel < -cfg.zdeg ? OHAT : rel > cfg.zdeg ? SNARE : KICK; }
+  bool flash = lastHitKind >= 0 && now - lastHitAt < 140;
+  int big = flash ? lastHitKind : zone >= 0 ? zone : lastHitKind;
+  int bpm = beatMs ? (int)roundf(60000.0f / beatMs) : 0;
+  uint32_t sig = (big + 2) * 2654435761u ^ (flash ? 77u : 0) ^ bpm * 40503u ^ (bleConnected ? 3u : 0) ^ battPct * 1009u ^ WiFi.softAPgetStationNum() * 4099u ^ cfg.snare * 131u ^ (calibrating ? 5u : 0) ^ (cfg.cal ? 11u : 0) ^ (cfg.lcal ? 13u : 0) ^ (cfg.rcal ? 17u : 0);
+  if (sig == lastSig) return; lastSig = sig;
+  uint16_t col = big >= 0 ? kindColor(big) : TFT_WHITE;
+  d.fillScreen(flash ? col : TFT_BLACK);
+  if (!flash && big >= 0) { d.fillRect(0, 0, 6, H, col); }   // colour edge = the drum shown
+  uint16_t fg = flash ? TFT_BLACK : TFT_WHITE, dim = flash ? TFT_BLACK : TFT_DARKGREY;
+  d.setTextDatum(top_left); d.setFont(&fonts::Font2); d.setTextSize(1); d.setTextColor(fg);
+  char t[24]; snprintf(t, sizeof t, "%d bpm", bpm); d.drawString(t, 12, 4);
+  d.setTextDatum(top_right); d.setTextColor(dim);
+  snprintf(t, sizeof t, "%d%%", battPct); d.drawString(t, W - 4, 4);
+  // big drum name (two-word names go on two lines)
+  d.setTextDatum(middle_center); d.setFont(&fonts::FreeSansBold24pt7b); d.setTextColor(flash ? TFT_BLACK : col);
+  char nm[16]; strlcpy(nm, big >= 0 ? kindLabel(big) : "--", sizeof nm);
+  char* sp = strchr(nm, ' '); const char* l2 = nullptr; if (sp) { *sp = 0; l2 = sp + 1; }
+  int32_t tw = max((int32_t)d.textWidth(nm), l2 ? (int32_t)d.textWidth(l2) : (int32_t)1);
+  float sz = min(1.5f, (W - 16) / (float)max((int32_t)1, tw)); d.setTextSize(sz);
+  int cy = 96, lh = (int)(40 * sz);
+  if (l2) { d.drawString(nm, W / 2 + 3, cy - lh / 2); d.drawString(l2, W / 2 + 3, cy + lh / 2); }
+  else d.drawString(nm, W / 2 + 3, cy);
+  // what each gesture does / status
+  d.setFont(&fonts::Font0); d.setTextSize(1); d.setTextDatum(bottom_left); d.setTextColor(dim);
+  const char* hint = calibrating ? "swing foot 3x..." : cfg.snare == 10 ? "keys: A = centre" : cfg.snare == 11 ? "in=open hat  mid=kick  out=snare" : cfg.snare == 9 ? (cfg.shk == 2 ? "tambourine" : cfg.shk == 1 ? "maracas" : "shaker") : cfg.snare == 7 ? (cfg.lcal && cfg.rcal ? "toe=kick heel=snare" : "SET TOE/HEEL") : cfg.snare == 8 ? (cfg.lcal && cfg.rcal ? "heel=kick toe=snare" : "SET TOE/HEEL") : cfg.snare == 2 ? "tap=kick stomp=snare" : cfg.snare == 1 ? "tap=snare stomp=kick" : cfg.cal ? "stomp=kick swing=snare" : "SET SWING: press A";
+  if (cfg.snare == 11 && !calibrating) {   // swivel kit legend in each drum's colour
+    d.setFont(&fonts::Font2); d.setTextDatum(bottom_left);
+    d.setTextColor(flash ? TFT_BLACK : kindColor(OHAT)); d.drawString("in  = open hat", 12, H - 52);
+    d.setTextColor(flash ? TFT_BLACK : kindColor(KICK)); d.drawString("mid = kick", 12, H - 36);
+    d.setTextColor(flash ? TFT_BLACK : kindColor(SNARE)); d.drawString("out = snare", 12, H - 20);
+    d.setFont(&fonts::Font0); d.setTextColor(dim);
+  } else d.drawString(hint, 12, H - 14);
+  snprintf(t, sizeof t, "BLE %s  WiFi %d", bleConnected ? "on" : "--", WiFi.softAPgetStationNum()); d.drawString(t, 12, H - 3);
+  d.pushSprite(0, 0);
 }
 
 void setup() {
@@ -784,7 +822,8 @@ void setup() {
   c.internal_spk = true;
 #endif
   M5.begin(c);
-  M5.Display.setRotation(3); M5.Display.setBrightness(96);   // rotation 3: USB-C end away from the player
+  M5.Display.setRotation(2); M5.Display.setBrightness(96);   // portrait, same as Footboard
+  scr.setPsram(true); scr.setColorDepth(16); scr.createSprite(M5.Display.width(), M5.Display.height());
   lastButtonMs = millis();
   loadCfg();
   M5.Speaker.setVolume(cfg.vol);
@@ -808,7 +847,7 @@ void loop() {
   // Screen: off after 30 s without a button press; the next press only wakes it.
   if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) { lastActive = now;
     lastButtonMs = now;
-    if (!screenOn) { screenSet(true); drawScreen(); wakeOnly = true; }
+    if (!screenOn) { screenSet(true); lastSig = 0; drawScreen(); wakeOnly = true; }
   }
   if (screenOn && now - lastButtonMs > SCREEN_TIMEOUT_MS) screenSet(false);
   // Button A: calibrate the "right" direction. Hold 2 s: factory reset.
@@ -837,9 +876,11 @@ void loop() {
     snprintf(b + p, sizeof b - p, "],\"toe\":%.0f,\"open\":%d,\"yaw\":%.0f,\"flatT\":%.0f}", toeAngle, hatIsOpen ? 1 : 0, yawDeg, flatTilt); ws.textAll(b); nMeter = 0; lastMeterSend = now;
   } else if (nMeter >= 12) nMeter = 0;
 
-  if (now - lastDraw > 500) {
-    lastDraw = now; if (screenOn) drawScreen();
-    if (ws.count()) { char b[32]; snprintf(b, sizeof b, "{\"batt\":%d}", M5.Power.getBatteryLevel()); ws.textAll(b); }
+  if (screenOn && now - lastDraw > 30) { lastDraw = now; drawScreen(); }   // redraws only when something changed
+  static uint32_t lastHouse = 0;
+  if (now - lastHouse > 2000 || battPct < 0) {
+    lastHouse = now; battPct = M5.Power.getBatteryLevel();
+    if (ws.count()) { char b[32]; snprintf(b, sizeof b, "{\"batt\":%d}", battPct); ws.textAll(b); }
     ws.cleanupClients();
   }
 }
