@@ -60,6 +60,7 @@ struct Cfg {
   int cver = 0;            // settings layout version (1 = centre-note range, 2 = separate left/right note width)
   float kdegR = 4.0f;      // degrees per note on the right (higher) side; kdeg is the left (lower) side
   int nudge = 1;           // 1: swivelling (or sliding) while a note holds moves it to the new note
+  int arc = 1;             // 1: auto re-centre: while the foot rests, slowly treat its position as straight ahead
 } cfg;
 Preferences prefs;
 // Home Wi-Fi is also kept in a shared "wifi" store, so PocketBeat and Footboard can each use it after a switch.
@@ -214,6 +215,10 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   if (wm < 6 && fabsf(am - 1.0f) < 0.03f) { const float b = 0.01f; bwx += b * (wx - bwx); bwy += b * (wy - bwy); bwz += b * (wz - bwz); }
   float yr = (wx - bwx) * qx + (wy - bwy) * qy + (wz - bwz) * qz;
   if (fabsf(yr) > 1.5f) yawDeg += yr * dts;
+  // auto re-centre: the foot's resting position is straight ahead. After 3 s with no turning and no tap (and no
+  // note held), ease the swivel reading back to centre over ~20 s, which cancels slow gyro drift.
+  { static uint32_t lastTurn = 0; if (wm > 8) lastTurn = now;
+    if (cfg.arc && rootHeld < 0 && now - lastTurn > 3000 && now - lastTapT > 3000) yawDeg -= yawDeg * min(1.0f, dts / 20.0f); }
   yawDeg = constrain(yawDeg, -reachR() - 15, reachL() + 15);
   // ---- slide: sideways movement of the whole foot ----
   {
@@ -305,8 +310,8 @@ void setScale(int ns) {
 }
 void sendCfg(AsyncWebSocketClient* c) {
   char b[600];
-  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"nLo\":%d,\"ktot\":%.0f,\"kpos\":%.2f,\"kdeg\":%.1f,\"kdegR\":%.1f,\"nudge\":%d,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"move\":%d,\"sthr\":%.2f,\"scm\":%.1f,\"rSet\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, nLo(), cfg.ktot, cfg.kpos, cfg.kdeg, cfg.kdegR, cfg.nudge, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, cfg.move, cfg.sthr, cfg.scm, cfg.rSet ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"thr\":%.2f,\"gap\":%d,\"kroot\":%d,\"kspan\":%d,\"nLo\":%d,\"ktot\":%.0f,\"kpos\":%.2f,\"kdeg\":%.1f,\"kdegR\":%.1f,\"nudge\":%d,\"arc\":%d,\"kflip\":%d,\"kflat\":%.0f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"ints\":%d,\"out\":%d,\"vol\":%d,\"chan\":%d,\"scale\":%d,\"move\":%d,\"sthr\":%.2f,\"scm\":%.1f,\"rSet\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.thr, cfg.gap, cfg.kroot, cfg.kspan, nLo(), cfg.ktot, cfg.kpos, cfg.kdeg, cfg.kdegR, cfg.nudge, cfg.arc, cfg.kflip, cfg.kflat, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.ints, cfg.out, cfg.vol, cfg.chan, cfg.scale, cfg.move, cfg.sthr, cfg.scm, cfg.rSet ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 float jsonNum(const char* s, const char* key, bool* found) {
@@ -337,6 +342,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "kdeg", &f); if (f) cfg.kdeg = constrain(v, 1.0f, 30.0f);
   v = jsonNum(s, "kdegR", &f); if (f) cfg.kdegR = constrain(v, 1.0f, 30.0f);
   v = jsonNum(s, "nudge", &f); if (f) cfg.nudge = (int)v ? 1 : 0;
+  v = jsonNum(s, "arc", &f); if (f) cfg.arc = (int)v ? 1 : 0;
   v = jsonNum(s, "ktot", &f); if (f) cfg.ktot = constrain(v, 5.0f, 180.0f);
   v = jsonNum(s, "kpos", &f); if (f) cfg.kpos = constrain(v, 0.0f, 1.0f);
   updateSpan();
