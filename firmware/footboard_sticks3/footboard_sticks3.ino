@@ -452,19 +452,19 @@ float cursorFrac() {
 }
 // Colour: every pitch has its own, very different colour (neighbouring notes never look alike). The whole screen
 // takes the colour of the note you're on: dim between notes, vivid on the note's centre, full while it plays.
-static const uint32_t PITCH_RGB[12] = {
-  0xE8202A,  // C  red
-  0x9BE000,  // C# lime
-  0x1E50FF,  // D  blue
-  0xFF8A00,  // D# orange
-  0xFFE21A,  // E  yellow
-  0x00A651,  // F  green
-  0xFF2DB4,  // F# magenta
-  0x8A2BE2,  // G  purple
-  0x9C5A1E,  // G# brown
-  0x00D8FF,  // A  cyan
-  0xFF8FC8,  // A# pink
-  0x7DFFB0,  // B  mint
+static const uint32_t PITCH_RGB[12] = {   // rainbow round the octave, C red -> B rose
+  0xFF0000,  // C  red
+  0xFF8000,  // C# orange
+  0xFFFF00,  // D  yellow
+  0x80FF00,  // D# chartreuse
+  0x00F200,  // E  green
+  0x00F279,  // F  spring green
+  0x00F2F2,  // F# cyan
+  0x0080FF,  // G  azure
+  0x0000FF,  // G# blue
+  0x8000FF,  // A  violet
+  0xFF00FF,  // A# magenta
+  0xFF0080,  // B  rose
 };
 uint16_t pitchColor(int note, float bright) {   // bright 0..1
   uint32_t c = PITCH_RGB[((note % 12) + 12) % 12]; bright = constrain(bright, 0.0f, 1.0f);
