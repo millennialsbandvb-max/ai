@@ -182,6 +182,7 @@
   <div class="ctl"><label for="chan">MIDI channel</label><output id="chanOut"></output>
     <input type="range" id="chan" data-key="chan" min="1" max="16" step="1" value="1"></div>
   <div class="row"><button type="button" id="allOff">Stop all notes</button></div>
+  <div class="row"><button type="button" id="scrOn">Board screen on</button><button type="button" id="scrOff">Board screen off</button></div>
   <p class="hint">Bluetooth MIDI ("Footboard") and USB MIDI are always on.</p>
 </section>
 
@@ -199,7 +200,7 @@
   <div class="row"><input type="file" id="fwFile" accept=".bin" hidden><button type="button" id="pickFw">Upload a .app.bin from this phone</button></div>
   <p class="hint" id="otaMsg">Check for update joins your home Wi-Fi, gets the newest Footboard build and installs it (about a minute). "Switch to PocketBeat drums" installs the drum firmware the same way; its settings are kept.</p>
 </section>
-<div class="foot"><span>Board battery <b id="batt">—</b></span><span>Front button = center · side button = next scale · hold side 3 s = off</span></div>
+<div class="foot"><span>Board battery <b id="batt">—</b></span><span>Front = center · hold front 1 s = screen off · side = next scale · hold side 3 s = power off</span></div>
 
 <script>
 (() => {
@@ -277,6 +278,7 @@
   $('center').onclick = () => { send({ keyCenter: 1 }); step = Math.floor(+$('kspan').value / 2); paint(); };
   $('learnRight').onclick = () => { send({ learnRight: 1 }); $('learnState').textContent = 'Slide your foot to the right now (3 s)…'; };
   $('keyLo').onclick = () => send({ keyLo: 1 }); $('keyHi').onclick = () => send({ keyHi: 1 }); $('keyClear').onclick = () => send({ keyClear: 1 });
+  $('scrOn').addEventListener('click', () => send({ screen: 1 })); $('scrOff').addEventListener('click', () => send({ screen: 0 }));
   $('allOff').onclick = () => { send({ allOff: 1 }); phoneOff(); };
   for (const r of document.querySelectorAll('.ctl input[type=range]')) {   // −/+ nudges
     const out = $(r.id + 'Out'); if (!out) continue;

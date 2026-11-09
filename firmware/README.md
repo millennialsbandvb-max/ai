@@ -26,7 +26,7 @@ Only `pocketbeat_sticks3.app.bin` works inside Launcher. The plain `pocketbeat_s
 - **Default: stomp = kick, lift the foot high = snare** (gyro-based), hi-hat automatic from your tempo. Other modes on the tuning page: bounce = hat / stomp = kick / lift = snare, swing right for snare (see Set right), hard-stomp modes.
 - **Set right (once):** press the front button **A**, then within 2.5 s swing your leg out to the right. The screen changes from "SET RIGHT" to "snare: swing R". Saved on the board.
 - **Hi-hat** starts after 3 even hits and runs until you stop for a full bar.
-- **Hold A for 2 s** = reset all settings.
+- **Hold A for 1 s** = screen off (any button turns it back on). **Hold A for 6 s** = reset all settings.
 - **Screen** turns off after 30 s without a button press to save battery; press any button to wake it (that press does nothing else).
 
 ## Sound
@@ -57,7 +57,7 @@ Builds: `bin/footboard_sticks3.app.bin` (install from a tuning page upload, or l
 - Wi-Fi network **Footboard**, page at http://192.168.4.1. Bluetooth MIDI and USB MIDI are named "Footboard".
 - Board flat on the foot. Swivel to pick a note, tap to play it, it holds until the foot tips away by the release angle.
 - Harmony buttons m3, M3, 4, 5, 8 stack on top of the note (e.g. M3 + 5 = major triad).
-- Front button: center. Side button: octave up. Hold front 2 s: reset settings (keeps Wi-Fi).
+- Front button: center. Side button: octave up. Hold front 1 s: screen off (any button wakes it). Hold front 6 s: reset settings (keeps Wi-Fi).
 - Settings live in their own storage, separate from PocketBeat's, so switching between the two firmwares keeps both sets.
 
 The drum firmware as of the split is saved in `saved/pocketbeat_drums_8546ce0/` (source included).

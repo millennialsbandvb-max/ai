@@ -110,7 +110,8 @@ void loadCfg() {
   syncWifi();
 }
 
-volatile int otaRequest = 0;   // 1 = check+update from GitHub (run from loop, not from the websocket task)
+volatile int otaRequest = 0;
+volatile int screenReq = -1;   // from the page: 0 = screen off, 1 = on   // 1 = check+update from GitHub (run from loop, not from the websocket task)
 
 // ---------------- Outputs ----------------
 BLEMIDI_CREATE_INSTANCE("PocketBeat", MIDI);
@@ -632,6 +633,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   if (strstr(s, "\"keyClear\"")) { cfg.kEdge = false; cfg.kLo = cfg.kHi = 0; loSet = hiSet = false; yawDeg = 0; saveCfg(); sendCfg(nullptr); return; }
   if (strstr(s, "\"flipSwing\"")) { cfg.rx = -cfg.rx; cfg.ry = -cfg.ry; cfg.rz = -cfg.rz; saveCfg(); ws.textAll("{\"learn\":\"flipped ✓\"}"); return; }
   if (strstr(s, "\"switchFw\"")) { otaRequest = 2; return; }
+  if (const char* q = strstr(s, "\"screen\":")) { screenReq = atoi(q + 9) ? 1 : 0; return; }
   if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }
   if (const char* q = strstr(s, "\"ssid\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.ssid) - 1); memcpy(cfg.ssid, q, n); cfg.ssid[n] = 0; } }
   if (const char* q = strstr(s, "\"pass\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.pass) - 1); memcpy(cfg.pass, q, n); cfg.pass[n] = 0; } }
@@ -844,20 +846,23 @@ void loop() {
   MIDI.read();
   uint32_t now = millis();
 
-  // Screen: off after 30 s without a button press; the next press only wakes it.
   if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) { lastActive = now;
     lastButtonMs = now;
     if (!screenOn) { screenSet(true); lastSig = 0; drawScreen(); wakeOnly = true; }
   }
-  if (screenOn && now - lastButtonMs > SCREEN_TIMEOUT_MS) screenSet(false);
-  // Button A: calibrate the "right" direction. Hold 2 s: factory reset.
+  // Screen stays on. Hold the front button 1 s to turn it off; any button turns it back on.
+  if (M5.BtnA.pressedFor(1000) && !resetHeld && screenOn && !wakeOnly) { resetHeld = true; screenSet(false); }
+  if (screenReq >= 0) { bool on = screenReq; screenReq = -1; screenSet(on); if (on) { lastSig = 0; drawScreen(); } }
+  // Button A: calibrate / centre. Hold 1 s: screen off. Hold 6 s: factory reset.
   if (M5.BtnB.wasReleased() && cfg.snare == 10) {   // side button: next octave up (wraps to the bottom)
     cfg.kroot += 12; if (cfg.kroot > 84) cfg.kroot -= 48; if (cfg.kroot < 24) cfg.kroot = 24;
     keyOff(); saveCfg(); sendCfg(nullptr);
   }
   if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else if (!resetHeld && cfg.snare == 6) startSwingCal(); else if (!resetHeld && cfg.snare == 10) yawDeg = keyMid(); else if (!resetHeld && cfg.snare == 11) yawDeg = 0; resetHeld = false; }
-  if (M5.BtnA.pressedFor(2000) && !resetHeld) {   // reset settings, keep Wi-Fi
-    resetHeld = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.sigVer = 7; cfg = d; saveCfg(); sendCfg(nullptr);
+  static bool factoryDone = false;
+  if (M5.BtnA.wasReleased()) factoryDone = false;
+  if (M5.BtnA.pressedFor(6000) && !factoryDone) {   // hold front button 6 s: reset settings, keep Wi-Fi
+    factoryDone = true; Cfg d; memcpy(d.ssid, cfg.ssid, sizeof d.ssid); memcpy(d.pass, cfg.pass, sizeof d.pass); d.sigVer = 7; cfg = d; saveCfg(); sendCfg(nullptr);
   }
 
   float ax, ay, az;
