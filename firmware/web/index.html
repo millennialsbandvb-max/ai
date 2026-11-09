@@ -203,10 +203,12 @@
 <div class="ctl"><label for="pass">Home Wi-Fi password</label><output></output><input type="password" id="pass" placeholder="password" style="grid-column:1/-1;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px"></div>
 <div class="row"><button type="button" id="saveWifi">Save Wi-Fi</button><button type="button" id="otaBtn">Check for update</button></div>
 <div class="row"><button type="button" id="scrOn">Board screen on</button><button type="button" id="scrOff">Board screen off</button></div>
-<div class="row"><button type="button" id="switchFw">Switch to Footboard (keyboard firmware)</button></div>
+<p class="hint" id="dualInfo"><b>Other firmware:</b> checking…</p>
+<div class="row"><button type="button" id="switchFw">Switch to Footboard</button><button type="button" id="installOther">Install / update Footboard alongside</button></div>
+<div class="row"><input type="file" id="fwOtherFile" accept=".bin" hidden><button type="button" id="pickOther">Upload Footboard .app.bin into the spare slot</button></div>
 <div class="row"><input type="file" id="fwFile" accept=".bin" style="display:none"><button type="button" id="pickFw">Upload a .app.bin from this phone</button></div>
 <p class="hint" id="netInfo"><b>Skip the Wi-Fi swapping:</b> save your home Wi-Fi (or your phone's hotspot) below. The board joins it, and from then on you can stay on that network and open the address shown here.</p>
-  <p class="hint" id="otaMsg">Check for update joins your home Wi-Fi, fetches the newest build from GitHub and installs it (about a minute; the board restarts). "Switch to Footboard" installs the keyboard firmware the same way (its Wi-Fi is then called Footboard). Keep this phone on the network meanwhile.</p>
+  <p class="hint" id="otaMsg">Check for update joins your home Wi-Fi, fetches the newest build from GitHub and installs it (about a minute; the board restarts). Both firmwares can live on the board at once; Switch reboots into the other one in a few seconds. Keep this phone on the network meanwhile.</p>
 <p class="err" id="err" hidden></p>
 <button class="big" id="go" type="button">Enable sound on this phone</button>
 
@@ -333,8 +335,15 @@
   $('calBtn').addEventListener('click', () => { send({ cal: 1 }); $('calBtn').classList.add('arm'); $('calState').textContent = 'swing your foot 0/3'; });
   $('saveWifi').addEventListener('click', () => { send({ set: { ssid: $('ssid').value, pass: $('pass').value } }); $('otaMsg').textContent = 'Wi-Fi saved on the board.'; });
   $('scrOn').addEventListener('click', () => send({ screen: 1 })); $('scrOff').addEventListener('click', () => send({ screen: 0 }));
-  let confirmSwitch = false; const SWITCH_LABEL = 'Switch to Footboard (keyboard firmware)';
-  $('switchFw').addEventListener('click', () => { if (!confirmSwitch) { confirmSwitch = true; $('switchFw').textContent = 'Tap again to switch'; setTimeout(() => { confirmSwitch = false; $('switchFw').textContent = SWITCH_LABEL; }, 4000); return; } send({ switchFw: 1 }); $('otaMsg').textContent = 'Switching… keep this page open, the board restarts when done.'; });
+  let confirmSwitch = false; const SWITCH_LABEL = 'Switch to Footboard';
+  $('switchFw').addEventListener('click', () => { if (!confirmSwitch) { confirmSwitch = true; $('switchFw').textContent = 'Tap again to switch'; setTimeout(() => { confirmSwitch = false; $('switchFw').textContent = SWITCH_LABEL; }, 4000); return; } send({ switchFw: 1 }); $('otaMsg').textContent = 'Switching… the board restarts into Footboard. Join its Wi-Fi (or open footboard.local) afterwards.'; });
+  $('installOther').addEventListener('click', () => { send({ installOther: 1 }); $('otaMsg').textContent = 'Installing Footboard into the spare slot…'; });
+  $('pickOther').onclick = () => $('fwOtherFile').click();
+  $('fwOtherFile').onchange = async () => {
+    const f = $('fwOtherFile').files[0]; if (!f) return; $('otaMsg').textContent = 'Uploading ' + f.name + ' into the spare slot…';
+    const fd = new FormData(); fd.append('fw', f, f.name);
+    try { await fetch('/updateother', { method: 'POST', body: fd }); } catch (e) { $('otaMsg').textContent = 'Upload ended unexpectedly.'; }
+  };
   $('otaBtn').addEventListener('click', () => { send({ ota: 1 }); $('otaMsg').textContent = 'Starting…'; });
   $('pickFw').addEventListener('click', () => $('fwFile').click());
   $('fwFile').addEventListener('change', async () => {
@@ -379,6 +388,7 @@
       if (m.bpm !== undefined) $('bpm').textContent = m.bpm ? m.bpm + (m.locked ? ' 🔒' : '') : '—';
       if (m.count !== undefined) $('bpm').textContent = m.count + '/8';
       if (m.batt !== undefined) $('batt').textContent = m.batt + '%';
+      if (m.other !== undefined) $('dualInfo').innerHTML = '<b>Other firmware (Footboard):</b> ' + (+m.otherOk ? 'installed' + (m.otherVer ? ' (' + m.otherVer + ')' : '') + ' in the spare slot. Switch boots it; your settings for both are kept.' : 'not installed. Install it alongside from GitHub (needs home Wi-Fi), or upload its .app.bin into the spare slot.') + (+m.reinst ? ' Re-installing it after the update as soon as home Wi-Fi is up…' : '');
       if (m.net !== undefined) $('netInfo').innerHTML = m.net ? '<b>On your Wi-Fi (' + m.wifi + '):</b> stay on it and open <b>http://' + m.host + '</b> (or http://' + m.net + '). Bookmark it.' : '<b>Skip the Wi-Fi swapping:</b> save your home Wi-Fi (or your phone\'s hotspot) below. The board joins it, and from then on you can stay on that network and open the address shown here.';
       if (m.ota) $('otaMsg').textContent = m.ota;
       if (m.edge) $('edgeState').textContent = (m.edge === 'lo' ? 'low end set' : 'high end set') + (+cfg.kEdge ? '' : ', now set the other end');

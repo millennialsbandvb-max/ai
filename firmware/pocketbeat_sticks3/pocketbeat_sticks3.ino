@@ -32,6 +32,7 @@ USBMIDI usbMidi;
 #include "pb_types.h"
 
 #include "version.h"
+#include "dualboot.h"
 static const char* OTA_URL = "https://raw.githubusercontent.com/millennialsbandvb-max/ai/main/firmware/bin/pocketbeat_sticks3.app.bin";
 static const char* OTA_VER_URL = "https://raw.githubusercontent.com/millennialsbandvb-max/ai/main/firmware/bin/version.txt";
 static const char* OTHER_URL = "https://raw.githubusercontent.com/millennialsbandvb-max/ai/main/firmware/bin/footboard_sticks3.app.bin";   // "Switch to Footboard"
@@ -635,6 +636,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   if (strstr(s, "\"keyClear\"")) { cfg.kEdge = false; cfg.kLo = cfg.kHi = 0; loSet = hiSet = false; yawDeg = 0; saveCfg(); sendCfg(nullptr); return; }
   if (strstr(s, "\"flipSwing\"")) { cfg.rx = -cfg.rx; cfg.ry = -cfg.ry; cfg.rz = -cfg.rz; saveCfg(); ws.textAll("{\"learn\":\"flipped ✓\"}"); return; }
   if (strstr(s, "\"switchFw\"")) { otaRequest = 2; return; }
+  if (strstr(s, "\"installOther\"")) { otaRequest = 3; return; }
   if (const char* q = strstr(s, "\"screen\":")) { screenReq = atoi(q + 9) ? 1 : 0; return; }
   if (strstr(s, "\"ota\"")) { otaRequest = 1; return; }
   if (const char* q = strstr(s, "\"ssid\":\"")) { q += 8; const char* e = strchr(q, '"'); if (e) { size_t n = min((size_t)(e - q), sizeof(cfg.ssid) - 1); memcpy(cfg.ssid, q, n); cfg.ssid[n] = 0; } }
@@ -674,16 +676,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
 
 // ---------------- OTA ----------------
 void otaStatus(const char* msg) { char b[160]; snprintf(b, sizeof b, "{\"ota\":\"%s\"}", msg); ws.textAll(b); }
-bool joinHomeWifi() {
-  if (!cfg.ssid[0]) { otaStatus("No home Wi-Fi set. Enter it below first."); return false; }
-  if (WiFi.status() == WL_CONNECTED) return true;   // already on it (normal case now)
-  WiFi.mode(WIFI_AP_STA);
-  WiFi.begin(cfg.ssid, cfg.pass);
-  uint32_t t0 = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - t0 < 15000) { delay(200); M5.update(); }
-  if (WiFi.status() != WL_CONNECTED) { otaStatus("Could not join home Wi-Fi (check name/password)."); return false; }
-  return true;
-}
+bool joinHomeWifi() { return dual::netJoinNow(); }
 // url/verUrl: which firmware to fetch. force: install even if the version matches (switching firmware).
 void doOtaFromGithub(const char* url, const char* verUrl, bool force) {
   otaStatus("Joining home Wi-Fi…");
@@ -717,19 +710,26 @@ void doOtaFromGithub(const char* url, const char* verUrl, bool force) {
     if (millis() - lastMsg > 500) { char b[64]; snprintf(b, sizeof b, "Installing… %d%%", len > 0 ? (int)(done * 100 / len) : 0); otaStatus(b); lastMsg = millis(); }
   }
   http.end();
-  if (Update.end(true)) { otaStatus("Update installed. Restarting…"); delay(800); ESP.restart(); }
+  if (Update.end(true)) { dual::beforeSelfUpdateReboot(); otaStatus("Update installed. Restarting… (the other firmware is put back automatically once on home Wi-Fi)"); delay(800); ESP.restart(); }
   else otaStatus("Update failed to finish.");
 }
+// Upload a .app.bin and boot it (replaces this firmware; the other slot is then re-filled automatically).
 void handleUpload(AsyncWebServerRequest* r, const String& filename, size_t index, uint8_t* data, size_t len, bool final) {
   if (index == 0) { if (!Update.begin(UPDATE_SIZE_UNKNOWN)) { otaStatus("Could not start upload."); return; } otaStatus("Receiving file…"); }
   if (Update.isRunning() && len) Update.write(data, len);
-  if (final) { if (Update.end(true)) { otaStatus("Upload installed. Restarting…"); } else otaStatus("Upload failed (is it the .app.bin?)."); }
+  if (final) { if (Update.end(true)) { dual::beforeSelfUpdateReboot(); otaStatus("Upload installed. Restarting…"); } else otaStatus("Upload failed (is it the .app.bin?)."); }
+}
+// Upload the OTHER firmware's .app.bin into the spare slot, keeping this one running.
+void handleUploadOther(AsyncWebServerRequest* r, const String& filename, size_t index, uint8_t* data, size_t len, bool final) {
+  if (index == 0) { if (!dual::writeBegin(0)) { otaStatus("Could not open the other slot."); return; } otaStatus("Receiving file for the other slot…"); }
+  if (len) dual::writeChunk(data, len);
+  if (final) { if (dual::writeEnd("uploaded")) { char b[96]; snprintf(b, sizeof b, "%s installed alongside. Use Switch to boot it.", dual::OTHER_NAME); otaStatus(b); } else otaStatus("Upload failed (not a valid .app.bin?)."); }
 }
 
 void setupWeb() {
   // Own network "PocketBeat" is always there; the board also joins your Wi-Fi (or phone hotspot) when one is saved,
   // so the phone can stay on it and open http://pocketbeat.local
-  WiFi.mode(WIFI_AP_STA); WiFi.setAutoReconnect(true);
+  WiFi.mode(WIFI_AP_STA);
   WiFi.softAP("PocketBeat");   // open network; the board has nothing worth protecting
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
@@ -749,9 +749,10 @@ void setupWeb() {
     bool ok = !Update.hasError(); r->send(200, "text/plain", ok ? "ok" : "fail");
     if (ok) { delay(500); ESP.restart(); }
   }, handleUpload);
+  server.on("/updateother", HTTP_POST, [](AsyncWebServerRequest* r) { r->send(200, "text/plain", "ok"); }, handleUploadOther);
   server.onNotFound([](AsyncWebServerRequest* r) { r->redirect("/"); });  // captive-portal style
   server.begin();
-  if (cfg.ssid[0]) WiFi.begin(cfg.ssid, cfg.pass);
+  dual::netBegin("pocketbeat", cfg.ssid, cfg.pass);
 }
 
 // ---------------- Display ----------------
@@ -845,6 +846,7 @@ void setup() {
   scr.setPsram(true); scr.setColorDepth(16); scr.createSprite(M5.Display.width(), M5.Display.height());
   lastButtonMs = millis();
   loadCfg();
+  dual::begin("pb", "PocketBeat", "fb", "Footboard", OTHER_URL, OTHER_VER_URL, FW_VERSION, otaStatus);
   M5.Speaker.setVolume(cfg.vol);
   M5.Imu.init();
   BLEMIDI.setHandleConnected([]() { bleConnected = true; });
@@ -887,14 +889,19 @@ void loop() {
   if (M5.Imu.update() && M5.Imu.getAccel(&ax, &ay, &az)) { M5.Imu.getGyro(&wx, &wy, &wz); processMotion(ax, ay, az, wx, wy, wz, now); }
   powerCheck(now, wx, wy, wz);
 
-  if (wifiReq) { wifiReq = false; WiFi.disconnect(); if (cfg.ssid[0]) WiFi.begin(cfg.ssid, cfg.pass); }
-  { static bool mdnsUp = false; static uint32_t lastNet = 0;
-    bool up = WiFi.status() == WL_CONNECTED;
-    if (up && !mdnsUp) { mdnsUp = MDNS.begin("pocketbeat"); if (mdnsUp) MDNS.addService("http", "tcp", 80); }
-    if (!up && mdnsUp) { MDNS.end(); mdnsUp = false; }
-    if (ws.count() && now - lastNet > 3000) { lastNet = now; char b[120];
-      snprintf(b, sizeof b, "{\"net\":\"%s\",\"host\":\"pocketbeat.local\",\"wifi\":\"%s\"}", up ? WiFi.localIP().toString().c_str() : "", up ? cfg.ssid : ""); ws.textAll(b); } }
-  if (otaRequest) { int r = otaRequest; otaRequest = 0; screenBufFree(); if (r == 2) doOtaFromGithub(OTHER_URL, OTHER_VER_URL, true); else doOtaFromGithub(OTA_URL, OTA_VER_URL, false); screenBufRestore(); }
+  if (wifiReq) { wifiReq = false; dual::netSet(cfg.ssid, cfg.pass); }
+  dual::netTick(now, ws.count() > 0 || WiFi.softAPgetStationNum() > 0);
+  { static uint32_t lastNet = 0;
+    if (ws.count() && now - lastNet > 3000) { lastNet = now; char b[320], dj[160]; dual::json(dj, sizeof dj);
+      bool up = dual::netUp();
+      snprintf(b, sizeof b, "{\"net\":\"%s\",\"host\":\"pocketbeat.local\",\"wifi\":\"%s\",%s}", up ? WiFi.localIP().toString().c_str() : "", up ? cfg.ssid : "", dj); ws.textAll(b); } }
+  // after a self-update the other firmware was overwritten: put it back once home Wi-Fi is up
+  { static uint32_t lastTry = 0;
+    if (dual::reinstallPending() && now - lastTry > 30000) { lastTry = now;
+      if (dual::netUp() || (!ws.count() && dual::netJoinNow(8000))) { screenBufFree(); if (dual::installOther()) dual::setReinstall(false); screenBufRestore(); } } }
+  if (otaRequest) { int r = otaRequest; otaRequest = 0;
+    if (r == 2) { if (!dual::switchToOther()) { char b[120]; snprintf(b, sizeof b, "%s is not installed yet. Install it alongside first.", dual::OTHER_NAME); otaStatus(b); } }
+    else { screenBufFree(); if (r == 3) { if (joinHomeWifi()) dual::installOther(); } else doOtaFromGithub(OTA_URL, OTA_VER_URL, false); screenBufRestore(); } }
   if (pending.on && now >= pending.at) { pending.on = false; hit(pending.k, pending.vel, pending.g, pending.sw, pending.lift); }
   clockTick(now);
 
