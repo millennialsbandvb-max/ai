@@ -14,7 +14,7 @@ float gapBuf[4]; int nGaps = 0;        // recent raw gaps between hits (ms), new
 int hitsSinceStart = 0;
 bool locked = false; int lockHits = 0; float countStart = 0;   // Locked tempo: count-in hits so far, first count-in hit, and whether the tempo is held
 const int COUNT_IN = 8;
-float lastManualHatMs = -1e9; int hatRun = 0;   // hand-played hats (swivel kit): auto hats step aside, 6 in a row re-set the tempo
+float lastManualHatMs = -1e9; int hatRun = 0;   // (declared extern in the sketch)   // hand-played hats (swivel kit): auto hats step aside, 6 in a row re-set the tempo
 
 static float foldBeat(float ms) {      // put a gap into a normal beat range (70-160 bpm)
   if (ms <= 0) return 0;

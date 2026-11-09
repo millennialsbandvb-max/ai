@@ -219,6 +219,7 @@ void sendMidi(Kind k, float vel) {
   usbMidi.noteOff(midiNote[k], 0, 10);
 #endif
 }
+extern float lastManualHatMs;   // pb_clock.h
 int lastHitKind = -1; uint32_t lastHitAt = 0;   // for the screen's colour flash
 void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
   if (k != HAT || (cfg.snare == 11 && millis() - lastManualHatMs < 120)) { lastKind = kindName[k]; lastHitKind = k; lastHitAt = millis(); }   // auto hats don't flash the screen
