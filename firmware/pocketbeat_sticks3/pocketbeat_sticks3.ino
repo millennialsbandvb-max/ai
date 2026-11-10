@@ -117,7 +117,6 @@ void loadCfg() {
   if (cfg.mch < 1 || cfg.mch > 16) cfg.mch = 10;
   cfg.snare = 11;   // only the swivel kit is in use now (other modes stay in the code but are not offered)
   if (cfg.sigVer < 7) { if (n > 0) cfg.kflip = cfg.kflip ? 0 : 1; cfg.sigVer = 7; }   // keyboard pitch direction was backwards: flip whatever was set
-  if (cfg.snare != 1 && cfg.snare != 2 && cfg.snare != 6 && cfg.snare != 7 && cfg.snare != 8 && cfg.snare != 9 && cfg.snare != 10) cfg.snare = 8;
   prefs.end();
   syncWifi();
 }
