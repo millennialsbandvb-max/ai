@@ -80,6 +80,8 @@ struct Cfg {
   float zoh = 2.5f;                                // swivel kit: a hat tap harder than this (g) is an open hat, softer is closed
   int zarc = 1;                                    // swivel kit: auto re-centre while the foot rests
   int loop = 1;                                    // swivel kit: looper on
+  float zhthr = 0.8f;                              // swivel kit: lightest tap that counts in the hats zone (g); kick uses thr
+  float zsthr = 1.8f;                              // swivel kit: lightest tap that counts in the snare zone (g)
   int lbars = 1;                                   // loop length in bars (1, 2, 4)
   float lheel = 12.0f;                             // heel lift gesture: tipped from rest by more than this (deg)
 } cfg;
@@ -419,7 +421,10 @@ void fireStomp(float p, float now) {
     float a = yawDeg; int32_t bestAge = 1 << 30;
     for (int i = 0; i < GH; i++) { int32_t age = (int32_t)(onsetT - gHT[i]); if (age >= 10 && age < bestAge) { bestAge = age; a = yH[i]; } }
     float rel = -a;   // worn on the right foot: toes turning right (out) = yaw falling
-    float vel = constrain(0.5f + 0.5f * ((p - cfg.thr) / (cfg.thr * 3)), 0.0f, 1.0f);
+    // each zone has its own lightest tap: hats are usually light, snares usually hard
+    float zthr = rel < -cfg.zin ? cfg.zhthr : rel > cfg.zdeg ? cfg.zsthr : cfg.thr;
+    if (p < zthr) return;
+    float vel = constrain(0.5f + 0.5f * ((p - zthr) / (zthr * 3)), 0.0f, 1.0f);
     // in = hats (soft tap closed, hard tap open) and they set the tempo; kick and snare just play on the grid
     Kind k = rel < -cfg.zin ? (p > cfg.zoh ? OHAT : HAT) : rel > cfg.zdeg ? SNARE : KICK;
     if (k == HAT || k == OHAT) onHit(k, vel, p, -1, now); else playOnGrid(k, vel, p, now);
@@ -636,7 +641,7 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   if (shaking || now < quietUntil) { peak = 0; peakT = 0; return; }
 
   // ---- kick: impact spike; not right after a swing (the foot landing from a swing isn't a stomp) ----
-  float gate = (cfg.snare == 7 || cfg.snare == 8) ? min(cfg.klvl, cfg.slvl) : cfg.thr;
+  float gate = (cfg.snare == 7 || cfg.snare == 8) ? min(cfg.klvl, cfg.slvl) : cfg.snare == 11 ? min(cfg.thr, min(cfg.zhthr, cfg.zsthr)) : cfg.thr;
   if (mag > gate) {
     uint32_t gapMs = cfg.snare == 9 ? 55 : cfg.snare == 10 ? max((uint32_t)cfg.gap, (uint32_t)200) : (uint32_t)cfg.gap;   // shakers retrigger fast; keyboard ignores the tap's bounce
     if (now - lastStompT > gapMs && now - lastSwingT > 250) {
@@ -650,8 +655,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[880];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zin\":%.0f,\"zoh\":%.2f,\"zarc\":%d,\"loop\":%d,\"lbars\":%d,\"lheel\":%.0f,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zin, cfg.zoh, cfg.zarc, cfg.loop, cfg.lbars, cfg.lheel, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zin\":%.0f,\"zoh\":%.2f,\"zarc\":%d,\"loop\":%d,\"lbars\":%d,\"lheel\":%.0f,\"zhthr\":%.2f,\"zsthr\":%.2f,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zin, cfg.zoh, cfg.zarc, cfg.loop, cfg.lbars, cfg.lheel, cfg.zhthr, cfg.zsthr, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -708,6 +713,8 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "loop", &f); if (f) { cfg.loop = (int)v ? 1 : 0; loopClear(); loopSendState(); }
   v = jsonNum(s, "lbars", &f); if (f) { int b = (int)v; cfg.lbars = b == 2 ? 2 : b == 4 ? 4 : 1; loopClear(); loopSendState(); }
   v = jsonNum(s, "lheel", &f); if (f) cfg.lheel = constrain(v, 5.0f, 40.0f);
+  v = jsonNum(s, "zhthr", &f); if (f) cfg.zhthr = constrain(v, 0.05f, 8.0f);
+  v = jsonNum(s, "zsthr", &f); if (f) cfg.zsthr = constrain(v, 0.05f, 8.0f);
   v = jsonNum(s, "zflip", &f); if (f) cfg.zflip = (int)v ? 1 : 0;
   v = jsonNum(s, "kflat", &f); if (f) cfg.kflat = constrain(v, 3.0f, 40.0f);
   v = jsonNum(s, "kspan", &f); if (f) cfg.kspan = constrain((int)v, 2, 48);
