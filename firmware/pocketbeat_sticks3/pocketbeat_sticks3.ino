@@ -689,6 +689,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   char s[256]; size_t n = min(len, sizeof(s) - 1); memcpy(s, data, n); s[n] = 0;
   bool f;
   if (strstr(s, "\"get\"")) { sendCfg(client); return; }
+  if (const char* q = strstr(s, "\"forget\":\"")) { char nm[33]; strlcpy(nm, q + 10, sizeof nm); if (char* e = strchr(nm, '"')) *e = 0; slots::netForget(nm); return; }
   if (strstr(s, "\"cal\"")) { startSwingCal(); return; }
   if (strstr(s, "\"learnToe\"")) { learnTH = 1; learnN = 0; memset(learnSig, 0, sizeof learnSig); ws.textAll("{\"learn\":\"toe 0/3\"}"); return; }
   if (strstr(s, "\"learnHeel\"")) { learnTH = 2; learnN = 0; memset(learnSig, 0, sizeof learnSig); ws.textAll("{\"learn\":\"heel 0/3\"}"); return; }
@@ -972,9 +973,9 @@ void loop() {
   if (wifiReq) { wifiReq = false; slots::netSet(cfg.ssid, cfg.pass); }
   slots::netTick(now, ws.count() > 0 || WiFi.softAPgetStationNum() > 0);
   { static uint32_t lastNet = 0;
-    if (ws.count() && now - lastNet > 3000) { lastNet = now; char b[520], dj[360]; slots::json(dj, sizeof dj);
+    if (ws.count() && now - lastNet > 3000) { lastNet = now; char b[900], dj[360], nj[320]; slots::json(dj, sizeof dj); slots::netJson(nj, sizeof nj);
       bool up = slots::netUp();
-      snprintf(b, sizeof b, "{\"net\":\"%s\",\"host\":\"pocketbeat.local\",\"wifi\":\"%s\",%s}", up ? WiFi.localIP().toString().c_str() : "", up ? cfg.ssid : "", dj); ws.textAll(b); } }
+      snprintf(b, sizeof b, "{\"net\":\"%s\",\"host\":\"pocketbeat.local\",\"wifi\":\"%s\",%s,%s}", up ? WiFi.localIP().toString().c_str() : "", slots::netCurrent(), dj, nj); ws.textAll(b); } }
   // after an update that overwrote another firmware: put it back once home Wi-Fi is up
   { static uint32_t lastTry = 0;
     if (slots::restorePending().length() && now - lastTry > 30000) { lastTry = now;

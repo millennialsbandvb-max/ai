@@ -195,12 +195,13 @@
 <div class="ctl"><label for="ssid">Home Wi-Fi name</label><output></output><input type="text" id="ssid" placeholder="your Wi-Fi network" style="grid-column:1/-1;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px"></div>
 <div class="ctl"><label for="pass">Home Wi-Fi password</label><output></output><input type="password" id="pass" placeholder="password" style="grid-column:1/-1;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px"></div>
 <div class="row"><button type="button" id="saveWifi">Save Wi-Fi</button><button type="button" id="otaBtn">Check for update</button></div>
+<div id="netList" style="display:flex;flex-direction:column;gap:6px"></div>
 <div class="row"><button type="button" id="scrOn">Board screen on</button><button type="button" id="scrOff">Board screen off</button></div>
 <p class="hint"><b>Firmware on this board</b> (three slots; switching takes a few seconds and keeps every firmware's settings):</p>
 <div id="fwList" style="display:flex;flex-direction:column;gap:8px"></div>
 <input type="file" id="fwOtherFile" accept=".bin" hidden>
 <div class="row"><input type="file" id="fwFile" accept=".bin" style="display:none"><button type="button" id="pickFw">Upload a .app.bin from this phone</button></div>
-<p class="hint" id="netInfo"><b>Skip the Wi-Fi swapping:</b> save your home Wi-Fi (or your phone's hotspot) below. The board joins it, and from then on you can stay on that network and open the address shown here.</p>
+<p class="hint" id="netInfo"><b>Skip the Wi-Fi swapping:</b> save the Wi-Fi of each place you play (and your phone's hotspot). The board remembers them all and joins whichever is in range; then you stay on that network and open the address shown here.</p>
   <p class="hint" id="otaMsg">Check for update joins your home Wi-Fi, fetches the newest build from GitHub and installs it (about a minute; the board restarts). All three firmwares can live on the board at once. Keep this phone on the network meanwhile.</p>
 <p class="err" id="err" hidden></p>
 <button class="big" id="go" type="button">Enable sound on this phone</button>
@@ -350,7 +351,8 @@
   $('zoneCenter').addEventListener('click', () => send({ keyCenter: 1 }));
   $('flipBtn').addEventListener('click', () => send({ flipSwing: 1 }));
   $('calBtn').addEventListener('click', () => { send({ cal: 1 }); $('calBtn').classList.add('arm'); $('calState').textContent = 'swing your foot 0/3'; });
-  $('saveWifi').addEventListener('click', () => { send({ set: { ssid: $('ssid').value, pass: $('pass').value } }); $('otaMsg').textContent = 'Wi-Fi saved on the board.'; });
+  $('netList').addEventListener('click', e => { const b = e.target.closest('button[data-forget]'); if (!b) return; send({ forget: b.dataset.forget }); b.textContent = 'Forgotten'; });
+  $('saveWifi').addEventListener('click', () => { send({ set: { ssid: $('ssid').value, pass: $('pass').value } }); $('otaMsg').textContent = 'Wi-Fi saved on the board (added to its list).'; $('pass').value = ''; });
   $('scrOn').addEventListener('click', () => send({ screen: 1 })); $('scrOff').addEventListener('click', () => send({ screen: 0 }));
   const FWN = { pb: 'PocketBeat (drums)', fb: 'Footboard (keyboard)', pet: 'ChiPet (chihuahua)' };
   let uploadFor = '', confirmId = '';
@@ -421,7 +423,8 @@
       if (m.count !== undefined) $('bpm').textContent = m.count + '/8';
       if (m.batt !== undefined) $('batt').textContent = m.batt + '%';
       if (m.slots) { window.__me = (m.slots.find(x => +x.run) || {}).id; renderSlots(m); }
-      if (m.net !== undefined) $('netInfo').innerHTML = m.net ? '<b>On your Wi-Fi (' + m.wifi + '):</b> stay on it and open <b>http://' + m.host + '</b> (or http://' + m.net + '). Bookmark it.' : '<b>Skip the Wi-Fi swapping:</b> save your home Wi-Fi (or your phone\'s hotspot) below. The board joins it, and from then on you can stay on that network and open the address shown here.';
+      if (m.nets) { $('netList').innerHTML = m.nets.length ? '<div class="hint" style="margin:0">Saved Wi-Fi (the board joins whichever is in range):</div>' + m.nets.map(n => '<div class="row" style="align-items:center"><span style="flex:1;font-size:14px">' + n.replace(/</g, '&lt;') + (n === m.wifi ? ' <span style="color:var(--ok)">· connected</span>' : '') + '</span><button type="button" data-forget="' + n.replace(/"/g, '&quot;') + '" style="flex:0 0 auto">Forget</button></div>').join('') : ''; }
+      if (m.net !== undefined) $('netInfo').innerHTML = m.net ? '<b>On your Wi-Fi (' + m.wifi + '):</b> stay on it and open <b>http://' + m.host + '</b> (or http://' + m.net + '). Bookmark it.' : '<b>Skip the Wi-Fi swapping:</b> save the Wi-Fi of each place you play (and your phone\'s hotspot). The board remembers them all and joins whichever is in range.';
       if (m.stopped) { logRows.unshift('── stopped (shake) ──'); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); }
       if (m.ota) $('otaMsg').textContent = m.ota;
       if (m.edge) $('edgeState').textContent = (m.edge === 'lo' ? 'low end set' : 'high end set') + (+cfg.kEdge ? '' : ', now set the other end');

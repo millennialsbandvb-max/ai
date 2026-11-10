@@ -185,32 +185,80 @@ static void json(char* out, size_t n) {
   snprintf(out + p, n - p, "],\"restore\":\"%s\",\"fws\":[\"pb\",\"fb\",\"pet\"]", r.c_str());
 }
 
-// ---- home Wi-Fi manager ----
-static char nSsid[33] = "", nPass[65] = ""; static const char* nHost = "board";
-static uint32_t attemptStart = 0, nextAttempt = 0; static bool attempting = false, mdnsUp = false, wasUp = false;
+// ---- home Wi-Fi manager: remembers every network you save (up to 8) and joins whichever is in range ----
+struct Net { char ssid[33]; char pass[65]; };
+static Net nets[8]; static int nNets = 0; static const char* nHost = "board";
+static uint32_t attemptStart = 0, nextAttempt = 0; static bool attempting = false, mdnsUp = false, wasUp = false, scanning = false;
+static char curSsid[33] = "";
 static const uint32_t ATTEMPT_MS = 20000, RETRY_MS = 120000;
+static void netLoad() {
+  Preferences p; p.begin("wifi", true); nNets = constrain((int)p.getInt("n", 0), 0, 8);
+  for (int i = 0; i < nNets; i++) { char k[6]; snprintf(k, sizeof k, "s%d", i); strlcpy(nets[i].ssid, p.getString(k, "").c_str(), 33); snprintf(k, sizeof k, "p%d", i); strlcpy(nets[i].pass, p.getString(k, "").c_str(), 65); }
+  p.end();
+}
+static void netStore() {
+  Preferences p; p.begin("wifi", false); p.putInt("n", nNets);
+  for (int i = 0; i < nNets; i++) { char k[6]; snprintf(k, sizeof k, "s%d", i); p.putString(k, nets[i].ssid); snprintf(k, sizeof k, "p%d", i); p.putString(k, nets[i].pass); }
+  p.end();
+}
+static void netAdd(const char* ssid, const char* pass) {   // newest first; same name replaces
+  if (!ssid || !ssid[0]) return;
+  int at = -1; for (int i = 0; i < nNets; i++) if (!strcmp(nets[i].ssid, ssid)) at = i;
+  if (at < 0) { if (nNets < 8) nNets++; at = nNets - 1; }
+  for (int i = at; i > 0; i--) nets[i] = nets[i - 1];
+  strlcpy(nets[0].ssid, ssid, 33); strlcpy(nets[0].pass, pass ? pass : "", 65);
+  netStore();
+}
+static void netForget(const char* ssid) {
+  for (int i = 0; i < nNets; i++) if (!strcmp(nets[i].ssid, ssid)) { for (int k = i; k < nNets - 1; k++) nets[k] = nets[k + 1]; nNets--; netStore(); if (!strcmp(curSsid, ssid)) WiFi.disconnect(); return; }
+}
 static void netBegin(const char* host, const char* ssid, const char* pass) {
-  nHost = host; strlcpy(nSsid, ssid, sizeof nSsid); strlcpy(nPass, pass, sizeof nPass);
+  nHost = host; netLoad();
+  if (ssid && ssid[0]) { bool have = false; for (int i = 0; i < nNets; i++) if (!strcmp(nets[i].ssid, ssid)) have = true; if (!have) netAdd(ssid, pass); }   // carry over the single saved one
   WiFi.setAutoReconnect(false); WiFi.setSleep(false);
   nextAttempt = millis() + 1500;
 }
-static void netSet(const char* ssid, const char* pass) { strlcpy(nSsid, ssid, sizeof nSsid); strlcpy(nPass, pass, sizeof nPass); WiFi.disconnect(); attempting = false; nextAttempt = millis() + 200; }
+static void netSet(const char* ssid, const char* pass) { netAdd(ssid, pass); WiFi.disconnect(); attempting = false; scanning = false; nextAttempt = millis() + 200; }
+// pick the strongest saved network among the scan results; -1 if none in range
+static int netBest(int found) {
+  int best = -1, bestRssi = -1000;
+  for (int r = 0; r < found; r++) { String ss = WiFi.SSID(r); for (int i = 0; i < nNets; i++) if (ss == nets[i].ssid && WiFi.RSSI(r) > bestRssi) { bestRssi = WiFi.RSSI(r); best = i; } }
+  return best;
+}
+static void netConnectTo(int i, uint32_t now) { strlcpy(curSsid, nets[i].ssid, 33); WiFi.begin(nets[i].ssid, nets[i].pass); attempting = true; attemptStart = now; }
 static void netTick(uint32_t now, bool pageOpen) {
   bool up = WiFi.status() == WL_CONNECTED;
-  if (up) { attempting = false; if (!mdnsUp) { mdnsUp = MDNS.begin(nHost); if (mdnsUp) MDNS.addService("http", "tcp", 80); } wasUp = true; return; }
+  if (up) { attempting = false; scanning = false; if (!mdnsUp) { mdnsUp = MDNS.begin(nHost); if (mdnsUp) MDNS.addService("http", "tcp", 80); } wasUp = true; return; }
   if (mdnsUp) { MDNS.end(); mdnsUp = false; }
   if (wasUp) { wasUp = false; WiFi.disconnect(); attempting = false; nextAttempt = now + 5000; }
+  if (scanning) {   // a background scan is running: when it's done, join the best saved network it found
+    int found = WiFi.scanComplete();
+    if (found == WIFI_SCAN_RUNNING) return;
+    scanning = false; int b = found > 0 ? netBest(found) : -1; WiFi.scanDelete();
+    if (b >= 0) netConnectTo(b, now); else nextAttempt = now + RETRY_MS;
+    return;
+  }
   if (attempting) { if (now - attemptStart > ATTEMPT_MS) { WiFi.disconnect(); attempting = false; nextAttempt = now + RETRY_MS; } return; }
-  if (nSsid[0] && (int32_t)(now - nextAttempt) >= 0 && !pageOpen) { WiFi.begin(nSsid, nPass); attempting = true; attemptStart = now; }
+  if (nNets && (int32_t)(now - nextAttempt) >= 0 && !pageOpen) { WiFi.scanNetworks(true); scanning = true; }
 }
 static bool netJoinNow(uint32_t waitMs = 15000) {
-  if (!nSsid[0]) { say("No home Wi-Fi set. Enter it below first."); return false; }
+  if (!nNets) { say("No Wi-Fi saved yet. Enter one below first."); return false; }
   if (WiFi.status() == WL_CONNECTED) return true;
-  WiFi.disconnect(); delay(100); WiFi.begin(nSsid, nPass); attempting = true; attemptStart = millis();
+  WiFi.disconnect(); delay(100); scanning = false;
+  say("Looking for a saved Wi-Fi…");
+  int found = WiFi.scanNetworks(); int b = found > 0 ? netBest(found) : -1; WiFi.scanDelete();
+  if (b < 0) { attempting = false; nextAttempt = millis() + RETRY_MS; say("None of your saved Wi-Fi networks is in range (save this place's Wi-Fi or a hotspot below)."); return false; }
+  netConnectTo(b, millis());
   uint32_t t0 = millis(); while (WiFi.status() != WL_CONNECTED && millis() - t0 < waitMs) delay(100);
-  if (WiFi.status() != WL_CONNECTED) { WiFi.disconnect(); attempting = false; nextAttempt = millis() + RETRY_MS; say("Could not join home Wi-Fi (check name/password, or use your phone's hotspot)."); return false; }
+  if (WiFi.status() != WL_CONNECTED) { WiFi.disconnect(); attempting = false; nextAttempt = millis() + RETRY_MS; char m[120]; snprintf(m, sizeof m, "Could not join %s (wrong password?).", nets[b].ssid); say(m); return false; }
   attempting = false; return true;
 }
 static bool netUp() { return WiFi.status() == WL_CONNECTED; }
+static const char* netCurrent() { return WiFi.status() == WL_CONNECTED ? curSsid : ""; }
+static void netJson(char* out, size_t n) {   // "nets":["a","b"]
+  int p = snprintf(out, n, "\"nets\":[");
+  for (int i = 0; i < nNets && p < (int)n - 40; i++) p += snprintf(out + p, n - p, "%s\"%s\"", i ? "," : "", nets[i].ssid);
+  snprintf(out + p, n - p, "]");
+}
 
 }  // namespace slots
