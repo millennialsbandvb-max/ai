@@ -113,46 +113,21 @@
   <div class="tile"><b id="zoneYaw">—</b><span>swivel</span></div>
 </div>
 <div class="zonebar" id="zonebar">
-  <div class="zb hats" id="zbHats"><span>HATS</span></div><div class="zb kick" id="zbKick"><span>KICK</span></div><div class="zb snare" id="zbSnare"><span>SNARE</span></div>
+  <div class="zb kick" id="zbKick"><span>KICK</span></div><div class="zb snare" id="zbSnare"><span>SNARE</span></div>
   <div class="zneedle" id="zneedle"></div>
   <div class="zticks" id="zticks"></div>
 </div>
 <div class="row" style="font-size:11px;color:var(--muted);justify-content:space-between"><span>in (toes left) 60°</span><span id="zbMid">0°</span><span>60° out (toes right)</span></div>
-<p class="hint">Swivel kit: lay the board flat on your foot. Foot straight = kick, swivelled out = snare, swivelled in = hi-hat (soft tap closed, hard tap open). Your hats set the tempo: play 6 in a row and the tempo snaps to them; kicks and snares just play on the grid. While you play hats yourself the auto hats stay quiet and come back two beats after you stop. Shake your foot hard for 3 beats to stop everything. "Center here" or the board's front button re-centres if it drifts. Set up for the right foot, USB-C toward the toes.</p>
-<h2 style="margin-top:6px">Looper</h2>
-<div class="seg" data-key="loop">
-  <button type="button" data-v="1">Looper on</button>
-  <button type="button" data-v="0">Off (live only)</button>
-</div>
-<div id="loopBox" style="display:flex;flex-direction:column;gap:10px">
-  <div class="loopgrid" id="loopgrid"></div>
-  <div class="row">
-    <button type="button" id="loopPlay" class="lbtn">▶ PLAY</button>
-    <button type="button" id="loopUndo">Undo last hit</button>
-  </div>
-  <div class="row">
-    <button type="button" data-clear="2">Erase hats</button><button type="button" data-clear="0">Erase kick</button><button type="button" data-clear="1">Erase snare</button><button type="button" data-clear="-1">Erase all</button>
-  </div>
-  <div class="seg" data-key="lbars">
-    <button type="button" data-v="1">1 bar</button><button type="button" data-v="2">2 bars</button><button type="button" data-v="4">4 bars</button>
-  </div>
-  <div class="ctl"><label for="lheel">Pause gesture: tip the foot more than this and hold ~1 s</label><output id="lheelOut"></output>
-    <input type="range" id="lheel" data-key="lheel" min="5" max="40" step="1" value="12"></div>
-  <p class="hint" id="gestureMsg">Simple version: everything you play is in the loop. Hats first (they set the tempo and land quantized), then kicks and snares on top. Tip your foot and hold it about a second = pause / resume (the board beeps). Front button = undo the last hit. Side button = erase the drum you're swivelled to. Hard shake for 3 beats = stop and clear everything. Same controls here on the page.</p>
-</div>
+<p class="hint">Swivel kit: foot straight (or turned in) = kick, swivelled out = snare. Kicks and snares set the tempo for quantize. "Center here" or the front button re-centres if it drifts.</p>
 <div class="row"><button type="button" id="zoneCenter">Center here</button></div>
 <div class="seg" data-key="zarc">
   <button type="button" data-v="1">Auto re-centre: resting foot = straight</button>
   <button type="button" data-v="0">Off</button>
 </div>
-<div class="ctl"><label for="zdeg">Kick zone, right side (toes out): snare starts past</label><output id="zdegOut"></output>
+<div class="ctl"><label for="zdeg">Snare starts past (toes out)</label><output id="zdegOut"></output>
   <input type="range" id="zdeg" data-key="zdeg" min="3" max="60" step="1" value="15"></div>
-<div class="ctl"><label for="zin">Kick zone, left side (toes in): hats start past</label><output id="zinOut"></output>
-  <input type="range" id="zin" data-key="zin" min="3" max="60" step="1" value="15"></div>
 <div class="ctl"><label for="thr" id="thrLabel">Kick: lightest tap that counts</label><output id="thrOut"></output>
   <input type="range" id="thr" data-key="thr" min="0.05" max="8" step="0.01" value="1.8"></div>
-<div class="ctl"><label for="zhthr">Hats: lightest tap that counts</label><output id="zhthrOut"></output>
-  <input type="range" id="zhthr" data-key="zhthr" min="0.05" max="8" step="0.05" value="0.8"></div>
 <div class="ctl"><label for="zsthr">Snare: lightest tap that counts</label><output id="zsthrOut"></output>
   <input type="range" id="zsthr" data-key="zsthr" min="0.05" max="8" step="0.05" value="1.8"></div>
 <p class="hint">The impact meter at the top shows what each tap measures.</p>
@@ -164,16 +139,12 @@
   <button type="button" data-v="0">Measure any acceleration</button>
 </div>
 <p class="hint">"Jolt only" takes the foot's movement (tilting, swivelling, sliding) out of the reading, so a tap measures how hard the foot actually hits, not how fast it was moving. Thresholds will read lower than before; re-check them on the meter.</p>
-<div class="ctl"><label for="zoh">Hats: tap harder than this for an open hat</label><output id="zohOut"></output>
-  <input type="range" id="zoh" data-key="zoh" min="0.3" max="8" step="0.1" value="2.5"></div>
 </div>
 <h2>MIDI notes</h2>
 <div class="ctl"><label for="nKick">Kick</label><output id="nKickOut"></output><input type="range" id="nKick" data-key="nKick" min="0" max="127" step="1" value="36"></div>
 <div class="ctl"><label for="nSnare">Snare</label><output id="nSnareOut"></output><input type="range" id="nSnare" data-key="nSnare" min="0" max="127" step="1" value="38"></div>
-<div class="ctl"><label for="nHat">Closed hat</label><output id="nHatOut"></output><input type="range" id="nHat" data-key="nHat" min="0" max="127" step="1" value="42"></div>
-<div class="ctl"><label for="nOHat">Open hat</label><output id="nOHatOut"></output><input type="range" id="nOHat" data-key="nOHat" min="0" max="127" step="1" value="46"></div>
 <div class="ctl"><label for="mch">MIDI channel</label><output id="mchOut"></output><input type="range" id="mch" data-key="mch" min="1" max="16" step="1" value="10"></div>
-<p class="hint">Defaults are General MIDI drums (36 kick, 38 snare, 42 closed hat, 46 open hat) on channel 10. Use the −/+ buttons to step one note at a time.</p>
+<p class="hint">Defaults are General MIDI drums (36 kick, 38 snare) on channel 10. Use the −/+ buttons to step one note at a time.</p>
 <h2>Drum kit</h2>
 <div class="seg" data-key="kit">
   <button type="button" data-v="0">Acoustic</button>
@@ -195,12 +166,6 @@
   <button type="button" data-v="0">Off</button>
   <button type="button" data-v="2">8ths</button>
   <button type="button" data-v="4">16ths</button>
-</div>
-<h2>Hi-hat (automatic)</h2>
-<div class="seg" data-key="hat">
-  <button type="button" data-v="0">Off</button>
-  <button type="button" data-v="1">Quarters</button>
-  <button type="button" data-v="2">Eighths</button>
 </div>
 <div class="ctl"><label for="gap">Minimum gap between hits</label><output id="gapOut"></output>
   <input type="range" id="gap" data-key="gap" min="60" max="400" step="10" value="120"></div>
@@ -294,10 +259,10 @@
   const ZR = 60; let zTicks = false;
   function paintZones(rel) {
     if (!zTicks) { zTicks = true; for (let d = -60; d <= 60; d += 10) { const i = document.createElement('i'); i.style.left = ((d + ZR) / (2 * ZR) * 100) + '%'; i.style.height = d % 30 ? '4px' : '8px'; $('zticks').appendChild(i); } }
-    const zin = Math.min(ZR, +$('zin').value), zdeg = Math.min(ZR, +$('zdeg').value);
-    $('zbHats').style.flex = (ZR - zin) + ' 0 0'; $('zbKick').style.flex = (zin + zdeg) + ' 0 0'; $('zbSnare').style.flex = (ZR - zdeg) + ' 0 0';
+    const zdeg = Math.min(ZR, +$('zdeg').value);
+    $('zbKick').style.flex = (ZR + zdeg) + ' 0 0'; $('zbSnare').style.flex = (ZR - zdeg) + ' 0 0';
     if (rel !== undefined) { const x = Math.max(-ZR, Math.min(ZR, rel)); $('zneedle').style.left = ((x + ZR) / (2 * ZR) * 100) + '%';
-      $('zbHats').classList.toggle('lit', rel < -zin); $('zbKick').classList.toggle('lit', rel >= -zin && rel <= zdeg); $('zbSnare').classList.toggle('lit', rel > zdeg); }
+      $('zbKick').classList.toggle('lit', rel <= zdeg); $('zbSnare').classList.toggle('lit', rel > zdeg); }
   }
   const NN2 = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']; const nn = v => v + ' (' + NN2[v % 12] + (Math.floor(v / 12) - 1) + ')';
   const fmt = { zsharp: v => (+v).toFixed(2) + ' g/10ms', nKick: nn, nSnare: nn, nHat: nn, nOHat: nn, mch: v => 'ch ' + v, lheel: v => v + '°', zhthr: v => (+v).toFixed(2) + ' g', zsthr: v => (+v).toFixed(2) + ' g', zdeg: v => v + '° out', zin: v => v + '° in', zoh: v => (+v).toFixed(1) + ' g', thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', swang: v => v + '°', kroot: v => noteName(+v), kflat: v => v + '°', kspan: v => (+v + 1) + ' notes', kdeg: v => (+v) + '° (ends at ±' + Math.round(+$('kspan').value * v / 2) + '°)', tthr: v => v + '°', othr: v => v + '°', klvl: v => (+v).toFixed(2) + ' g', slvl: v => (+v).toFixed(2) + ' g', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
@@ -307,7 +272,7 @@
     for (const el of document.querySelectorAll('input[type=range][data-key]')) { if (c[el.dataset.key] !== undefined) { el.value = c[el.dataset.key]; $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); } }
     for (const seg of document.querySelectorAll('.seg[data-key]')) { const v = String(c[seg.dataset.key]); for (const b of seg.children) b.classList.toggle('on', b.dataset.v === v); }
     kit = +(c.kit || 0);
-    modeUi(+c.snare); paintZones(); $('loopBox').hidden = !+c.loop; if (+c.snare === 11) send({ loopState: 1 });
+    modeUi(+c.snare); paintZones(); 
     const ed = +c.kEdge;
     $('edgeState').textContent = (ed ? 'edges set · ' : 'no edges · ') + Math.round(+c.kspan * +c.kdeg) + '° wide, ' + (+c.kdeg).toFixed(1) + '° per note';
     $('ohatBox').hidden = !+c.ohat;
@@ -321,7 +286,7 @@
     if (c.ssid !== undefined && document.activeElement !== $('ssid')) $('ssid').value = c.ssid;
   }
   for (const el of document.querySelectorAll('input[type=range][data-key]')) {
-    el.addEventListener('input', () => { if (el.dataset.key === 'zin' || el.dataset.key === 'zdeg') paintZones(); $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); });
+    el.addEventListener('input', () => { if (el.dataset.key === 'zdeg') paintZones(); $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value); });
     el.addEventListener('change', () => { send({ set: { [el.dataset.key]: +el.value } }); });
     $(el.id + 'Out').textContent = fmt[el.dataset.key](el.value);
   }
@@ -417,7 +382,7 @@
       if (m.gesture) { $('gestureMsg').textContent = 'Gesture: ' + m.gesture; }
       if (m.yaw !== undefined && +(cfg.snare) === 11) {
         const rel = -m.yaw; paintZones(rel);
-        $('zoneNow').textContent = rel > +$('zdeg').value ? 'SNARE' : rel < -+$('zin').value ? 'HAT' : 'KICK';
+        $('zoneNow').textContent = rel > +$('zdeg').value ? 'SNARE' : 'KICK';
         $('zoneYaw').textContent = (rel > 0 ? 'out ' : rel < 0 ? 'in ' : '') + Math.abs(Math.round(rel)) + '°';
       }
       if (m.yaw !== undefined && +(cfg.snare) === 10) $('keyAim').textContent = noteName(keyForTilt(m.yaw)) + (m.flatT > +$('kflat').value ? ' ·' : '');
