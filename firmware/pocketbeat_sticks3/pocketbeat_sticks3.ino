@@ -238,14 +238,14 @@ void sendMidi(Kind k, float vel) {
 extern float lastManualHatMs;   // pb_clock.h
 float firedRise = 0;   // sharpness of the tap being reported (g per 10 ms)
 int lastHitKind = -1; uint32_t lastHitAt = 0;   // for the screen's colour flash
-void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
+void hit(Kind k, float vel, float g = 0, float sw = -999, float lift = -1) {
   if (k != HAT || (cfg.snare == 11 && millis() - lastManualHatMs < 120)) { lastKind = kindName[k]; lastHitKind = k; lastHitAt = millis(); }   // auto hats don't flash the screen
   playBoard(k, vel);
   sendMidi(k, vel);
   if (ws.count()) {
     const char* nm = k == SHAKE ? (cfg.shk == 2 ? "tamb" : "shaker") : kindName[k];
     char buf[200]; int n = snprintf(buf, sizeof buf, "{\"hit\":\"%s\",\"v\":%.2f,\"g\":%.2f", nm, vel, g);
-    if (sw >= 0) n += snprintf(buf + n, sizeof buf - n, ",\"sw\":%.1f", sw);
+    if (sw > -900) n += snprintf(buf + n, sizeof buf - n, ",\"sw\":%.1f", sw);
     if (lift >= 0) n += snprintf(buf + n, sizeof buf - n, ",\"lift\":%.0f", lift);
     if (hitAngle > -900 && k != HAT) { n += snprintf(buf + n, sizeof buf - n, ",\"ang\":%.0f", hitAngle); hitAngle = -999; }
     if (hitToeUp >= 0 && k != HAT && k != OHAT) { n += snprintf(buf + n, sizeof buf - n, ",\"tu\":%.0f,\"hu\":%.0f", hitToeUp, hitHeelUp); hitToeUp = hitHeelUp = -1; }
@@ -430,14 +430,16 @@ void fireStomp(float p, float now) {
     return;
   }
   if (cfg.snare == 11) {   // Swivel kit: foot straight (or turned in) = kick, swivelled out = snare. Just the two.
+    // where was the foot pointing when it landed? Use the reading right at the onset of the impact (the foot has
+    // arrived by then), not an older one: coming back fast from snare to kick, 10 ms earlier it was still further out.
     float a = yawDeg; int32_t bestAge = 1 << 30;
-    for (int i = 0; i < GH; i++) { int32_t age = (int32_t)(onsetT - gHT[i]); if (age >= 10 && age < bestAge) { bestAge = age; a = yH[i]; } }
+    for (int i = 0; i < GH; i++) { int32_t age = (int32_t)(onsetT - gHT[i]); if (age >= 0 && age < bestAge) { bestAge = age; a = yH[i]; } }
     float rel = -a;   // worn on the right foot: toes turning right (out) = yaw falling
     bool snare = rel > cfg.zdeg;
     float zthr = snare ? cfg.zsthr : cfg.thr;   // each drum has its own lightest tap
     if (p < zthr) return;
     float vel = constrain(0.5f + 0.5f * ((p - zthr) / (zthr * 3)), 0.0f, 1.0f);
-    onHit(snare ? SNARE : KICK, vel, p, -1, now);   // kicks and snares set the tempo (for quantize / lock)
+    onHit(snare ? SNARE : KICK, vel, p, rel, now);   // kicks and snares set the tempo (for quantize / lock); rel shows in the log
     return;
   }
   if (cfg.snare == 9) {   // Shaker: every shake is a hit; strength sets the velocity (lightest = thr, full at 4x thr)
@@ -503,15 +505,15 @@ void fireStomp(float p, float now) {
     hitAngle = cfg.upSet ? pp : ang; hitToeUp = toeUp; hitHeelUp = heelUp;
     Kind k = (toe == (cfg.snare == 7)) ? KICK : SNARE;
     if (p < (k == KICK ? cfg.klvl : cfg.slvl)) return;   // not hard enough for that drum
-    onHit(k, constrain(0.6f + 0.4f * (p / ((k == KICK ? cfg.klvl : cfg.slvl) * 2.5f)), 0, 1), p, -1, now, fabsf(st - sh) * 30);
+    onHit(k, constrain(0.6f + 0.4f * (p / ((k == KICK ? cfg.klvl : cfg.slvl) * 2.5f)), 0, 1), p, -999, now, fabsf(st - sh) * 30);
     return;
   }
-  if (cfg.snare == 6) { onHit(KICK, constrain(0.6f + 0.4f * (p / (cfg.thr * 2.5f)), 0, 1), p, -1, now); return; }
+  if (cfg.snare == 6) { onHit(KICK, constrain(0.6f + 0.4f * (p / (cfg.thr * 2.5f)), 0, 1), p, -999, now); return; }
   // tap/stomp modes: the stomp line decides; mode 2 = tap kick / stomp snare, mode 1 = the reverse
   bool stomp = p >= cfg.sthr;
   Kind k = (stomp ^ (cfg.snare == 1)) ? SNARE : KICK;
   float vel = stomp ? constrain(0.7f + 0.3f * (p / (cfg.sthr * 2)), 0, 1) : constrain(0.6f + 0.4f * (p / cfg.sthr), 0, 1);
-  onHit(k, vel, p, -1, now);
+  onHit(k, vel, p, -999, now);
 }
 
 void processMotion(float ax, float ay, float az, float wx, float wy, float wz, uint32_t now) {  // accel in g (incl. gravity), gyro in deg/s

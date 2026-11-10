@@ -86,7 +86,7 @@ void playOnGrid(Kind k, float vel, float g, float now) {
     if (grid - now < 90 && grid >= now - 5) when = grid;
   }
   if (clockOn) lastHitMs = now;
-  if (when > now + 1) pending = { true, when, k, vel, g, -1, -1 }; else hit(k, vel, g);
+  if (when > now + 1) pending = { true, when, k, vel, g, -999, -1 }; else hit(k, vel, g);
 }
 void onHit(Kind k, float vel, float g, float sw, float now, float lift = -1) {
   float when = now;
