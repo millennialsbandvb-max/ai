@@ -235,6 +235,7 @@ void sendMidi(Kind k, float vel) {
 #endif
 }
 extern float lastManualHatMs;   // pb_clock.h
+float firedRise = 0;   // sharpness of the tap being reported (g per 10 ms)
 int lastHitKind = -1; uint32_t lastHitAt = 0;   // for the screen's colour flash
 void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
   if (k != HAT || (cfg.snare == 11 && millis() - lastManualHatMs < 120)) { lastKind = kindName[k]; lastHitKind = k; lastHitAt = millis(); }   // auto hats don't flash the screen
@@ -268,7 +269,7 @@ float qx = 0, qy = 0, qz = 0; bool qInit = false;   // gravity direction tracked
 //  Snare = a swing: the shoe rotating along the learned swing direction (gyro) faster than cfg.swthr.
 //          Only that direction (and sign) counts, so the toe lift before a stomp and the swing back don't trigger it.
 float gx = 0, gy = 0, gz = 0;        // gravity estimate (g units)
-float peak = 0; uint32_t peakT = 0, lastStompT = 0; float maxRise = 0, firedRise = 0;
+float peak = 0; uint32_t peakT = 0, lastStompT = 0; float maxRise = 0;
 bool shaking = false; uint32_t quietUntil = 0;   // violent-shake stop gesture
 uint32_t lastSwingT = 0; bool inSwing = false; float swingPeak = 0;
 float swingAngle = 0; uint32_t swingStill = 0;   // degrees swung (net) along the learned direction since the foot was last at rest
