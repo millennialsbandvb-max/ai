@@ -553,10 +553,13 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
   {
     static float smx = 0, smy = 0, smz = 0;
     float dx = lx - smx, dy = ly - smy, dz = lz - smz, dm = sqrtf(dx * dx + dy * dy + dz * dz);
-    float ks = min(1.0f, dts / 0.06f);                             // ~60 ms smoothing
-    if (dm < 0.5f) { smx += ks * dx; smy += ks * dy; smz += ks * dz; }   // a jolt doesn't drag the smooth part along
-    else { smx += 0.1f * ks * dx; smy += 0.1f * ks * dy; smz += 0.1f * ks * dz; }
-    if (cfg.imp) { lx -= smx; ly -= smy; lz -= smz; }
+    float ks = min(1.0f, dts / 0.15f);                             // ~150 ms smoothing: only motion slower than a tap is "smooth"
+    if (dm < 0.35f) { smx += ks * dx; smy += ks * dy; smz += ks * dz; }   // a jolt doesn't drag the smooth part along
+    else { smx += 0.05f * ks * dx; smy += 0.05f * ks * dy; smz += 0.05f * ks * dz; }
+    if (cfg.imp) {   // take out the smooth motion, but never more than 0.4 g of it, so soft round taps keep their size
+      float sm = sqrtf(smx * smx + smy * smy + smz * smz), cap = 0.4f, f = sm > cap ? cap / sm : 1.0f;
+      lx -= f * smx; ly -= f * smy; lz -= f * smz;
+    }
   }
   float mag = sqrtf(lx * lx + ly * ly + lz * lz);
   float wm = sqrtf(wx * wx + wy * wy + wz * wz);               // rotation speed, deg/s
