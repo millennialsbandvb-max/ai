@@ -81,6 +81,7 @@ struct Cfg {
   int zarc = 1;                                    // swivel kit: auto re-centre while the foot rests
   int loop = 1;                                    // swivel kit: looper on
   float zhthr = 0.8f;                              // swivel kit: lightest tap that counts in the hats zone (g); kick uses thr
+  int imp = 1;                                     // impact measure: 1 = sharp jolt only (motion removed), 0 = any acceleration (old)
   float zsthr = 1.8f;                              // swivel kit: lightest tap that counts in the snare zone (g)
   int lbars = 1;                                   // loop length in bars (1, 2, 4)
   float lheel = 12.0f;                             // heel lift gesture: tipped from rest by more than this (deg)
@@ -537,7 +538,19 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
       if (lin < 0.04f) { if (!stillSince) stillSince = now; else if (now - stillSince > 1000) setFlat(); } else stillSince = 0;
     }
   }
-  float lx = ax - gx, ly = ay - gy, lz = az - gz;               // linear accel, g
+  // Linear acceleration = accelerometer minus gravity. Gravity comes from the gyro-tracked direction (q), which
+  // follows tilts instantly, so tipping or swivelling the foot doesn't read as an impact the way it did with a
+  // slow average. Then the smooth part of the motion (swinging, sliding) is taken out too: what's left is the
+  // sharp jolt of the foot hitting the floor, which is what the thresholds and velocities should measure.
+  float lx = ax - (qInit ? qx : gx), ly = ay - (qInit ? qy : gy), lz = az - (qInit ? qz : gz);
+  {
+    static float smx = 0, smy = 0, smz = 0;
+    float dx = lx - smx, dy = ly - smy, dz = lz - smz, dm = sqrtf(dx * dx + dy * dy + dz * dz);
+    float ks = min(1.0f, dts / 0.06f);                             // ~60 ms smoothing
+    if (dm < 0.5f) { smx += ks * dx; smy += ks * dy; smz += ks * dz; }   // a jolt doesn't drag the smooth part along
+    else { smx += 0.1f * ks * dx; smy += 0.1f * ks * dy; smz += 0.1f * ks * dz; }
+    if (cfg.imp) { lx -= smx; ly -= smy; lz -= smz; }
+  }
   float mag = sqrtf(lx * lx + ly * ly + lz * lz);
   float wm = sqrtf(wx * wx + wy * wy + wz * wz);               // rotation speed, deg/s
   // Swivel: rotation about the vertical (gravity) axis, minus the gyro's own small error, added up.
@@ -653,8 +666,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[880];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zin\":%.0f,\"zoh\":%.2f,\"zarc\":%d,\"loop\":%d,\"lbars\":%d,\"lheel\":%.0f,\"zhthr\":%.2f,\"zsthr\":%.2f,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zin, cfg.zoh, cfg.zarc, cfg.loop, cfg.lbars, cfg.lheel, cfg.zhthr, cfg.zsthr, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zin\":%.0f,\"zoh\":%.2f,\"zarc\":%d,\"loop\":%d,\"lbars\":%d,\"lheel\":%.0f,\"zhthr\":%.2f,\"zsthr\":%.2f,\"imp\":%d,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zin, cfg.zoh, cfg.zarc, cfg.loop, cfg.lbars, cfg.lheel, cfg.zhthr, cfg.zsthr, cfg.imp, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -714,6 +727,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "lheel", &f); if (f) cfg.lheel = constrain(v, 5.0f, 40.0f);
   v = jsonNum(s, "zhthr", &f); if (f) cfg.zhthr = constrain(v, 0.05f, 8.0f);
   v = jsonNum(s, "zsthr", &f); if (f) cfg.zsthr = constrain(v, 0.05f, 8.0f);
+  v = jsonNum(s, "imp", &f); if (f) cfg.imp = (int)v ? 1 : 0;
   v = jsonNum(s, "zflip", &f); if (f) cfg.zflip = (int)v ? 1 : 0;
   v = jsonNum(s, "kflat", &f); if (f) cfg.kflat = constrain(v, 3.0f, 40.0f);
   v = jsonNum(s, "kspan", &f); if (f) cfg.kspan = constrain((int)v, 2, 48);

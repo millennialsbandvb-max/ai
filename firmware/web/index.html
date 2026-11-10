@@ -138,6 +138,11 @@
 <div class="ctl"><label for="zsthr">Snare: lightest tap that counts</label><output id="zsthrOut"></output>
   <input type="range" id="zsthr" data-key="zsthr" min="0.05" max="8" step="0.05" value="1.8"></div>
 <p class="hint">Kick uses the stomp threshold below. The impact meter shows what each tap measures.</p>
+<div class="seg" data-key="imp">
+  <button type="button" data-v="1">Measure the jolt only</button>
+  <button type="button" data-v="0">Measure any acceleration</button>
+</div>
+<p class="hint">"Jolt only" takes the foot's movement (tilting, swivelling, sliding) out of the reading, so a tap measures how hard the foot actually hits, not how fast it was moving. Thresholds will read lower than before; re-check them on the meter.</p>
 <div class="ctl"><label for="zoh">Hats: tap harder than this for an open hat</label><output id="zohOut"></output>
   <input type="range" id="zoh" data-key="zoh" min="0.3" max="8" step="0.1" value="2.5"></div>
 </div>
