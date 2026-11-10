@@ -83,6 +83,7 @@ struct Cfg {
   int loop = 1;                                    // swivel kit: looper on
   float zhthr = 0.8f;                              // swivel kit: lightest tap that counts in the hats zone (g); kick uses thr
   int imp = 1;                                     // impact measure: 1 = sharp jolt only (motion removed), 0 = any acceleration (old)
+  float zsharp = 0.25f;                            // swivel kit: a tap must rise at least this much (g) within 10 ms; slower = foot movement, ignored
   int nKick = 36, nSnare = 38, nHat = 42, nOHat = 46;   // MIDI notes per drum (GM defaults), channel mch
   int mch = 10;                                    // MIDI channel
   float zsthr = 1.8f;                              // swivel kit: lightest tap that counts in the snare zone (g)
@@ -247,6 +248,7 @@ void hit(Kind k, float vel, float g = 0, float sw = -1, float lift = -1) {
     if (hitAngle > -900 && k != HAT) { n += snprintf(buf + n, sizeof buf - n, ",\"ang\":%.0f", hitAngle); hitAngle = -999; }
     if (hitToeUp >= 0 && k != HAT && k != OHAT) { n += snprintf(buf + n, sizeof buf - n, ",\"tu\":%.0f,\"hu\":%.0f", hitToeUp, hitHeelUp); hitToeUp = hitHeelUp = -1; }
     if (hitVotes[0] && k != HAT && k != OHAT) { n += snprintf(buf + n, sizeof buf - n, ",\"votes\":\"%s\"", hitVotes); hitVotes[0] = 0; }
+    if (cfg.snare == 11 && k != HAT) n += snprintf(buf + n, sizeof buf - n, ",\"rise\":%.2f", firedRise);
     snprintf(buf + n, sizeof buf - n, "}");
     ws.textAll(buf);
   }
@@ -266,7 +268,7 @@ float qx = 0, qy = 0, qz = 0; bool qInit = false;   // gravity direction tracked
 //  Snare = a swing: the shoe rotating along the learned swing direction (gyro) faster than cfg.swthr.
 //          Only that direction (and sign) counts, so the toe lift before a stomp and the swing back don't trigger it.
 float gx = 0, gy = 0, gz = 0;        // gravity estimate (g units)
-float peak = 0; uint32_t peakT = 0, lastStompT = 0;
+float peak = 0; uint32_t peakT = 0, lastStompT = 0; float maxRise = 0, firedRise = 0;
 bool shaking = false; uint32_t quietUntil = 0;   // violent-shake stop gesture
 uint32_t lastSwingT = 0; bool inSwing = false; float swingPeak = 0;
 float swingAngle = 0; uint32_t swingStill = 0;   // degrees swung (net) along the learned direction since the foot was last at rest
@@ -663,21 +665,28 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 
   // ---- kick: impact spike; not right after a swing (the foot landing from a swing isn't a stomp) ----
   float gate = (cfg.snare == 7 || cfg.snare == 8) ? min(cfg.klvl, cfg.slvl) : cfg.snare == 11 ? min(cfg.thr, min(cfg.zhthr, cfg.zsthr)) : cfg.thr;
+  // sharpness: how fast the reading rises (g per 10 ms). A real tap shoots up; moving the foot ramps up slowly.
+  { static float prevMag = 0; float rise = dts > 0 ? (mag - prevMag) / dts * 0.01f : 0; prevMag = mag;
+    if (!peakT) maxRise = rise; else if (rise > maxRise) maxRise = rise; }
   if (mag > gate) {
     uint32_t gapMs = cfg.snare == 9 ? 55 : cfg.snare == 10 ? max((uint32_t)cfg.gap, (uint32_t)200) : (uint32_t)cfg.gap;   // shakers retrigger fast; keyboard ignores the tap's bounce
     if (now - lastStompT > gapMs && now - lastSwingT > 250) {
       if (!peakT) onsetAngle = toeAngle;
       if (mag > peak) { peak = mag; pkx = lx; pky = ly; pkz = lz; peakAt = now; if (!peakT) peakT = now; }
-      if (now - peakT > (cfg.snare == 9 ? 15u : 35u)) { float p = peak; onsetT = peakT; peakAtFired = peakAt; onsetAngleFired = onsetAngle; fpkx = pkx; fpky = pky; fpkz = pkz; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
+      if (now - peakT > (cfg.snare == 9 ? 15u : 35u)) { float p = peak; onsetT = peakT; peakAtFired = peakAt; onsetAngleFired = onsetAngle; fpkx = pkx; fpky = pky; fpkz = pkz; peak = 0; peakT = 0; firedRise = maxRise;
+        if (cfg.snare == 11 && maxRise < cfg.zsharp) { if (ws.count()) { char b[64]; snprintf(b, sizeof b, "{\"slow\":%.2f,\"rise\":%.2f}", p, maxRise); ws.textAll(b); } }   // too slow: movement, not a tap
+        else { lastStompT = now; fireStomp(p, now); } }
     }
-  } else if (peakT) { float p = peak; onsetT = peakT; peakAtFired = peakAt; onsetAngleFired = onsetAngle; fpkx = pkx; fpky = pky; fpkz = pkz; peak = 0; peakT = 0; lastStompT = now; fireStomp(p, now); }
+  } else if (peakT) { float p = peak; onsetT = peakT; peakAtFired = peakAt; onsetAngleFired = onsetAngle; fpkx = pkx; fpky = pky; fpkz = pkz; peak = 0; peakT = 0; firedRise = maxRise;
+    if (cfg.snare == 11 && maxRise < cfg.zsharp) { if (ws.count()) { char b[64]; snprintf(b, sizeof b, "{\"slow\":%.2f,\"rise\":%.2f}", p, maxRise); ws.textAll(b); } }
+    else { lastStompT = now; fireStomp(p, now); } }
 }
 
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[880];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zin\":%.0f,\"zoh\":%.2f,\"zarc\":%d,\"loop\":%d,\"lbars\":%d,\"lheel\":%.0f,\"zhthr\":%.2f,\"zsthr\":%.2f,\"imp\":%d,\"nKick\":%d,\"nSnare\":%d,\"nHat\":%d,\"nOHat\":%d,\"mch\":%d,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zin, cfg.zoh, cfg.zarc, cfg.loop, cfg.lbars, cfg.lheel, cfg.zhthr, cfg.zsthr, cfg.imp, cfg.nKick, cfg.nSnare, cfg.nHat, cfg.nOHat, cfg.mch, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zin\":%.0f,\"zoh\":%.2f,\"zarc\":%d,\"loop\":%d,\"lbars\":%d,\"lheel\":%.0f,\"zhthr\":%.2f,\"zsthr\":%.2f,\"imp\":%d,\"zsharp\":%.2f,\"nKick\":%d,\"nSnare\":%d,\"nHat\":%d,\"nOHat\":%d,\"mch\":%d,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zin, cfg.zoh, cfg.zarc, cfg.loop, cfg.lbars, cfg.lheel, cfg.zhthr, cfg.zsthr, cfg.imp, cfg.zsharp, cfg.nKick, cfg.nSnare, cfg.nHat, cfg.nOHat, cfg.mch, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -739,6 +748,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "zhthr", &f); if (f) cfg.zhthr = constrain(v, 0.05f, 8.0f);
   v = jsonNum(s, "zsthr", &f); if (f) cfg.zsthr = constrain(v, 0.05f, 8.0f);
   v = jsonNum(s, "imp", &f); if (f) cfg.imp = (int)v ? 1 : 0;
+  v = jsonNum(s, "zsharp", &f); if (f) cfg.zsharp = constrain(v, 0.0f, 2.0f);
   v = jsonNum(s, "nKick", &f); if (f) cfg.nKick = constrain((int)v, 0, 127);
   v = jsonNum(s, "nSnare", &f); if (f) cfg.nSnare = constrain((int)v, 0, 127);
   v = jsonNum(s, "nHat", &f); if (f) cfg.nHat = constrain((int)v, 0, 127);

@@ -156,6 +156,9 @@
 <div class="ctl"><label for="zsthr">Snare: lightest tap that counts</label><output id="zsthrOut"></output>
   <input type="range" id="zsthr" data-key="zsthr" min="0.05" max="8" step="0.05" value="1.8"></div>
 <p class="hint">The impact meter at the top shows what each tap measures.</p>
+<div class="ctl"><label for="zsharp">Tap sharpness: ignore anything rising slower than</label><output id="zsharpOut"></output>
+  <input type="range" id="zsharp" data-key="zsharp" min="0" max="1.5" step="0.01" value="0.25"></div>
+<p class="hint">A real tap shoots up fast; moving the foot ramps up slowly. Slow ones are logged as "ignored (slow)" with their rise, so you can set this just under what your softest taps show and above what movement shows. 0 = off.</p>
 <div class="seg" data-key="imp">
   <button type="button" data-v="1">Measure the jolt only</button>
   <button type="button" data-v="0">Measure any acceleration</button>
@@ -297,7 +300,7 @@
       $('zbHats').classList.toggle('lit', rel < -zin); $('zbKick').classList.toggle('lit', rel >= -zin && rel <= zdeg); $('zbSnare').classList.toggle('lit', rel > zdeg); }
   }
   const NN2 = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']; const nn = v => v + ' (' + NN2[v % 12] + (Math.floor(v / 12) - 1) + ')';
-  const fmt = { nKick: nn, nSnare: nn, nHat: nn, nOHat: nn, mch: v => 'ch ' + v, lheel: v => v + '°', zhthr: v => (+v).toFixed(2) + ' g', zsthr: v => (+v).toFixed(2) + ' g', zdeg: v => v + '° out', zin: v => v + '° in', zoh: v => (+v).toFixed(1) + ' g', thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', swang: v => v + '°', kroot: v => noteName(+v), kflat: v => v + '°', kspan: v => (+v + 1) + ' notes', kdeg: v => (+v) + '° (ends at ±' + Math.round(+$('kspan').value * v / 2) + '°)', tthr: v => v + '°', othr: v => v + '°', klvl: v => (+v).toFixed(2) + ' g', slvl: v => (+v).toFixed(2) + ' g', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
+  const fmt = { zsharp: v => (+v).toFixed(2) + ' g/10ms', nKick: nn, nSnare: nn, nHat: nn, nOHat: nn, mch: v => 'ch ' + v, lheel: v => v + '°', zhthr: v => (+v).toFixed(2) + ' g', zsthr: v => (+v).toFixed(2) + ' g', zdeg: v => v + '° out', zin: v => v + '° in', zoh: v => (+v).toFixed(1) + ' g', thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', swang: v => v + '°', kroot: v => noteName(+v), kflat: v => v + '°', kspan: v => (+v + 1) + ' notes', kdeg: v => (+v) + '° (ends at ±' + Math.round(+$('kspan').value * v / 2) + '°)', tthr: v => v + '°', othr: v => v + '°', klvl: v => (+v).toFixed(2) + ' g', slvl: v => (+v).toFixed(2) + ' g', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
   function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function applyCfg(c) {
     cfg = c;
@@ -431,7 +434,7 @@
       if (m.hit) {
         show(m.hit);
         if (m.hit === 'tap') { logRows.unshift('bounce ' + m.g.toFixed(2) + ' g  (tempo only)'); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); return; }
-        if ((m.hit !== 'hat' && m.hit !== 'hatOpen') || m.g !== undefined) { logRows.unshift((m.hit + '     ').slice(0, 5) + ' ' + (m.g !== undefined && !(m.sw >= 0) ? m.g.toFixed(2) + ' g' : '') + (m.sw !== undefined && m.sw >= 0 ? '  swing ' + Math.round(m.sw) + '°' : '') + (m.tu !== undefined ? '  toe↑' + Math.round(m.tu) + '° heel↑' + Math.round(m.hu) + '°' : (m.ang !== undefined ? '  tilt ' + Math.round(m.ang) + '°' : '')) + ((m.hit === 'shaker' || m.hit === 'tamb') ? '  vel ' + Math.round(8 + m.v * 119) : '') + (m.lift !== undefined && m.lift >= 0 ? '  match ' + Math.round(m.lift) : '') + (m.votes ? '  ' + m.votes : '')); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); } if (m.g !== undefined && !(m.sw >= 0)) $('mPeak').textContent = m.g.toFixed(2); 
+        if ((m.hit !== 'hat' && m.hit !== 'hatOpen') || m.g !== undefined) { logRows.unshift((m.hit + '     ').slice(0, 5) + ' ' + (m.g !== undefined && !(m.sw >= 0) ? m.g.toFixed(2) + ' g' : '') + (m.sw !== undefined && m.sw >= 0 ? '  swing ' + Math.round(m.sw) + '°' : '') + (m.tu !== undefined ? '  toe↑' + Math.round(m.tu) + '° heel↑' + Math.round(m.hu) + '°' : (m.ang !== undefined ? '  tilt ' + Math.round(m.ang) + '°' : '')) + ((m.hit === 'shaker' || m.hit === 'tamb') ? '  vel ' + Math.round(8 + m.v * 119) : '') + (m.lift !== undefined && m.lift >= 0 ? '  match ' + Math.round(m.lift) : '') + (m.votes ? '  ' + m.votes : '') + (m.rise !== undefined ? '  rise ' + m.rise.toFixed(2) : '')); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); } if (m.g !== undefined && !(m.sw >= 0)) $('mPeak').textContent = m.g.toFixed(2); 
         const out = +(cfg.out || 0); if (phoneSound && (out === 1 || out === 2)) playPhone(m.hit, m.v || 1);
       }
       if (m.bpm !== undefined) $('bpm').textContent = m.bpm ? m.bpm + (m.locked ? ' 🔒' : '') : '—';
@@ -440,6 +443,7 @@
       if (m.slots) { window.__me = (m.slots.find(x => +x.run) || {}).id; renderSlots(m); }
       if (m.nets) { $('netList').innerHTML = m.nets.length ? '<div class="hint" style="margin:0">Saved Wi-Fi (the board joins whichever is in range):</div>' + m.nets.map(n => '<div class="row" style="align-items:center"><span style="flex:1;font-size:14px">' + n.replace(/</g, '&lt;') + (n === m.wifi ? ' <span style="color:var(--ok)">· connected</span>' : '') + '</span><button type="button" data-forget="' + n.replace(/"/g, '&quot;') + '" style="flex:0 0 auto">Forget</button></div>').join('') : ''; }
       if (m.net !== undefined) $('netInfo').innerHTML = m.net ? '<b>On your Wi-Fi (' + m.wifi + '):</b> stay on it and open <b>http://' + m.host + '</b> (or http://' + m.net + '). Bookmark it.' : '<b>Skip the Wi-Fi swapping:</b> save the Wi-Fi of each place you play (and your phone\'s hotspot). The board remembers them all and joins whichever is in range.';
+      if (m.slow !== undefined) { logRows.unshift('ignored (slow)  ' + m.slow.toFixed(2) + ' g  rise ' + m.rise.toFixed(2)); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); }
       if (m.stopped) { logRows.unshift('── stopped (shake) ──'); if (logRows.length > 8) logRows.pop(); $('log').textContent = logRows.join('\n'); }
       if (m.ota) $('otaMsg').textContent = m.ota;
       if (m.edge) $('edgeState').textContent = (m.edge === 'lo' ? 'low end set' : 'high end set') + (+cfg.kEdge ? '' : ', now set the other end');
