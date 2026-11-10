@@ -362,8 +362,8 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   arrow loads; MIDI Program Change n = rig n+1. quad_test loads every rig and checks names; new rigs go at the end.
   Banks (Nov 2026, the user's ask: live rigs kept apart from the factory ones): rigs.h BANKS = Factory (RIGS) and Live
   (LIVE_RIGS, 8 starters, a Compressor first; more on the user's word, at the end). Params kBank / Bank < / Bank > after
-  the FX arrows; the Rig stepper, its list (Rigs), arrows and Program Change work within the bank; a bank change loads
-  nothing (Rig shows "-"); a "Banks" list (the last); MIDI CC 20 = bank. RIG page: Bank stepper above MIDI Ch.
+  the FX arrows; the Rig stepper, its list (Rigs), arrows and Program Change work within the bank; a bank change by < > or
+  the Banks list loads its first rig (the user found "nothing happens" confusing; CC 20 / a restore load nothing); a "Banks" list (the last); MIDI CC 20 = bank. RIG page: Bank stepper above MIDI Ch.
   Setlist banks (Nov 2026, the user's Hoochie_Daddy_Setlist.xlsx, "I need tones for that"): `quadrig-mpc/setlist/make_setlist.py`
   writes `src/rigs_setlist.h` (SET_0..6, SETLIST_BANKS, included at the end of rigs.h): banks A Grunge Core .. G Slow
   Ones, two rigs per song in sheet order, the signature tone then "<song> Rhy" (the rhythm: same amp + reverb, clean /

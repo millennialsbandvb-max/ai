@@ -179,7 +179,9 @@ int main(int argc, char **argv) {
     for (int bk = 0; bk < N_BANKS; bk++) {
         const Rig *rigs = BANKS[bk].rigs;
         const int nrigs = BANKS[bk].n;
-        if (bk) { const int bn = param(e, "Bank >"); e->setParameter(e, bn, 1); e->setParameter(e, bn, 0); disp(e, param(e, "Bank"), t); printf("  bank: %s\n", t); CHECK(!strcmp(t, BANKS[bk].name), "Bank > doesn't move to the next bank"); }
+        if (bk) { const int bn = param(e, "Bank >"); e->setParameter(e, bn, 1); e->setParameter(e, bn, 0); disp(e, param(e, "Bank"), t); printf("  bank: %s\n", t); CHECK(!strcmp(t, BANKS[bk].name), "Bank > doesn't move to the next bank");
+            disp(e, param(e, "Rig"), t); if (strcmp(t, BANKS[bk].rigs[0].name)) printf("  Rig shows %s\n", t); CHECK(!strcmp(t, BANKS[bk].rigs[0].name), "Bank > doesn't load the bank's first rig");
+            const int rp = param(e, "Rig <"); e->setParameter(e, rp, 1); e->setParameter(e, rp, 0); }   /* (back one, so Rig > starts at the first) */
         const int rig = param(e, "Rig"), next = param(e, "Rig >"), pres = param(e, "Presence");
         int bad = 0;
         for (int r = 0; r < nrigs; r++) {

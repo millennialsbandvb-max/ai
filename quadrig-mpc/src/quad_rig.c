@@ -492,7 +492,7 @@ static int quad_pick(AEffect *e, int list, int op, int i, char *out, int max) {
         if (op == PL_CURRENT) return s->bank;
         if (op == PL_HEADING || i < 0 || i >= N_BANKS) return 0;
         if (op == PL_NAME) snprintf(out, (size_t)max, "%s", BANKS[i].name);
-        else if (op == PL_CHOOSE) { s->bank = i; s->rig = -1; s->norm[kBank] = N_BANKS > 1 ? (float)i / (float)(N_BANKS - 1) : 0; s->automate[kBank] = s->automate[kRig] = 1; s->update_display = 1; }
+        else if (op == PL_CHOOSE) { s->bank = i; s->rig = -1; s->norm[kBank] = N_BANKS > 1 ? (float)i / (float)(N_BANKS - 1) : 0; s->automate[kBank] = s->automate[kRig] = 1; s->update_display = 1; load_rig(s, 0); }   /* (its first rig plays at once) */
         return 0;
     }
     if (list > RIG_LIST) {   /* a slot's effect, A-Z (Off first) */
@@ -627,7 +627,7 @@ static void bank_param(Plugin *s, int w, float v) {
     int b = s->bank;
     if (w) { if (v > 0.5f) b = (s->bank + (w == 1 ? -1 : 1) + N_BANKS) % N_BANKS; s->norm[kBank + w] = 0; }
     else b = N_BANKS > 1 ? (int)lrintf(clampf(v, 0, 1) * (float)(N_BANKS - 1)) : 0;
-    if (b != s->bank) { s->bank = b; s->rig = -1; s->automate[kRig] = 1; }
+    if (b != s->bank) { s->bank = b; s->rig = -1; s->automate[kRig] = 1; if (w) load_rig(s, 0); }   /* (< >: its first rig plays at once) */
     s->norm[kBank] = N_BANKS > 1 ? (float)s->bank / (float)(N_BANKS - 1) : 0;
     s->automate[kBank] = 1;
     s->update_display = 1;
