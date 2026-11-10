@@ -82,6 +82,8 @@ struct Cfg {
   int loop = 1;                                    // swivel kit: looper on
   float zhthr = 0.8f;                              // swivel kit: lightest tap that counts in the hats zone (g); kick uses thr
   int imp = 1;                                     // impact measure: 1 = sharp jolt only (motion removed), 0 = any acceleration (old)
+  int nKick = 36, nSnare = 38, nHat = 42, nOHat = 46;   // MIDI notes per drum (GM defaults), channel mch
+  int mch = 10;                                    // MIDI channel
   float zsthr = 1.8f;                              // swivel kit: lightest tap that counts in the snare zone (g)
   int lbars = 1;                                   // loop length in bars (1, 2, 4)
   float lheel = 12.0f;                             // heel lift gesture: tipped from rest by more than this (deg)
@@ -111,6 +113,8 @@ void loadCfg() {
   if (cfg.sigVer < 4) { cfg.lcal = false; cfg.rcal = false; cfg.sigVer = 4; cfg.snare = 8; cfg.thr = 1.2f; }
   if (cfg.sigVer < 5) { cfg.tthr = 15.0f; cfg.sigVer = 5; }
   if (cfg.sigVer < 6) { cfg.lcal = false; cfg.rcal = false; cfg.sigVer = 6; }   // toe/heel now learn five measurements   // lf/rf now hold toe/heel signatures; start in heel/toe mode
+  if (cfg.nKick == 0 && cfg.nSnare == 0) { cfg.nKick = 36; cfg.nSnare = 38; cfg.nHat = 42; cfg.nOHat = 46; }
+  if (cfg.mch < 1 || cfg.mch > 16) cfg.mch = 10;
   cfg.snare = 11;   // only the swivel kit is in use now (other modes stay in the code but are not offered)
   if (cfg.sigVer < 7) { if (n > 0) cfg.kflip = cfg.kflip ? 0 : 1; cfg.sigVer = 7; }   // keyboard pitch direction was backwards: flip whatever was set
   if (cfg.snare != 1 && cfg.snare != 2 && cfg.snare != 6 && cfg.snare != 7 && cfg.snare != 8 && cfg.snare != 9 && cfg.snare != 10) cfg.snare = 8;
@@ -221,10 +225,12 @@ void sendMidi(Kind k, float vel) {
 #endif
     return;
   }
-  if (bleConnected) { MIDI.sendNoteOn(midiNote[k], v, 10); MIDI.sendNoteOff(midiNote[k], 0, 10); }
+  int n = k == KICK ? cfg.nKick : k == SNARE ? cfg.nSnare : k == HAT ? cfg.nHat : k == OHAT ? cfg.nOHat : midiNote[k];
+  int ch = constrain(cfg.mch, 1, 16);
+  if (bleConnected) { MIDI.sendNoteOn(n, v, ch); MIDI.sendNoteOff(n, 0, ch); }
 #ifdef HAVE_USB_MIDI
-  usbMidi.noteOn(midiNote[k], v, 10);
-  usbMidi.noteOff(midiNote[k], 0, 10);
+  usbMidi.noteOn(n, v, ch);
+  usbMidi.noteOff(n, 0, ch);
 #endif
 }
 extern float lastManualHatMs;   // pb_clock.h
@@ -667,8 +673,8 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
 // ---------------- Web ----------------
 void sendCfg(AsyncWebSocketClient* c) {
   char b[880];
-  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zin\":%.0f,\"zoh\":%.2f,\"zarc\":%d,\"loop\":%d,\"lbars\":%d,\"lheel\":%.0f,\"zhthr\":%.2f,\"zsthr\":%.2f,\"imp\":%d,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
-           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zin, cfg.zoh, cfg.zarc, cfg.loop, cfg.lbars, cfg.lheel, cfg.zhthr, cfg.zsthr, cfg.imp, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
+  snprintf(b, sizeof b, "{\"cfg\":{\"snare\":%d,\"thr\":%.3f,\"sthr\":%.3f,\"swthr\":%.0f,\"swang\":%.0f,\"kroot\":%d,\"krange\":%.0f,\"kflip\":%d,\"kflat\":%.0f,\"kspan\":%d,\"kdeg\":%.1f,\"kEdge\":%d,\"kLo\":%.1f,\"kHi\":%.1f,\"zdeg\":%.0f,\"zin\":%.0f,\"zoh\":%.2f,\"zarc\":%d,\"loop\":%d,\"lbars\":%d,\"lheel\":%.0f,\"zhthr\":%.2f,\"zsthr\":%.2f,\"imp\":%d,\"nKick\":%d,\"nSnare\":%d,\"nHat\":%d,\"nOHat\":%d,\"mch\":%d,\"zflip\":%d,\"tthr\":%.0f,\"shk\":%d,\"ohat\":%d,\"othr\":%.0f,\"flat\":%d,\"up\":%d,\"klvl\":%.2f,\"slvl\":%.2f,\"tlock\":%d,\"bpm\":%.0f,\"gap\":%d,\"kit\":%d,\"out\":%d,\"quant\":%d,\"hat\":%d,\"vol\":%d,\"cal\":%d,\"tcal\":%d,\"hcal\":%d,\"ver\":\"%s\",\"ssid\":\"%s\"}}",
+           cfg.snare, cfg.thr, cfg.sthr, cfg.swthr, cfg.swang, cfg.kroot, cfg.krange, cfg.kflip, cfg.kflat, cfg.kspan, cfg.kdeg, cfg.kEdge ? 1 : 0, cfg.kLo, cfg.kHi, cfg.zdeg, cfg.zin, cfg.zoh, cfg.zarc, cfg.loop, cfg.lbars, cfg.lheel, cfg.zhthr, cfg.zsthr, cfg.imp, cfg.nKick, cfg.nSnare, cfg.nHat, cfg.nOHat, cfg.mch, cfg.zflip, cfg.tthr, cfg.shk, cfg.ohat, cfg.othr, cfg.flatSet ? 1 : 0, cfg.upSet ? 1 : 0, cfg.klvl, cfg.slvl, cfg.tlock, cfg.bpm, cfg.gap, cfg.kit, cfg.out, cfg.quant, cfg.hat, cfg.vol, cfg.cal ? 1 : 0, cfg.lcal ? 1 : 0, cfg.rcal ? 1 : 0, FW_VERSION, cfg.ssid);
   if (c) c->text(b); else ws.textAll(b);
 }
 // Tiny JSON reader for {"set":{"key":value}} / {"get":1} / {"cal":1}
@@ -729,6 +735,11 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   v = jsonNum(s, "zhthr", &f); if (f) cfg.zhthr = constrain(v, 0.05f, 8.0f);
   v = jsonNum(s, "zsthr", &f); if (f) cfg.zsthr = constrain(v, 0.05f, 8.0f);
   v = jsonNum(s, "imp", &f); if (f) cfg.imp = (int)v ? 1 : 0;
+  v = jsonNum(s, "nKick", &f); if (f) cfg.nKick = constrain((int)v, 0, 127);
+  v = jsonNum(s, "nSnare", &f); if (f) cfg.nSnare = constrain((int)v, 0, 127);
+  v = jsonNum(s, "nHat", &f); if (f) cfg.nHat = constrain((int)v, 0, 127);
+  v = jsonNum(s, "nOHat", &f); if (f) cfg.nOHat = constrain((int)v, 0, 127);
+  v = jsonNum(s, "mch", &f); if (f) cfg.mch = constrain((int)v, 1, 16);
   v = jsonNum(s, "zflip", &f); if (f) cfg.zflip = (int)v ? 1 : 0;
   v = jsonNum(s, "kflat", &f); if (f) cfg.kflat = constrain(v, 3.0f, 40.0f);
   v = jsonNum(s, "kspan", &f); if (f) cfg.kspan = constrain((int)v, 2, 48);

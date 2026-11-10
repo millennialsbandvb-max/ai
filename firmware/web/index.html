@@ -149,6 +149,13 @@
 <div class="ctl"><label for="zoh">Hats: tap harder than this for an open hat</label><output id="zohOut"></output>
   <input type="range" id="zoh" data-key="zoh" min="0.3" max="8" step="0.1" value="2.5"></div>
 </div>
+<h2>MIDI notes</h2>
+<div class="ctl"><label for="nKick">Kick</label><output id="nKickOut"></output><input type="range" id="nKick" data-key="nKick" min="0" max="127" step="1" value="36"></div>
+<div class="ctl"><label for="nSnare">Snare</label><output id="nSnareOut"></output><input type="range" id="nSnare" data-key="nSnare" min="0" max="127" step="1" value="38"></div>
+<div class="ctl"><label for="nHat">Closed hat</label><output id="nHatOut"></output><input type="range" id="nHat" data-key="nHat" min="0" max="127" step="1" value="42"></div>
+<div class="ctl"><label for="nOHat">Open hat</label><output id="nOHatOut"></output><input type="range" id="nOHat" data-key="nOHat" min="0" max="127" step="1" value="46"></div>
+<div class="ctl"><label for="mch">MIDI channel</label><output id="mchOut"></output><input type="range" id="mch" data-key="mch" min="1" max="16" step="1" value="10"></div>
+<p class="hint">Defaults are General MIDI drums (36 kick, 38 snare, 42 closed hat, 46 open hat) on channel 10. Use the −/+ buttons to step one note at a time.</p>
 <h2>Drum kit</h2>
 <div class="seg" data-key="kit">
   <button type="button" data-v="0">Acoustic</button>
@@ -273,7 +280,8 @@
     if (rel !== undefined) { const x = Math.max(-ZR, Math.min(ZR, rel)); $('zneedle').style.left = ((x + ZR) / (2 * ZR) * 100) + '%';
       $('zbHats').classList.toggle('lit', rel < -zin); $('zbKick').classList.toggle('lit', rel >= -zin && rel <= zdeg); $('zbSnare').classList.toggle('lit', rel > zdeg); }
   }
-  const fmt = { lheel: v => v + '°', zhthr: v => (+v).toFixed(2) + ' g', zsthr: v => (+v).toFixed(2) + ' g', zdeg: v => v + '° out', zin: v => v + '° in', zoh: v => (+v).toFixed(1) + ' g', thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', swang: v => v + '°', kroot: v => noteName(+v), kflat: v => v + '°', kspan: v => (+v + 1) + ' notes', kdeg: v => (+v) + '° (ends at ±' + Math.round(+$('kspan').value * v / 2) + '°)', tthr: v => v + '°', othr: v => v + '°', klvl: v => (+v).toFixed(2) + ' g', slvl: v => (+v).toFixed(2) + ' g', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
+  const NN2 = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B']; const nn = v => v + ' (' + NN2[v % 12] + (Math.floor(v / 12) - 1) + ')';
+  const fmt = { nKick: nn, nSnare: nn, nHat: nn, nOHat: nn, mch: v => 'ch ' + v, lheel: v => v + '°', zhthr: v => (+v).toFixed(2) + ' g', zsthr: v => (+v).toFixed(2) + ' g', zdeg: v => v + '° out', zin: v => v + '° in', zoh: v => (+v).toFixed(1) + ' g', thr: v => (+v).toFixed(2) + ' g', sthr: v => (+v).toFixed(2) + ' g', swthr: v => v + ' °/s', swang: v => v + '°', kroot: v => noteName(+v), kflat: v => v + '°', kspan: v => (+v + 1) + ' notes', kdeg: v => (+v) + '° (ends at ±' + Math.round(+$('kspan').value * v / 2) + '°)', tthr: v => v + '°', othr: v => v + '°', klvl: v => (+v).toFixed(2) + ' g', slvl: v => (+v).toFixed(2) + ' g', bpm: v => v + ' bpm', gap: v => v + ' ms', vol: v => Math.round(v / 2.55) + '%' };
   function send(obj) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj)); }
   function applyCfg(c) {
     cfg = c;
