@@ -90,6 +90,7 @@
 
 <h2>Recent hits (newest first)</h2>
 <div class="tile" style="flex:none; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.5; min-height: 60px; white-space: pre" id="log">—</div>
+<div class="seg" data-key="snare" hidden><button type="button" data-v="11">Swivel kit</button></div>
 <h2>Swivel kit</h2>
 <div id="zoneBox" style="display:flex;flex-direction:column;gap:10px" hidden>
 <div class="tiles">
@@ -133,11 +134,13 @@
   <input type="range" id="zdeg" data-key="zdeg" min="3" max="60" step="1" value="15"></div>
 <div class="ctl"><label for="zin">Kick zone, left side (toes in): hats start past</label><output id="zinOut"></output>
   <input type="range" id="zin" data-key="zin" min="3" max="60" step="1" value="15"></div>
+<div class="ctl"><label for="thr" id="thrLabel">Kick: lightest tap that counts</label><output id="thrOut"></output>
+  <input type="range" id="thr" data-key="thr" min="0.05" max="8" step="0.01" value="1.8"></div>
 <div class="ctl"><label for="zhthr">Hats: lightest tap that counts</label><output id="zhthrOut"></output>
   <input type="range" id="zhthr" data-key="zhthr" min="0.05" max="8" step="0.05" value="0.8"></div>
 <div class="ctl"><label for="zsthr">Snare: lightest tap that counts</label><output id="zsthrOut"></output>
   <input type="range" id="zsthr" data-key="zsthr" min="0.05" max="8" step="0.05" value="1.8"></div>
-<p class="hint">Kick uses the stomp threshold below. The impact meter shows what each tap measures.</p>
+<p class="hint">The impact meter at the top shows what each tap measures.</p>
 <div class="seg" data-key="imp">
   <button type="button" data-v="1">Measure the jolt only</button>
   <button type="button" data-v="0">Measure any acceleration</button>
@@ -145,57 +148,6 @@
 <p class="hint">"Jolt only" takes the foot's movement (tilting, swivelling, sliding) out of the reading, so a tap measures how hard the foot actually hits, not how fast it was moving. Thresholds will read lower than before; re-check them on the meter.</p>
 <div class="ctl"><label for="zoh">Hats: tap harder than this for an open hat</label><output id="zohOut"></output>
   <input type="range" id="zoh" data-key="zoh" min="0.3" max="8" step="0.1" value="2.5"></div>
-</div>
-<details style="margin-top:6px"><summary style="color:var(--muted);font-size:13px;cursor:pointer">Other modes (heel/toe, swing, tap/stomp, shaker, foot keyboard)</summary>
-<h2>Mode</h2>
-<div class="seg" data-key="snare">
-  <button type="button" data-v="8">Heel = kick, toe = snare</button>
-  <button type="button" data-v="7">Toe = kick, heel = snare</button>
-  <button type="button" data-v="6">Stomp = kick, swing = snare</button>
-  <button type="button" data-v="2">Tap = kick, stomp = snare</button>
-  <button type="button" data-v="1">Tap = snare, stomp = kick</button>
-  <button type="button" data-v="9">Shaker</button>
-  <button type="button" data-v="10">Foot keyboard</button>
-  <button type="button" data-v="11">Swivel kit</button>
-</div>
-</details>
-<div id="keyBox" style="display:flex;flex-direction:column;gap:10px">
-<div class="tiles">
-  <div class="tile"><b id="keyAim">—</b><span>pointing at</span></div>
-  <div class="tile"><b id="keyNow">—</b><span>playing</span></div>
-  <div class="tile"><b id="keyRange">—</b><span>range</span></div>
-</div>
-<p class="hint">Lay the board flat on your foot and tap "Set flat" once (open-hat section). Swivel your foot left / right to pick a note (chromatic; set how many notes and how wide each one is below); the left tile shows the note you're pointing at. Tap to play it (harder = louder); it holds until your foot tips away from where it was when you tapped by more than the release angle. Set the edges: swivel to where you want the lowest note and tap "Set low end here", then to the highest and tap "Set high end here"; the notes spread evenly between them, and you can still widen or narrow the range with Degrees per note or add/remove notes (it stays centred). "Center here" or the board's front button re-centres on the middle of the range if it drifts; the board's side button steps up an octave. Sends MIDI on channel 1; the board speaker plays a tone.</p>
-<div class="row"><button type="button" id="octDown">Octave −</button><button type="button" id="keyCenter">Center here</button><button type="button" id="octUp">Octave +</button></div>
-<div class="row"><button type="button" id="keyLo">Set low end here</button><button type="button" id="keyHi">Set high end here</button><button type="button" id="keyClear">Clear edges</button></div>
-<div class="tile" style="flex:none"><b id="edgeState">—</b><span>playable range</span></div>
-<div class="seg" data-key="kflip" id="kflipSeg">
-  <button type="button" data-v="0">Normal</button>
-  <button type="button" data-v="1">Swap left / right</button>
-</div>
-<div class="ctl"><label for="kroot">Lowest note</label><output id="krootOut"></output>
-  <input type="range" id="kroot" data-key="kroot" min="24" max="84" step="1" value="48"></div>
-<div class="ctl"><label for="kspan">Notes in range</label><output id="kspanOut"></output>
-  <input type="range" id="kspan" data-key="kspan" min="2" max="48" step="1" value="18"></div>
-<div class="ctl"><label for="kdeg">Degrees of swivel per note</label><output id="kdegOut"></output>
-  <input type="range" id="kdeg" data-key="kdeg" min="1" max="15" step="0.5" value="4"></div>
-<div class="ctl"><label for="kflat">Release when tipped more than (from where you tapped)</label><output id="kflatOut"></output>
-  <input type="range" id="kflat" data-key="kflat" min="3" max="40" step="1" value="10"></div>
-</div>
-<div id="shkBox">
-<div class="seg" data-key="shk">
-  <button type="button" data-v="0">Shaker</button>
-  <button type="button" data-v="1">Maracas</button>
-  <button type="button" data-v="2">Tambourine</button>
-</div>
-</div>
-<div id="thBox" style="display:flex;flex-direction:column;gap:10px">
-<div class="row"><button type="button" id="learnHeel">Set heel: tap, then heel-stomp 3×</button><button type="button" id="learnToe">Set toe: tap, then toe-stomp 3×</button></div>
-<div class="tile" style="flex:none"><b id="thState">—</b><span>heel / toe learned</span></div>
-</div>
-<div id="swingBox" style="display:flex;flex-direction:column;gap:10px">
-<div class="row"><button type="button" id="calBtn">Set swing: tap, then swing your foot 3×</button><button type="button" id="flipBtn">Flip swing direction</button></div>
-<div class="tile" style="flex:none"><b id="calState">—</b><span>swing direction (or press the board's front button, then swing 3×)</span></div>
 </div>
 <h2>Drum kit</h2>
 <div class="seg" data-key="kit">
@@ -225,41 +177,13 @@
   <button type="button" data-v="1">Quarters</button>
   <button type="button" data-v="2">Eighths</button>
 </div>
-<h2>Open hat when the toe is raised</h2>
-<div class="seg" data-key="ohat">
-  <button type="button" data-v="0">Off</button>
-  <button type="button" data-v="1">On</button>
-</div>
-<div id="ohatBox" style="display:flex;flex-direction:column;gap:10px">
-<div class="tiles">
-  <div class="tile"><b id="toeAng">—</b><span>toe angle now</span></div>
-  <div class="tile"><b id="hatState">—</b><span>hats</span></div>
-  <div class="tile" style="display:flex;align-items:center"><button type="button" id="flatBtn" style="width:100%;background:none;border:0;color:var(--fg);font-size:14px;cursor:pointer;padding:6px 0">Set flat, then raise toe</button></div>
-</div>
-<p class="hint" id="upState" style="margin:0">—</p>
-<div class="ctl"><label for="othr">Open when the toe is up more than</label><output id="othrOut"></output>
-  <input type="range" id="othr" data-key="othr" min="3" max="60" step="1" value="20"></div>
-</div>
-
-<div class="ctl"><label for="thr" id="thrLabel">Kick: lightest tap that counts</label><output id="thrOut"></output>
-  <input type="range" id="thr" data-key="thr" min="0.05" max="8" step="0.01" value="1.8"></div>
-<div class="ctl" id="sthrCtl"><label for="sthr">Stomp line (harder than this = stomp)</label><output id="sthrOut"></output>
-  <input type="range" id="sthr" data-key="sthr" min="0.1" max="12" step="0.01" value="3.5"></div>
-<div class="ctl" id="klvlCtl"><label for="klvl">Kick needs at least</label><output id="klvlOut"></output>
-  <input type="range" id="klvl" data-key="klvl" min="0.1" max="8" step="0.01" value="1.2"></div>
-<div class="ctl" id="slvlCtl"><label for="slvl">Snare needs at least</label><output id="slvlOut"></output>
-  <input type="range" id="slvl" data-key="slvl" min="0.1" max="8" step="0.01" value="1.2"></div>
-<div class="ctl" id="tthrCtl"><label for="tthr">Toe lift (toe must come up at least this far to be a toe)</label><output id="tthrOut"></output>
-  <input type="range" id="tthr" data-key="tthr" min="0" max="80" step="1" value="15"></div>
-<div class="ctl" id="swthrCtl"><label for="swang">Swing angle (swing at least this far = snare)</label><output id="swangOut"></output>
-  <input type="range" id="swang" data-key="swang" min="3" max="90" step="1" value="25"></div>
 <div class="ctl"><label for="gap">Minimum gap between hits</label><output id="gapOut"></output>
   <input type="range" id="gap" data-key="gap" min="60" max="400" step="10" value="120"></div>
 <div class="ctl"><label for="vol">Board speaker volume</label><output id="volOut"></output>
   <input type="range" id="vol" data-key="vol" min="0" max="255" step="1" value="200"></div>
 <div class="ctl"><label for="pvol">Phone volume</label><output id="pvolOut"></output>
   <input type="range" id="pvol" min="0" max="100" step="1" value="85"></div>
-<p class="hint">Up and down: "Set flat, then raise toe" learns which way is toe-up, so tilt has a sign: + toe up, − toe down (heel raised). Before each hit it measures only the lift: how far the toe rose and how far the heel rose (log: toe↑ / heel↑); coming back down is ignored. Toe if the toe rose at least the Toe lift angle and more than the heel; heel if the heel rose more; if neither lifted, the other measurements decide (sixth letter in the log). Open hat: with the board on your toes, tap "Set flat, then raise toe" with your foot resting flat, then raise your toe past the "Open above" angle and the automatic hats play open (MIDI note 46); lower it and they close again (note 42), cutting the open hat off like a real one. The toe-angle tile shows the live angle so you can pick the line. If you never set flat, it takes the first second your foot is still. Shaker mode: every shake plays, and how hard you shake sets the volume (MIDI velocity), from the "lightest shake" line up to full at four times that. Pick Shaker (MIDI note 82), Maracas (70) or Tambourine (54); no kick, snare or hats in this mode. Tempo · Lock after 8 hits: count in with eight even hits (two bars of quarter notes; the BPM tile counts them). The tempo is the total time of those eight hits, and the hats start on the eighth. After that nothing you play changes the tempo or moves the hats. Stop for two bars and the hats stop and it resets for a new count-in. Follow my playing: the tempo keeps following your hits, as before. Heel / toe modes (board taped on the toes): tap "Set heel" and do 3 heel stomps, then "Set toe" and do 3 toe stomps. It tells them apart by which way your foot is rotating as it lands, and a toe also has to drop at least the "Toe lift" angle. The log shows each hit's lift angle: set the Toe lift slider between your heel numbers and your toe numbers. Stomp / swing mode (board taped on top of the shoe): a stomp above the orange line is a kick; swinging your foot at least the swing angle in the learned direction is a snare (the log shows how far each swing went). Teach the swing once: tap "Set swing" (or press the board's front button) and swing your foot 3 times the way you'll play it, pausing a moment after each; it learns the direction your foot starts moving and ignores the swing back. If it ever triggers on the swing back instead, tap "Flip swing direction". Tap / stomp modes: blue line = lightest tap that counts, yellow line = the stomp line. In every mode each hit sets the tempo; the hi-hat starts on your second hit and stops when you stop. The log shows each kick's impact (g) and each snare's swing speed (°/s), handy for setting the sliders. Everything here is stored on the board. Bluetooth and USB MIDI are always on.</p>
+<p class="hint">Tempo · Lock after 8 hits: count in with eight even hats; after that nothing moves the tempo until you stop for two bars. Follow my playing: the tempo keeps following your hats. Everything here is stored on the board. Bluetooth and USB MIDI are always on.</p>
 <h2>Firmware · installed: <span id="ver">?</span></h2>
 <div class="ctl"><label for="ssid">Home Wi-Fi name</label><output></output><input type="text" id="ssid" placeholder="your Wi-Fi network" style="grid-column:1/-1;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px"></div>
 <div class="ctl"><label for="pass">Home Wi-Fi password</label><output></output><input type="password" id="pass" placeholder="password" style="grid-column:1/-1;background:var(--panel);color:var(--fg);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px"></div>
@@ -279,7 +203,9 @@
 (() => {
   const NN = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   function noteName(n) { return NN[n % 12] + (Math.floor(n / 12) - 1); }
-  const $ = id => document.getElementById(id);
+  // elements of the retired modes (heel/toe, swing, keyboard...) are gone from the page; code that still
+  // touches them gets a detached placeholder so nothing breaks
+  const _ph = {}; const $ = id => document.getElementById(id) || (_ph[id] = _ph[id] || Object.assign(document.createElement('input'), { hidden: true }));
   const colors = { kick: '#ff6a3d', snare: '#ffd166', hat: '#7bdff2', hatOpen: '#b3f0ff', shaker: '#7bf2a8', tamb: '#f27bd5' };
   let cfg = {}, ws = null, phoneSound = false; const logRows = [];
 
