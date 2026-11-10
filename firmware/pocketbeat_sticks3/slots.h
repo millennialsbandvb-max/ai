@@ -17,6 +17,7 @@
 #include <WiFiClientSecure.h>
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
+#include <esp_system.h>
 
 #ifndef FW_ID
 #error "define FW_ID (\"pb\", \"fb\" or \"pet\") before including slots.h"
@@ -25,6 +26,23 @@
 const char FW_MARK[] __attribute__((used, section(".rodata.fwmark"))) = "\x7f" "FWID:" FW_ID ":" FW_VERSION ":";
 
 namespace slots {
+
+// ---- boot guard: if the firmware dies three times in a row within 40 s of starting, the next boot is "safe mode"
+// (no Bluetooth, no Wi-Fi scanning, no motion processing): the board's own network and the page still work, so
+// you can update or switch firmware instead of reaching for the USB cable.
+static bool safeMode = false;
+static bool bootGuard() {
+  Preferences p; p.begin("boot", false);
+  int crashes = p.getInt("c", 0);
+  esp_reset_reason_t why = esp_reset_reason();
+  bool crashed = (why == ESP_RST_PANIC || why == ESP_RST_INT_WDT || why == ESP_RST_TASK_WDT || why == ESP_RST_WDT || why == ESP_RST_BROWNOUT);
+  if (crashed) crashes++; else if (why == ESP_RST_POWERON) crashes = 0;
+  safeMode = crashes >= 3;
+  if (safeMode) crashes = 0;   // one safe boot, then try normally again
+  p.putInt("c", crashes); p.end();
+  return safeMode;
+}
+static void bootOk() { Preferences p; p.begin("boot", false); if (p.getInt("c", 0)) p.putInt("c", 0); p.end(); }   // call once after 40 s alive
 
 struct Fw { const char* id; const char* name; const char* host; const char* ap; const char* bin; const char* ver; };
 static const Fw FWS[3] = {

@@ -29,6 +29,7 @@ USBMIDI usbMidi;
 #include "version.h"
 #define FW_ID "fb"
 #include "slots.h"
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);   // roomier main stack: web, TLS updates and the looper all run from loop()
 
 
 // ---------------- Settings (persisted; append new fields at the end) ----------------
@@ -708,12 +709,13 @@ void setup() {
   scr.setPsram(true); scr.setColorDepth(16); scr.createSprite(M5.Display.width(), M5.Display.height());
   lastButtonMs = millis();
   loadCfg();
+  bool safe = slots::bootGuard();
   slots::begin(otaStatus);
   M5.Speaker.setVolume(cfg.vol);
   M5.Imu.init();
   BLEMIDI.setHandleConnected([]() { bleConnected = true; });
   BLEMIDI.setHandleDisconnected([]() { bleConnected = false; });
-  MIDI.begin();
+  if (!safe) MIDI.begin();
 #ifdef HAVE_USB_MIDI
   USB.productName("Footboard"); USB.manufacturerName("Footboard");
   usbMidi.begin(); USB.begin();
@@ -724,6 +726,15 @@ void setup() {
 
 void loop() {
   M5.update();
+  { static bool okDone = false; if (!okDone && millis() > 40000) { okDone = true; slots::bootOk(); } }
+  if (slots::safeMode) {   // safe mode: only the page, Wi-Fi and updates
+    static uint32_t drew = 0; uint32_t nowS = millis();
+    if (nowS - drew > 1000) { drew = nowS; auto& d = M5.Display; d.fillScreen(TFT_BLACK); d.setTextColor(TFT_ORANGE, TFT_BLACK); d.setFont(&fonts::Font2); d.setTextDatum(top_left); d.setTextSize(1);
+      d.drawString("SAFE MODE", 6, 8); d.setTextColor(TFT_WHITE); d.drawString("crashed 3x at boot", 6, 30); d.drawString("Join its Wi-Fi, open", 6, 52); d.drawString("192.168.4.1 and", 6, 68); d.drawString("update or switch.", 6, 84); d.drawString("Press reset to retry.", 6, 110); }
+    if (otaRequest) { int r = otaRequest; otaRequest = 0; if (r == 2) slots::switchTo(reqId); else if (r == 3) { if (joinHomeWifi()) slots::installFromGithub(reqId, true, false); } else doOtaFromGithub(); }
+    if (wifiReq) { wifiReq = false; slots::netSet(cfg.ssid, cfg.pass); }
+    ws.cleanupClients(); delay(5); return;
+  }
   MIDI.read();
   uint32_t now = millis();
   if (M5.BtnA.wasPressed() || M5.BtnB.wasPressed()) { lastActive = now;
@@ -751,7 +762,7 @@ void loop() {
   if (wifiReq) { wifiReq = false; slots::netSet(cfg.ssid, cfg.pass); }
   slots::netTick(now, ws.count() > 0 || WiFi.softAPgetStationNum() > 0);
   { static uint32_t lastNet = 0;
-    if (ws.count() && now - lastNet > 3000) { lastNet = now; char b[900], dj[360], nj[320]; slots::json(dj, sizeof dj); slots::netJson(nj, sizeof nj);
+    if (ws.count() && now - lastNet > 3000) { lastNet = now; static char b[900], dj[360], nj[320]; slots::json(dj, sizeof dj); slots::netJson(nj, sizeof nj);
       bool up = slots::netUp();
       snprintf(b, sizeof b, "{\"net\":\"%s\",\"host\":\"footboard.local\",\"wifi\":\"%s\",%s,%s}", up ? WiFi.localIP().toString().c_str() : "", slots::netCurrent(), dj, nj); ws.textAll(b); } }
   // after an update that overwrote another firmware: put it back once home Wi-Fi is up
