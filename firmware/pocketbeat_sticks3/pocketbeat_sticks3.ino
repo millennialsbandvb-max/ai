@@ -116,7 +116,7 @@ void loadCfg() {
   if (cfg.sigVer < 6) { cfg.lcal = false; cfg.rcal = false; cfg.sigVer = 6; }   // toe/heel now learn five measurements   // lf/rf now hold toe/heel signatures; start in heel/toe mode
   if (cfg.nKick == 0 && cfg.nSnare == 0) { cfg.nKick = 36; cfg.nSnare = 38; cfg.nHat = 42; cfg.nOHat = 46; }
   if (cfg.mch < 1 || cfg.mch > 16) cfg.mch = 10;
-  cfg.snare = 11;   // only the swivel kit is in use now (other modes stay in the code but are not offered)
+  if (cfg.snare != 7 && cfg.snare != 8 && cfg.snare != 11) cfg.snare = 11;   // offered modes: swivel kit, heel/toe (both ways)
   if (cfg.sigVer < 7) { if (n > 0) cfg.kflip = cfg.kflip ? 0 : 1; cfg.sigVer = 7; }   // keyboard pitch direction was backwards: flip whatever was set
   prefs.end();
   syncWifi();

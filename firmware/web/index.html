@@ -90,8 +90,23 @@
 
 <h2>Recent hits (newest first)</h2>
 <div class="tile" style="flex:none; font-family: ui-monospace, Menlo, monospace; font-size: 12px; line-height: 1.5; min-height: 60px; white-space: pre" id="log">—</div>
-<div class="seg" data-key="snare" hidden><button type="button" data-v="11">Swivel kit</button></div>
-<h2>Swivel kit</h2>
+<h2>Mode</h2>
+<div class="seg" data-key="snare">
+  <button type="button" data-v="11">Swivel kit</button>
+  <button type="button" data-v="8">Heel = kick, toe = snare</button>
+  <button type="button" data-v="7">Toe = kick, heel = snare</button>
+</div>
+<div id="thBox" style="display:flex;flex-direction:column;gap:10px" hidden>
+<h2>Heel / toe</h2>
+<div class="row"><button type="button" id="learnHeel">Set heel: tap, then heel-stomp 3×</button><button type="button" id="learnToe">Set toe: tap, then toe-stomp 3×</button></div>
+<div class="tile" style="flex:none"><b id="thState">—</b><span>heel / toe learned</span></div>
+<div class="ctl" id="klvlCtl"><label for="klvl">Kick needs at least</label><output id="klvlOut"></output>
+  <input type="range" id="klvl" data-key="klvl" min="0.1" max="8" step="0.01" value="1.2"></div>
+<div class="ctl" id="slvlCtl"><label for="slvl">Snare needs at least</label><output id="slvlOut"></output>
+  <input type="range" id="slvl" data-key="slvl" min="0.1" max="8" step="0.01" value="1.2"></div>
+<p class="hint">Teach it once: tap Set heel, then stomp with your heel three times; same for the toe. Kicks and snares set the tempo and the auto hi-hats follow, as before.</p>
+</div>
+<h2 id="zoneTitle">Swivel kit</h2>
 <div id="zoneBox" style="display:flex;flex-direction:column;gap:10px" hidden>
 <div class="tiles">
   <div class="tile"><b id="zoneNow">—</b><span>a tap now plays</span></div>
@@ -340,7 +355,7 @@
   }
   function modeUi(mode) {
     const swing = mode === 6, th = mode === 7 || mode === 8, shk = mode === 9, key = mode === 10;
-    $('keyBox').hidden = !key; keyRangeText(); $('zoneBox').hidden = mode !== 11;
+    $('keyBox').hidden = !key; keyRangeText(); $('zoneBox').hidden = mode !== 11; $('zoneTitle').hidden = mode !== 11;
     $('swingBox').hidden = !swing; $('swthrCtl').hidden = !swing; $('thBox').hidden = !th; $('tthrCtl').hidden = !th; $('sthrCtl').hidden = swing || th || shk || mode === 11;
     $('shkBox').hidden = !shk;
     $('klvlCtl').hidden = !th; $('slvlCtl').hidden = !th; $('thr').closest('.ctl').hidden = th;
