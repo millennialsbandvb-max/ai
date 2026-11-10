@@ -605,24 +605,22 @@ void processMotion(float ax, float ay, float az, float wx, float wy, float wz, u
     else keyLiftSince = 0;
   }
 
-  // ---- looper gestures (swivel kit): the foot tipped from its resting angle = "heel lift" ----
+  // ---- looper gesture (swivel kit): ONE foot gesture. Hold the foot tipped from its resting angle for 0.7 s
+  //      = pause / resume the loop. Everything else is on the board's buttons or the page.
   if (cfg.snare == 11 && cfg.loop && qInit) {
-    // resting orientation: adopted after the foot has been still for 4 s (so a tilted mount is fine)
     static float rqx = 0, rqy = 0, rqz = 0; static bool rSet = false; static uint32_t stillSince = 0;
     if (wm < 8 && fabsf(sqrtf(ax * ax + ay * ay + az * az) - 1.0f) < 0.05f) { if (!stillSince) stillSince = now; } else stillSince = 0;
     if (!rSet || (stillSince && now - stillSince > 4000)) { rqx = qx; rqy = qy; rqz = qz; rSet = true; if (stillSince) stillSince = now; }
     float tilt = acosf(constrain(qx * rqx + qy * rqy + qz * rqz, -1.0f, 1.0f)) * 57.2958f;
-    static uint32_t liftStart = 0; static bool liftLong = false;
-    if (!liftStart && tilt > cfg.lheel && now - lastStompT > 200) liftStart = now;
-    if (liftStart && tilt > cfg.lheel - 3 && now - liftStart > 1800 && !liftLong) { liftLong = true; ws.textAll("{\"gesture\":\"erase?\"}"); }
-    if (liftStart && tilt < cfg.lheel - 3) {
-      uint32_t dur = now - liftStart; liftStart = 0; liftLong = false; quietUntil = now + 250;
-      if (dur < 400) { loopPlaying = !loopPlaying; ws.textAll(loopPlaying ? "{\"gesture\":\"play\"}" : "{\"gesture\":\"pause\"}"); }
-      else if (dur < 1800) { loopRec = !loopRec; ws.textAll(loopRec ? "{\"gesture\":\"rec on\"}" : "{\"gesture\":\"rec off\"}"); }
-      else { float rel = -yawDeg; int ki = rel < -cfg.zin ? 2 : rel > cfg.zdeg ? 1 : 0; loopClear(ki); ws.textAll(ki == 2 ? "{\"gesture\":\"hats erased\"}" : ki == 1 ? "{\"gesture\":\"snare erased\"}" : "{\"gesture\":\"kick erased\"}"); }
-      loopSendState();
+    static uint32_t liftStart = 0; static bool fired = false;
+    if (!liftStart && tilt > cfg.lheel && now - lastStompT > 200) { liftStart = now; fired = false; }
+    if (liftStart && tilt > cfg.lheel - 3 && !fired && now - liftStart > 700) {
+      fired = true; loopPlaying = !loopPlaying; loopSendState();
+      ws.textAll(loopPlaying ? "{\"gesture\":\"resumed\"}" : "{\"gesture\":\"paused\"}");
+      M5.Speaker.tone(loopPlaying ? 1200 : 600, 60);
     }
-    if (liftStart) { peak = 0; peakT = 0; }   // no taps while the heel is up
+    if (liftStart && tilt < cfg.lheel - 3) { liftStart = 0; quietUntil = now + 250; }
+    if (liftStart) { peak = 0; peakT = 0; }   // no taps while the foot is tipped
   }
 
   // ---- stop: a violent shake of the foot held for 3 beats stops the hats and the tempo (not in shaker mode) ----
@@ -677,6 +675,7 @@ void onWsEvent(AsyncWebSocket* srv, AsyncWebSocketClient* client, AwsEventType t
   if (strstr(s, "\"learnHeel\"")) { learnTH = 2; learnN = 0; memset(learnSig, 0, sizeof learnSig); ws.textAll("{\"learn\":\"heel 0/3\"}"); return; }
   if (strstr(s, "\"setFlat\"")) { setFlat(); return; }
   if (strstr(s, "\"loopRec\"")) { loopRec = !loopRec; loopSendState(); return; }
+  if (strstr(s, "\"loopUndo\"")) { loopUndo(); loopSendState(); return; }
   if (strstr(s, "\"loopPlay\"")) { loopPlaying = !loopPlaying; loopSendState(); return; }
   if (const char* q = strstr(s, "\"loopClear\":")) { int ki = atoi(q + 12); loopClear(ki); loopSendState(); return; }
   if (strstr(s, "\"loopState\"")) { loopSendState(); return; }
@@ -868,7 +867,7 @@ void drawScreen() {
         if (i == cur) d.drawRect(xa, gy + row * (rh + 2), max(1, xb - xa), rh, TFT_WHITE);
       }
     }
-    d.setFont(&fonts::Font0); d.setTextDatum(top_right); d.setTextColor(loopRec ? TFT_RED : dim); d.drawString(loopRec ? "REC" : "rec off", W - 4, gy - 10);
+    d.setFont(&fonts::Font0); d.setTextDatum(top_right); d.setTextColor(dim); d.drawString("A=undo B=erase", W - 4, gy - 10);
     d.setTextDatum(top_left); d.setTextColor(dim); d.drawString(loopPlaying ? "playing" : "paused", 4, gy - 10);
   }
   if (cfg.snare == 11 && !calibrating) {   // swivel kit: zone bar (hats | kick | snare) with the swivel needle
@@ -924,11 +923,16 @@ void loop() {
   if (M5.BtnA.pressedFor(1000) && !resetHeld && screenOn && !wakeOnly) { resetHeld = true; screenSet(false); }
   if (screenReq >= 0) { bool on = screenReq; screenReq = -1; screenSet(on); if (on) { lastSig = 0; drawScreen(); } }
   // Button A: calibrate / centre. Hold 1 s: screen off. Hold 6 s: factory reset.
+  if (M5.BtnB.wasReleased() && !wakeOnly && cfg.snare == 11 && cfg.loop) {   // side button: erase the drum you're swivelled to
+    float rel = -yawDeg; int ki = rel < -cfg.zin ? 2 : rel > cfg.zdeg ? 1 : 0; loopClear(ki); loopSendState();
+    ws.textAll(ki == 2 ? "{\"gesture\":\"hats erased\"}" : ki == 1 ? "{\"gesture\":\"snare erased\"}" : "{\"gesture\":\"kick erased\"}");
+    M5.Speaker.tone(400, 80);
+  }
   if (M5.BtnB.wasReleased() && cfg.snare == 10) {   // side button: next octave up (wraps to the bottom)
     cfg.kroot += 12; if (cfg.kroot > 84) cfg.kroot -= 48; if (cfg.kroot < 24) cfg.kroot = 24;
     keyOff(); saveCfg(); sendCfg(nullptr);
   }
-  if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else if (!resetHeld && cfg.snare == 6) startSwingCal(); else if (!resetHeld && cfg.snare == 10) yawDeg = keyMid(); else if (!resetHeld && cfg.snare == 11) yawDeg = 0; resetHeld = false; }
+  if (M5.BtnA.wasReleased()) { if (wakeOnly) wakeOnly = false; else if (!resetHeld && cfg.snare == 6) startSwingCal(); else if (!resetHeld && cfg.snare == 10) yawDeg = keyMid(); else if (!resetHeld && cfg.snare == 11) { if (cfg.loop) { loopUndo(); loopSendState(); } else yawDeg = 0; } resetHeld = false; }
   static bool factoryDone = false;
   if (M5.BtnA.wasReleased()) factoryDone = false;
   if (M5.BtnA.pressedFor(6000) && !factoryDone) {   // hold front button 6 s: reset settings, keep Wi-Fi

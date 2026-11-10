@@ -17,7 +17,8 @@ const int LOOP_MAX_SLOTS = 64;                 // 4 bars of 16ths
 const int LOOP_KINDS = 4;                      // KICK, SNARE, HAT, OHAT
 uint8_t loopVel[LOOP_MAX_SLOTS][LOOP_KINDS];   // 0 = nothing, else velocity 1..127
 int32_t loopArmed[LOOP_MAX_SLOTS][LOOP_KINDS]; // slot counter at which this event was recorded (don't replay it in the same pass)
-bool loopPlaying = true, loopRec = true;
+bool loopPlaying = true, loopRec = true;   // (rec is always on now; kept for the page)
+int undoSlot[32], undoKind[32]; int nUndo = 0;   // recently recorded hits, newest last
 int32_t loopLastCounter = -1;                  // last global slot counter we played
 float hatHist[16]; int nHatHist = 0;           // recent hand-played hat times (before the clock existed)
 uint8_t hatHistOpen[16];
@@ -29,7 +30,9 @@ bool loopHasContent() { for (int s = 0; s < loopSlots(); s++) for (int k = 0; k 
 void loopClear(int kindIdx = -1) {   // -1 = everything, 2 clears both hats
   for (int s = 0; s < LOOP_MAX_SLOTS; s++) for (int k = 0; k < LOOP_KINDS; k++)
     if (kindIdx < 0 || k == kindIdx || (kindIdx == 2 && k == 3)) { loopVel[s][k] = 0; loopArmed[s][k] = -1; }
+  if (kindIdx < 0) nUndo = 0;
 }
+void loopUndo() { if (!nUndo) return; nUndo--; loopVel[undoSlot[nUndo]][undoKind[nUndo]] = 0; }
 void loopSendState() {
   if (!ws.count()) return;
   char b[LOOP_MAX_SLOTS * LOOP_KINDS + 96]; int p = snprintf(b, sizeof b, "{\"loop\":{\"rec\":%d,\"play\":%d,\"slots\":%d,\"v\":\"", loopRec ? 1 : 0, loopPlaying ? 1 : 0, loopSlots());
@@ -48,6 +51,7 @@ void loopRecord(Kind k, float vel, float t) {
   int ki = loopKindIdx(k); if (ki < 0 || !clockOn || !loopRec) return;
   int32_t c = loopCounterAt(t); if (c < 0) return;
   int s = loopSlotOf(c);
+  if (!loopVel[s][ki]) { if (nUndo == 32) { memmove(undoSlot, undoSlot + 1, 31 * sizeof(int)); memmove(undoKind, undoKind + 1, 31 * sizeof(int)); nUndo = 31; } undoSlot[nUndo] = s; undoKind[nUndo] = ki; nUndo++; }
   loopVel[s][ki] = (uint8_t)constrain(20 + vel * 107, 1, 127);
   loopArmed[s][ki] = c;   // if the playhead reaches this very counter, skip it: the live hit already sounded
   loopSendState();

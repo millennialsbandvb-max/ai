@@ -111,8 +111,8 @@
 <div id="loopBox" style="display:flex;flex-direction:column;gap:10px">
   <div class="loopgrid" id="loopgrid"></div>
   <div class="row">
-    <button type="button" id="loopRec" class="lbtn">● REC</button>
     <button type="button" id="loopPlay" class="lbtn">▶ PLAY</button>
+    <button type="button" id="loopUndo">Undo last hit</button>
   </div>
   <div class="row">
     <button type="button" data-clear="2">Erase hats</button><button type="button" data-clear="0">Erase kick</button><button type="button" data-clear="1">Erase snare</button><button type="button" data-clear="-1">Erase all</button>
@@ -120,9 +120,9 @@
   <div class="seg" data-key="lbars">
     <button type="button" data-v="1">1 bar</button><button type="button" data-v="2">2 bars</button><button type="button" data-v="4">4 bars</button>
   </div>
-  <div class="ctl"><label for="lheel">Heel-lift gesture: tip the foot more than</label><output id="lheelOut"></output>
+  <div class="ctl"><label for="lheel">Pause gesture: tip the foot more than this and hold ~1 s</label><output id="lheelOut"></output>
     <input type="range" id="lheel" data-key="lheel" min="5" max="40" step="1" value="12"></div>
-  <p class="hint" id="gestureMsg">Play hats to set the tempo: they land in the loop, quantized, as soon as the tempo is found. Then add kicks and snares; while REC is on every hit goes into the loop. Gestures: quick heel lift = play/pause · hold the heel up ½–1½ s = REC on/off · hold it longer than 1½ s while swivelled to a zone = erase that drum · hard shake for 3 beats = stop and clear everything.</p>
+  <p class="hint" id="gestureMsg">Simple version: everything you play is in the loop. Hats first (they set the tempo and land quantized), then kicks and snares on top. Tip your foot and hold it about a second = pause / resume (the board beeps). Front button = undo the last hit. Side button = erase the drum you're swivelled to. Hard shake for 3 beats = stop and clear everything. Same controls here on the page.</p>
 </div>
 <div class="row"><button type="button" id="zoneCenter">Center here</button></div>
 <div class="seg" data-key="zarc">
@@ -331,7 +331,7 @@
     for (const d of g.children) { const k = +d.dataset.k; for (const c of d.children) { const i = +c.dataset.i; const ch = loopV[i * 4 + k] || '.', cho = k === 2 ? (loopV[i * 4 + 3] || '.') : '.';
       c.className = 'lc' + (i % 4 === 0 ? ' beat' : '') + (ch !== '.' ? ' on k' + k : cho !== '.' ? ' on k3' : '') + (i === loopPos ? ' head' : ''); } }
   }
-  $('loopRec').onclick = () => send({ loopRec: 1 }); $('loopPlay').onclick = () => send({ loopPlay: 1 });
+  $('loopUndo').onclick = () => send({ loopUndo: 1 }); $('loopPlay').onclick = () => send({ loopPlay: 1 });
   for (const b of document.querySelectorAll('[data-clear]')) b.onclick = () => send({ loopClear: +b.dataset.clear });
   // swivel-kit visualizer: -60° (toes in) .. +60° (toes out) across the bar, zones from the sliders, needle = swivel
   const ZR = 60; let zTicks = false;
@@ -453,7 +453,7 @@
       const m = JSON.parse(ev.data);
       if (m.cfg) applyCfg(m.cfg);
       if (m.m) { for (const v of m.m) { trace[ti] = v; ti = (ti + 1) % trace.length; } }
-      if (m.loop) { loopSlots = m.loop.slots; loopV = m.loop.v; $('loopRec').classList.toggle('live', !!+m.loop.rec); $('loopPlay').classList.toggle('live', !!+m.loop.play); $('loopPlay').textContent = +m.loop.play ? '▶ PLAYING' : '❚❚ PAUSED'; paintLoop(); }
+      if (m.loop) { loopSlots = m.loop.slots; loopV = m.loop.v; $('loopPlay').classList.toggle('live', !!+m.loop.play); $('loopPlay').textContent = +m.loop.play ? '▶ PLAYING' : '❚❚ PAUSED'; paintLoop(); }
       if (m.lpos !== undefined) { loopPos = m.lpos; paintLoop(); }
       if (m.gesture) { $('gestureMsg').textContent = 'Gesture: ' + m.gesture; }
       if (m.yaw !== undefined && +(cfg.snare) === 11) {
