@@ -978,8 +978,8 @@ void loop() {
       snprintf(b, sizeof b, "{\"net\":\"%s\",\"host\":\"pocketbeat.local\",\"wifi\":\"%s\",%s,%s}", up ? WiFi.localIP().toString().c_str() : "", slots::netCurrent(), dj, nj); ws.textAll(b); } }
   // after an update that overwrote another firmware: put it back once home Wi-Fi is up
   { static uint32_t lastTry = 0;
-    if (slots::restorePending().length() && now - lastTry > 30000) { lastTry = now;
-      if (slots::netUp() || (!ws.count() && slots::netJoinNow(8000))) { screenBufFree(); slots::restoreTick(true); screenBufRestore(); } } }
+    if (now - lastTry > 30000 && slots::restorePending().length()) { lastTry = now;
+      if (slots::netUp()) { screenBufFree(); slots::restoreTick(true); screenBufRestore(); } } }   // never block the loop waiting for Wi-Fi: the background manager joins when a saved network is in range
   if (otaRequest) { int r = otaRequest; otaRequest = 0;
     if (r == 2) { if (!slots::switchTo(reqId)) { char b[120]; snprintf(b, sizeof b, "%s is not installed yet. Install it first.", slots::fwById(reqId) ? slots::fwById(reqId)->name : reqId); otaStatus(b); } }
     else { screenBufFree(); if (r == 3) { if (joinHomeWifi()) slots::installFromGithub(reqId, true, false); } else doOtaFromGithub(); screenBufRestore(); } }

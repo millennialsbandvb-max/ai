@@ -216,7 +216,7 @@ static void netBegin(const char* host, const char* ssid, const char* pass) {
   nHost = host; netLoad();
   if (ssid && ssid[0]) { bool have = false; for (int i = 0; i < nNets; i++) if (!strcmp(nets[i].ssid, ssid)) have = true; if (!have) netAdd(ssid, pass); }   // carry over the single saved one
   WiFi.setAutoReconnect(false); WiFi.setSleep(false);
-  nextAttempt = millis() + 1500;
+  nextAttempt = millis() + 20000;   // give the phone 20 s to join the board's own network first
 }
 static void netSet(const char* ssid, const char* pass) { netAdd(ssid, pass); WiFi.disconnect(); attempting = false; scanning = false; nextAttempt = millis() + 200; }
 // pick the strongest saved network among the scan results; -1 if none in range
