@@ -101,6 +101,31 @@ SECTIONS = [
   ("Last Kiss", "clean", "trem spring"), ("Nutshell", "acoustic", "chorus plate"), ("Sour Girl", "clean", "trem chorus plate"),
   ("Shelf in the Room", "acoustic", "plate"), ("Drift and Die", "clean", "chorus delay plate"),
   ("Doesn't Remind Me", "edge", "chorus delay room")]),
+ # the user's other band (Nov 2026, their "Maskarade Rep List" sheet): ska, punk and covers, in the sheet's order;
+ # a 4th field = the rhythm's base (ska-punk: the clean upstroke, the signature the driven chorus)
+ ("Maskarade", [
+  ("2-Tone Army", "clean", "spring"), ("54-46 Was My Number", "clean", "spring"), ("99 Red Balloons", "heavy", "room"),
+  ("A Message to You Rudy", "clean", "spring"), ("Best Friends Metalheads", "heavy", "room", "clean"),
+  ("Bathwater", "edge", "chorus room"), ("Beer", "crunch", "room", "clean"), ("Blank Space", "clean", "chorus delay plate"),
+  ("Boss of Me", "crunch", "room"), ("Caress Me Down", "clean", "spring"), ("Charlie Brown", "heavy", "room", "clean"),
+  ("Come on Eileen", "crunch", "room", "clean"), ("Coyote", "clean", "slap room"), ("Dammit", "heavy", "room"),
+  ("Date R***", "clean", "spring"), ("Don't Speak", "acoustic", "chorus plate"), ("Easy Skanking", "clean", "spring"),
+  ("Everything Went Numb", "heavy", "room", "clean"), ("Hell", "clean", "room"), ("Here In Your Bedroom", "heavy", "room", "clean"),
+  ("High Anxiety", "heavy", "room", "clean"), ("James Bond Theme", "edge", "spring slap"), ("Jeopardy Theme", "clean", "room"),
+  ("Jolene", "clean", "chorus plate"), ("Keasbey Nights", "crunch", "room", "clean"), ("Ma and Pa", "crunch", "room", "clean"),
+  ("Miserlou", "edge", "spring slap"), ("My Boy Lollipop", "clean", "spring"), ("Never There", "edge", "room"),
+  ("No Worries", "clean", "spring"), ("One Step Beyond", "clean", "room"), ("Pink Pony Club", "clean", "chorus delay plate"),
+  ("Pressure Drop", "clean", "spring"), ("Red Sweater!", "heavy", "room", "clean"), ("Reeko", "heavy", "room"),
+  ("Saw Red", "clean", "spring"), ("Secret Agent Man", "edge", "spring slap"), ("Sell Out", "crunch", "room", "clean"),
+  ("She Has a Girlfriend", "crunch", "room", "clean"), ("She's Kerosene", "crunch", "room", "clean"),
+  ("Short Skirt/Long Jacket", "clean", "room"), ("Smile", "clean", "spring"), ("Spiderwebs", "heavy", "room", "clean"),
+  ("Start Wearing Purple", "crunch", "room"), ("Superman", "heavy", "room", "clean"), ("Take On Me", "crunch", "room", "clean"),
+  ("Take Warning", "crunch", "room", "clean"), ("Guns of Brixton", "clean", "spring"),
+  ("Impression That I Get", "crunch", "room", "clean"), ("Selling Yourself Short", "heavy", "room", "clean"),
+  ("The Tide Is High", "clean", "spring"), ("Time Bomb", "crunch", "room", "clean"), ("Toxic", "edge", "delay plate"),
+  ("Valerie", "clean", "plate"), ("We Will Fall Together", "heavy", "room", "clean"),
+  ("What Happened to You?", "heavy", "room", "clean"), ("What's My Age Again?", "heavy", "room"),
+  ("Who Do You Think", "clean", "chorus plate"), ("You Can Get It", "clean", "spring")]),
 ]
 
 # the Rig display shows 23 characters: shorter names for the long ones' rhythm rigs
@@ -108,7 +133,13 @@ SHORT = {"Interstate Love Song": "Interstate Love", "Touch, Peel and Stand": "To
          "Flirtin' w/ Disaster": "Flirtin w/ Disaster", "Ain't Much Left of Me": "Ain't Much Left",
          "Simple Man (Shinedown)": "Simple Man (Shine)", "Rockin' in Free World": "Rockin Free World",
          "Mary Jane's Last Dance": "Mary Jane's Last", "Runnin' Down a Dream": "Runnin Down a Dream",
-         "Knockin' on Heaven's": "Knockin on Heaven", "All Along Watchtower": "Watchtower"}
+         "Knockin' on Heaven's": "Knockin on Heaven", "All Along Watchtower": "Watchtower",
+         "A Message to You Rudy": "Message to Rudy", "Best Friends Metalheads": "Metalheads",
+         "Everything Went Numb": "Everything Numb", "Here In Your Bedroom": "Your Bedroom",
+         "She Has a Girlfriend": "Girlfriend Now", "Short Skirt/Long Jacket": "Short Skirt",
+         "Start Wearing Purple": "Wearing Purple", "Selling Yourself Short": "Selling Short",
+         "Impression That I Get": "Impression", "We Will Fall Together": "Fall Together",
+         "What Happened to You?": "What Happened", "What's My Age Again?": "Age Again"}
 
 def f(v): return ("%gf" % v) if float(v) != int(v) else "%d" % v
 def slot(fx, pre, mix, knobs):
@@ -135,16 +166,18 @@ for bi, (bank, songs) in enumerate(SECTIONS):
     arr = "SET_%d" % bi
     banks.append((bank, arr))
     print("static const Rig %s[] = {" % arr)
-    for name, base, touches in songs:
+    for song in songs:
+        name, base, touches = song[:3]
+        rbase = song[3] if len(song) > 3 else base   # (a rhythm on another base: ska verses clean, choruses driven)
         tk = touches.split()
-        keep = {"room", "plate", "spring", "hall"} | ({"chorus", "lush", "trem"} if base in ("clean", "acoustic") else set())
+        keep = {"room", "plate", "spring", "hall"} | ({"chorus", "lush", "trem"} if rbase in ("clean", "acoustic") else set())
         rhy = [x for x in tk if x in keep]
         sig, lift = tk, 0
-        if sig == rhy:
+        if sig == rhy and rbase == base:
             sig = (["boost"] if base in ("edge", "crunch", "heavy") else []) + ["delay"] + tk
             lift = 1
-        for nm, tks, up in ((name, sig, lift), (SHORT.get(name, name) + " Rhy", rhy, 0)):
-            rig(nm, base, tks, up)
+        for nm, b, tks, up in ((name, base, sig, lift), (SHORT.get(name, name) + " Rhy", rbase, rhy, 0)):
+            rig(nm, b, tks, up)
     print("};")
 print("#define SETLIST_BANKS \\")
 print(" \\\n".join('    {"%s", %s, (int)(sizeof %s / sizeof *%s), 1},' % (n, a, a, a) for n, a in banks))

@@ -368,7 +368,8 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   writes `src/rigs_setlist.h` (SET_0..6, SETLIST_BANKS, included at the end of rigs.h): banks A Grunge Core .. G Slow
   Ones, two rigs per song in sheet order, the signature tone then "<song> Rhy" (the rhythm: same amp + reverb, clean /
   acoustic ones keep chorus / trem; a signature with nothing more gets a boost + delay, +1 dB; BANKS[].pairs = 1); each rig = a base sound (clean / edge /
-  crunch / heavy / fuzz / acoustic) + touches (chorus, wah, whammy at Bend 0, delays, reverbs ...). Bank numbers: 0 Factory, 1 Live, 2..8 A..G.
+  crunch / heavy / fuzz / acoustic) + touches (chorus, wah, whammy at Bend 0, delays, reverbs ...). Bank numbers: 0 Factory, 1 Live, 2..8 A..G, 9 Maskarade (the user's other band, from their
+  "Maskarade Rep List" Claude sheet: 59 songs, a song's 4th field = the rhythm's own base, ska-punk: clean upstroke rhythm).
   Rig CCs (the user: Program Change doesn't work well with MPC; their foot controller sends exact CCs; undefined CCs
   MPC doesn't use): CC 20 = bank (value = number above), 21 = rig n (value n, from 1), 22 / 23 = song n's signature /
   rhythm, 24 / 25 = Rig > / < (rising past 64), 26 = this song's rhythm (64+) or signature (rig_cc; quad_test checks).
