@@ -221,6 +221,7 @@ int main(int argc, char **argv) {
         static const struct { int cc, v; const char *want; } STEPS[] = {
             {20, 2, NULL}, {22, 2, "Alive"}, {26, 127, "Alive Rhy"}, {26, 0, "Alive"}, {23, 3, "Corduroy Rhy"},
             {24, 127, "Rearviewmirror"}, {24, 0, "Rearviewmirror"}, {25, 127, "Corduroy Rhy"}, {25, 0, "Corduroy Rhy"},
+            {24, 127, "Rearviewmirror"}, {24, 127, "Rearviewmirror Rhy"}, {25, 127, "Rearviewmirror"}, {25, 127, "Corduroy Rhy"},
             {20, 3, NULL}, {22, 1, "Fell on Black Days"}, {20, 0, NULL}, {21, 2, NULL}, {23, 1, NULL}};
         const int rig = param(e, "Rig");
         int bad = 0;

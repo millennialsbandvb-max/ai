@@ -69,7 +69,6 @@ typedef struct {
     float byp_s[NS];
     int amp_look_tick;
     int rig, bank;                 /* the rig preset last loaded (-1: none), in the bank chosen */
-    int cc_hi[2];                  /* CC 24 / 25 (Rig > / <) last above 64 */
     volatile int update_display;
     volatile unsigned char automate[kNumParams];
     char *chunk;
@@ -614,10 +613,7 @@ static void rig_cc(Plugin *s, int cc, int v) {
     if (cc == 20) { if (v < N_BANKS) bank_param(s, 0, N_BANKS > 1 ? (float)v / (float)(N_BANKS - 1) : 0); }
     else if (cc == 21) load_rig(s, n);
     else if (cc == 22 || cc == 23) load_rig(s, pr ? 2 * n + (cc == 23) : n);
-    else if (cc == 24 || cc == 25) {
-        if ((v >= 64) != s->cc_hi[cc - 24] && v >= 64) rig_param(s, cc == 24 ? 2 : 1, 1);
-        s->cc_hi[cc - 24] = v >= 64;
-    } else if (cc == 26 && pr && s->rig >= 0) {
+    else if (cc == 24 || cc == 25) { if (v >= 64) rig_param(s, cc == 24 ? 2 : 1, 1); }   /* every 64+ steps (a switch may send 127 only) */ else if (cc == 26 && pr && s->rig >= 0) {
         const int want = (s->rig & ~1) + (v >= 64);
         if (want != s->rig && want < nr) load_rig(s, want);
     }

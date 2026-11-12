@@ -372,7 +372,7 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   "Maskarade Rep List" Claude sheet: 59 songs, a song's 4th field = the rhythm's own base, ska-punk: clean upstroke rhythm).
   Rig CCs (the user: Program Change doesn't work well with MPC; their foot controller sends exact CCs; undefined CCs
   MPC doesn't use): CC 20 = bank (value = number above), 21 = rig n (value n, from 1), 22 / 23 = song n's signature /
-  rhythm, 24 / 25 = Rig > / < (rising past 64), 26 = this song's rhythm (64+) or signature (rig_cc; quad_test checks).
+  rhythm, 24 / 25 = Rig > / < (every value 64+: the user's switch sends 127 only), 26 = this song's rhythm (64+) or signature (rig_cc; quad_test checks).
   CC 0 bank select was dropped (MPC uses it).
   Voicing pass (the user: "more volume and clarity, the metal ones too bright"): every rig +3 dB Output (max 9),
   Presence +1, Treble +0.5, Bass -0.5 from 5.5 up, Input no lower than -3; Modern Metal / Djent Machine / Drop Tune
