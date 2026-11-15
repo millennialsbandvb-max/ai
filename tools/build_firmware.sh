@@ -71,6 +71,10 @@ for b in sfizz-mpc/build/bundle duofx-mpc/build/bundle \
 done
 echo "plugins: $(ls "$W/extra/plugins" | tr '\n' ' ')"
 
+echo "== card versions (MPC OS 3.10.1+ External Plugin Support: <drive>/VST2 Plugins/)"
+python3 "$REPO/tools/card_packages.py" "$W/extra" "$REPO/nam-mpc/build/NAM-MPC.so" \
+  "$REPO/nam-mpc/build/skin/Other Things - VST - NAM MPC" "$OUT/card"
+
 echo "== the image"
 rm -f "$OUT/$IMG"
 EXTRA="$W/extra" "$REPO/nam-mpc/firmware/patch_image.sh" "$IN" "$OUT/$IMG" | grep -E 'root filesystem OK|wrote'

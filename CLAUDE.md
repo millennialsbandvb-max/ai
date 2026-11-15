@@ -389,6 +389,18 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   takes the sweep as ddep us x ldep % (ours: Depth 100% = 3.5 ms) and the mix from preset_mix. TricraChrs (Duo and the
   Tri Chorus plugin): the fast ensemble wobble is 0.12 (was 0.35) of the sweep, the centre voice 0.45 (was 0.7: two
   voices alike on one side cancel and swell), the sweep 3.5 ms (was 4.5).
+- **Akai's MPC plugin SDK** (Nov 2026, github.com/inmusic-software/mpc-plugin-builder-sdk; read, not vendored): MPC OS
+  3.10.1+ loads plugins from `<drive>/VST2 Plugins/<Maker> - VST - <Name>/` (plugin.json: name, manufacturer, uid,
+  format vst2, file32, kind, inputs/outputs; version.xml; Plugin Skins/) once Preferences > Enhancements (Beta) >
+  External Plugin Support is on. The user is on Hakai 3.10.0 (no card loading) and waits for Hakai 3.10.1.
+  `tools/card_packages.py` (run by build_firmware.sh) writes `<out>/card/VST2 Plugins/...` + a zip of all 16 from the
+  firmware's own bundle (entries/*.xml give the names and uids). Its host-contract.md: effects get NO MIDI (so the
+  firmware's extmidi add-on stays the way CCs reach our effects; card plugins find mpc_ext_midi_read the same way);
+  processing is in place; on every prepare parameter 0 is nudged to 1.0 / 0.0 and straight back: that reset Duo FX
+  (A algorithm), Ambient Lab (machine) and Vocal Rack (preset), so picklist.h holds a 0.0 / 1.0 write to parameter 0
+  until the next call (a return to the old value drops both; any other call, a process or asking its text lets it
+  through). `tools/host_contract_test.c` checks resvd2, the nudge (random settings) and in-place output for any plugin.
+  Plan once Hakai 3.10.1 exists: plugins only on the card, the firmware keeps the remote, extmidi, browser.
 - MPC drives: `/sdcard` is an internal SD card; the user's cards mount as `/media/<label>`.
 - Debugging only on the device needs a firmware round trip: write reports to every drive (see `mpc-remote/probe/`).
 - Blocked in this environment: publishing the image via Git LFS, running third-party tools cloned from the

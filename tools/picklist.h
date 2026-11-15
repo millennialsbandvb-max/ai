@@ -70,6 +70,9 @@ typedef struct {
     int sel;                     /* the list selected by a first tap (-1: none), and when it was last touched */
     double seltime;
     double wtime;
+    int hold0;                   /* the MPC's nudge of parameter 0 (to 1.0 or 0.0 and straight back, on every
+                                  * prepare: Akai's host-contract.md) held back until we see whether it returns */
+    float held0, pre0;
 } PickWrap;
 /* The < > arrows and the data wheel: the page points the wheel at an arrow when it's touched (Q-Link). An arrow
  * rests at 0.45, just under the middle: the page's toggle takes it to 1 on a tap (from 0.5 it went to 0, and taps
@@ -186,8 +189,22 @@ static void pl_wheel(PickWrap *w, int j, int d) {
     w->page = nx / PL_ROWS;
     pl_rows_changed(w);
 }
+/* a held parameter-0 write that wasn't the nudge (anything else came first): it goes through now */
+static void pl_unhold0(PickWrap *w) {
+    if (!w->hold0) return;
+    w->hold0 = 0;
+    w->in->setParameter(w->in, 0, w->held0);
+}
 static void pl_setParameter(AEffect *e, int32_t i, float v) {
     PickWrap *w = (PickWrap *)e->object;
+    if (i == 0 && w->base > 0 && !(w->arrow && w->arrow[0])) {   /* parameter 0: the nudge does nothing */
+        if (w->hold0) { w->hold0 = 0; if (fabsf(v - w->pre0) > 1e-6f) w->in->setParameter(w->in, 0, v); return; }
+        const float now = w->in->getParameter(w->in, 0);
+        if (v == 0.0f || v == 1.0f) { w->hold0 = 1; w->held0 = v; w->pre0 = now; return; }
+        w->in->setParameter(w->in, 0, v);
+        return;
+    }
+    pl_unhold0(w);
     if (i < w->base) {
         const int a = w->arrow ? w->arrow[i] : 0;
         if (a) {   /* an arrow: its press, or the wheel's step either way; then back to rest */
@@ -266,6 +283,7 @@ static void pl_setParameter(AEffect *e, int32_t i, float v) {
 }
 static float pl_getParameter(AEffect *e, int32_t i) {
     PickWrap *w = (PickWrap *)e->object;
+    if (i == 0 && w->hold0) return w->held0;
     if (i < w->base) {
         if (w->arrow && w->arrow[i] && w->alast) return w->rsent[i] ? PL_REST : w->alast[i];   /* (an arrow: as the host has it) */
         return w->in->getParameter(w->in, i);
@@ -311,6 +329,8 @@ static void pl_display(PickWrap *w, int j, char *t, int max) {
 }
 
 static intptr_t pl_dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t v, void *p, float o) {
+    if ((op != effGetParamDisplay && op != effGetParamName && op != effGetParamLabel) || (op == effGetParamDisplay && idx == 0))
+        pl_unhold0((PickWrap *)e->object);   /* (asked for parameter 0's text: it was a real write) */
     PickWrap *w = (PickWrap *)e->object;
     if (idx >= w->base && (op == effGetParamName || op == effGetParamLabel || op == effGetParamDisplay || op == effCanBeAutomated)) {
         const int j = idx - w->base;
@@ -399,12 +419,14 @@ static void pl_midi(PickWrap *w) {
 }
 static void pl_processReplacing(AEffect *e, float **in, float **out, int32_t n) {
     PickWrap *w = (PickWrap *)e->object;
+    pl_unhold0(w);
     pl_flush(w);
     pl_midi(w);
     w->in->processReplacing(w->in, in, out, n);
 }
 static void pl_process(AEffect *e, float **in, float **out, int32_t n) {
     PickWrap *w = (PickWrap *)e->object;
+    pl_unhold0(w);
     pl_flush(w);
     pl_midi(w);
     if (w->in->process) w->in->process(w->in, in, out, n);
