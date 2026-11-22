@@ -37,14 +37,18 @@ static const char *const STYLES[] = {"Any Style", "Clean", "Edge of Breakup", "C
 /* (parameter 0 is a choice, not a button: the MPC nudges parameter 0 to 1.0 and back on every prepare, which would
  * look like a press, and picklist.h holds such a nudge back) */
 enum { kSource, kSort, kBrand, kStyle, kSignIn, kSignOut, kFind, kTone, kTonePrev, kToneNext, kModel, kModelPrev,
-       kModelNext, kDownload, kStatus, kStatus2, kInfo1, kInfo2, kInfo3, kPowered, kNumParams };
+       kModelNext, kDownload, kStatus, kStatus2, kInfo1, kInfo2, kInfo3, kPowered, kBrandPrev, kBrandNext, kStylePrev,
+       kStyleNext, kNumParams };
 static const ParamDef P[kNumParams] = {
     OPT("source", "Source", SOURCES, 0), OPT("sort", "Sort", SORTS, 0), OPT("brand", "Brand", BRANDS, 0),
     OPT("style", "Style", STYLES, 0), BUTTON("signin", "Sign In"), BUTTON("signout", "Sign Out"), BUTTON("find", "Find"), PRESET("tone", "Tone"), BUTTON("tone_prev", "Tone <"), BUTTON("tone_next", "Tone >"),
     PRESET("model", "Model"), BUTTON("model_prev", "Model <"), BUTTON("model_next", "Model >"),
     BUTTON("download", "Download"), PRESET("status", "Status"), PRESET("status2", "Status 2"),
     PRESET("info1", "Creator"), PRESET("info2", "Gear"), PRESET("info3", "License"), PRESET("powered", "Powered"),
+    BUTTON("brand_prev", "Brand <"), BUTTON("brand_next", "Brand >"), BUTTON("style_prev", "Style <"), BUTTON("style_next", "Style >"),
 };
+#define NBRANDS ((int)(sizeof BRANDS / sizeof *BRANDS))
+#define NSTYLES ((int)(sizeof STYLES / sizeof *STYLES))
 
 typedef struct { long id; char title[96], creator[48], gear[24], sizes[48], license[16], format[8]; long downloads, a2, irs; } Tone;
 typedef struct { long id; char name[96], url[300], arch[8]; } Model;
@@ -615,6 +619,16 @@ static void setParameter(AEffect *e, int32_t i, float v) {
         }
         return;
     }
+    case kBrandPrev: case kBrandNext: case kStylePrev: case kStyleNext: {   /* the Brand / Style steppers' arrows */
+        const int b = i == kBrandPrev || i == kBrandNext, k = b ? kBrand : kStyle, n = b ? NBRANDS : NSTYLES;
+        if (press) {
+            const int cur = option_of(s->norm[k], n), to = (cur + ((i == kBrandPrev || i == kStylePrev) ? -1 : 1) + n) % n;
+            s->norm[k] = (float)to / (float)(n - 1);
+            s->automate[k] = 1;
+        }
+        s->norm[i] = 0;
+        return;
+    }
     case kStatus: case kStatus2: case kInfo1: case kInfo2: case kInfo3: case kPowered: return;   /* (read-only) */
     default: s->norm[i] = snap(&P[i], v, s->norm[i]); s->update_display = 1;
     }
@@ -648,8 +662,8 @@ static void display(Plugin *s, int i, char *t, int max) {
     }
     case kInfo3: snprintf(t, (size_t)max, "%s%s", tn ? "License: " : " ", tn ? tn->license : ""); break;
     case kPowered: snprintf(t, (size_t)max, "Powered by TONE3000"); break;
-    case kTonePrev: case kModelPrev: snprintf(t, (size_t)max, "<"); break;
-    case kToneNext: case kModelNext: snprintf(t, (size_t)max, ">"); break;
+    case kTonePrev: case kModelPrev: case kBrandPrev: case kStylePrev: snprintf(t, (size_t)max, "<"); break;
+    case kToneNext: case kModelNext: case kBrandNext: case kStyleNext: snprintf(t, (size_t)max, ">"); break;
     case kSignIn: snprintf(t, (size_t)max, "Sign In"); break;
     case kSignOut: snprintf(t, (size_t)max, "Sign Out"); break;
     case kFind: snprintf(t, (size_t)max, "Find"); break;
@@ -687,6 +701,15 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t v, void
 /* the full-page lists: the tones found, and the chosen tone's models */
 static int t3k_pick(AEffect *e, int list, int op, int i, char *out, int max) {
     Plugin *s = (Plugin *)e->object;
+    if (list >= 2) {   /* Brands, Styles */
+        const int k = list == 2 ? kBrand : kStyle, n = list == 2 ? NBRANDS : NSTYLES;
+        if (op == PL_COUNT) return n;
+        if (op == PL_CURRENT) return option_of(s->norm[k], n);
+        if (op == PL_HEADING || i < 0 || i >= n) return 0;
+        if (op == PL_NAME) snprintf(out, (size_t)max, "%s", list == 2 ? BRANDS[i] : STYLES[i]);
+        else if (op == PL_CHOOSE) { s->norm[k] = (float)i / (float)(n - 1); s->automate[k] = 1; }
+        return 0;
+    }
     if (op == PL_CHOOSE) { if (list == 0) pick_tone(s, i); else pick_model(s, i); return 0; }
     pthread_mutex_lock(&s->mu);
     int r = 0;
@@ -703,9 +726,9 @@ static int t3k_pick(AEffect *e, int list, int op, int i, char *out, int max) {
     pthread_mutex_unlock(&s->mu);
     return r;
 }
-static const char *const LIST_KEYS[] = {"tone", "model"};
-static const char *const LIST_TITLES[] = {"Tones", "Models"};
-static const PickLists LISTS = {2, LIST_KEYS, LIST_TITLES, t3k_pick, 0};
+static const char *const LIST_KEYS[] = {"tone", "model", "brand", "style"};
+static const char *const LIST_TITLES[] = {"Tones", "Models", "Brands", "Styles"};
+static const PickLists LISTS = {4, LIST_KEYS, LIST_TITLES, t3k_pick, 0};
 
 static AEffect *make(audioMasterCallback master) {
     Plugin *s = calloc(1, sizeof *s);

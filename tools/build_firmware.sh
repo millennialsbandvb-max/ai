@@ -56,6 +56,8 @@ echo "== Chr0ma Console (four effect modules)"
 (cd "$REPO/chroma-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
 echo "== EQs and dynamics (31 Smashly, X-Para EQ, Fairchyld 670)"
 (cd "$REPO/eq-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
+echo "== TONE3000 (browse and download TONE3000 captures on the MPC)"
+(cd "$REPO/t3k-mpc" && ./build.sh arm >/dev/null && ./build.sh skin >/dev/null 2>&1 && ./build.sh bundle >/dev/null)
 echo "== MPC Browser (the browser's page on the MPC's screen)"
 (cd "$REPO/browser-mpc" && ./build.sh bundle >/dev/null 2>&1)
 echo "== browser remote"
@@ -65,7 +67,7 @@ echo "== one bundle of everything"
 rm -rf "$W/extra" && mkdir -p "$W/extra"
 for b in sfizz-mpc/build/bundle duofx-mpc/build/bundle \
          trichorus-mpc/build/bundle vocal-mpc/build/bundle ambient-mpc/build/bundle quadrig-mpc/build/bundle ergo-mpc/build/bundle enzo-mpc/build/bundle chroma-mpc/build/bundle \
-         eq-mpc/build/bundle browser-mpc/build/bundle \
+         eq-mpc/build/bundle t3k-mpc/build/bundle browser-mpc/build/bundle \
          mpc-remote/server/build/bundle; do
   cp -a "$REPO/$b/." "$W/extra/"
 done

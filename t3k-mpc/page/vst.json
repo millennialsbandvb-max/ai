@@ -1,0 +1,9 @@
+{
+  "name": "TONE3000",
+  "vendor": "Other Things",
+  "uid": "T3KB",
+  "version": 1000,
+  "so": "TONE3000.so",
+  "params": "params.json",
+  "layout": "layout.conf"
+}

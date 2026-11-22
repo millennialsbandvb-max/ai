@@ -22,7 +22,7 @@ host)
   gcc -O2 -Wall -Wextra "$HERE/test/t3k_test.c" -ldl -lm -lpthread -ldl -o "$B/t3k-test-host"
   echo "built $B/TONE3000-host.so" ;;
 arm)
-  arm-linux-gnueabihf-gcc -O2 -Wall -Wextra -Wno-unused-function "${ARMF[@]}" -fPIC -shared -fvisibility=hidden "${INC[@]}" \
+  arm-linux-gnueabihf-gcc -O2 -Wall -Wextra -Wno-unused-function -Wno-format-truncation "${ARMF[@]}" -fPIC -shared -fvisibility=hidden "${INC[@]}" \
     "$HERE/src/t3k.c" -lm -lpthread -ldl -Wl,--no-undefined -Wl,--version-script="$REPO/nam-mpc/src/exports.map" -o "$B/TONE3000.so"
   arm-linux-gnueabihf-strip "$B/TONE3000.so"
   arm-linux-gnueabihf-gcc -O2 "${ARMF[@]}" "$HERE/test/t3k_test.c" -ldl -lm -lpthread -ldl -o "$B/t3k-test-arm"
