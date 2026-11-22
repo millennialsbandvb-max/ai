@@ -400,7 +400,22 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   (A algorithm), Ambient Lab (machine) and Vocal Rack (preset), so picklist.h holds a 0.0 / 1.0 write to parameter 0
   until the next call (a return to the old value drops both; any other call, a process or asking its text lets it
   through). `tools/host_contract_test.c` checks resvd2, the nudge (random settings) and in-place output for any plugin.
-  Plan once Hakai 3.10.1 exists: plugins only on the card, the firmware keeps the remote, extmidi, browser.
+  **MPC OS 3.10.1 + the new HAKAI (Nov 2026; Akai works with HAKAI now, github.com/medampire/HAKAI releases):** no
+  more firmware images. The user installs Akai's official 3.10.1 (MPC-3.10.1-Gen1-update.img from
+  cdn.inmusicbrands.com/Software/MPC/MOPN4PCOPEN/, a new "AZ01" container: the rootfs is the xz stream at 0x154,
+  glibc 2.39, `az01-launch-MPC` no longer sets LD_PRELOAD); HAKAI is now a drive folder (Hakai/ + autorun.sh, a
+  "KEY" stick's autorun.sh calls /media/MPC SSD/autorun.sh) that MPC's own ScriptRunner runs (it asks first; root);
+  it stages to /run, adds LD_PRELOAD by an acvs drop-in (/run/systemd/system/acvs.service.d/zz-hakai-gen1.conf) and
+  restarts MPC; a reboot is stock. Ours works the same way: `mpc-remote/runtime/` = autorun.sh (runs HAKAI's
+  hakai-autorun-gen1.sh first when a Hakai folder is on the same drive, so it can replace HAKAI's root autorun.sh),
+  other-things-deploy.sh (stage: OtherThings/bin -> /run/other-things/bin, drop-in zz-other-things.conf with
+  ExecStart= our mpc-launch; start: restart MPC unless our lib is already mapped, then mpc-remote via systemd-run
+  unit other-things-remote) and mpc-launch (appends mpc-buttons.so to whatever LD_PRELOAD HAKAI's drop-in set: order
+  independent; the 3-failed-starts and no-buttons rules kept). mpc-remote finds its own folder from /proc/self/exe
+  (bin_path(); MPCB_BIN for the browser scripts). card_packages.py writes the whole drive: autorun.sh, OtherThings/,
+  VST2 Plugins/, Other-Things-drive.zip. Checked: all 16 plugins and mpc-remote load under qemu with 3.10.1's
+  libraries; the deploy scripts with stub systemctl. Device-untested: all of the runtime path, and mpc-buttons.so
+  next to HAKAI's hakai_driver.so / mpc_cursor_devmode.so (both hook MIDI / DRM).
 - MPC drives: `/sdcard` is an internal SD card; the user's cards mount as `/media/<label>`.
 - Debugging only on the device needs a firmware round trip: write reports to every drive (see `mpc-remote/probe/`).
 - Blocked in this environment: publishing the image via Git LFS, running third-party tools cloned from the

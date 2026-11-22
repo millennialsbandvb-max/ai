@@ -10,7 +10,7 @@ cat > fonts.conf <<EOC
 EOC
 # Widevine (Netflix's copy protection): if this install lacks it (an older install, or one from a card), fetch it now
 # (the firmware's package list has its address and fingerprint; about 4 MB)
-B=/usr/lib/nam-mpc/bin
+B=${MPCB_BIN:-/usr/lib/nam-mpc/bin}   # (mpc-remote says where our programs are)
 if [ ! -f chromium/WidevineCdm/manifest.json ] && [ -x "$B/debfetch" ]; then
   wv=$(grep -i '^https://.*widevine' "$B/browser-packages.txt" | head -n 1)
   if [ -n "$wv" ]; then

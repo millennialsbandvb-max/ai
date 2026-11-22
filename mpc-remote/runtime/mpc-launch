@@ -1,0 +1,15 @@
+#!/bin/sh
+# Starts MPC for acvs.service (our drop-in's ExecStart) the way the firmware does (/usr/bin/az01-launch-MPC), with
+# mpc-buttons.so added to whatever preloads are already set (HAKAI's, through its own drop-in), whichever of us came
+# first. MPC starts without it if: it has failed to come up with it 3 times in a row (mpc-remote resets the count
+# once MPC has run a minute), /data/mpc-remote/no-buttons exists (the remote page's "Button input off").
+SO=/run/other-things/bin/mpc-buttons.so
+D=/data/mpc-remote
+n=$(cat "$D/launches" 2>/dev/null)
+case "$n" in ''|*[!0-9]*) n=0 ;; esac
+if [ -f "$SO" ] && [ ! -e "$D/no-buttons" ] && [ "$n" -lt 3 ]; then
+    mkdir -p "$D" && echo $((n + 1)) > "$D/launches" && sync
+    rm -f /tmp/mpc-buttons
+    case ":${LD_PRELOAD:-}:" in *":$SO:"*) ;; *) export LD_PRELOAD="${LD_PRELOAD:+$LD_PRELOAD:}$SO" ;; esac
+fi
+exec /usr/bin/az01-launch-MPC "$@"

@@ -1065,6 +1065,16 @@ static int screen_ready = 0, have_prev = 0;
  * the page. It runs headless; the page talks to it with the Chrome DevTools protocol, tunnelled through /cdp/ here
  * (DevTools only listens on the MPC itself and only accepts "Host: 127.0.0.1"). Its sound goes to Web In. */
 #define BROWSER_DIR "/data/mpc-browser"
+/* where our own programs are: the folder mpc-remote runs from (the firmware's /usr/lib/nam-mpc/bin, or the
+ * OtherThings add-on's /run/other-things/bin on MPC OS 3.10.1+, staged from the drive by other-things-deploy.sh) */
+static char bin_dir[256] = "/usr/lib/nam-mpc/bin";
+static const char *bin_path(const char *name) {
+    static char p[4][320];
+    static int k;
+    k = (k + 1) & 3;
+    snprintf(p[k], sizeof p[k], "%s/%s", bin_dir, name);
+    return p[k];
+}
 static pid_t browser_pid = -1, install_pid = -1;
 static int start_after_install;   /* Start pressed before it was installed: install, then start */
 static uint64_t browser_stop_at;
@@ -1125,7 +1135,7 @@ static void browser_install(void);
 
 /* is the installed browser the one this firmware lists (its packages.txt)? A card bundle has no list: keep it */
 static int browser_current(void) {
-    FILE *a = fopen(BROWSER_DIR "/packages.txt", "r"), *b = fopen("/usr/lib/nam-mpc/bin/browser-packages.txt", "r");
+    FILE *a = fopen(BROWSER_DIR "/packages.txt", "r"), *b = fopen(bin_path("browser-packages.txt"), "r");
     int same = 1;
     if (a && b) {
         int ca, cb;
@@ -1148,8 +1158,8 @@ static void browser_start(void) {
         if (fd >= 0) { dup2(fd, 1); dup2(fd, 2); }
         setpriority(PRIO_PROCESS, 0, 10);   /* MPC's audio always comes first */
         /* the firmware's own start script (an older install's copy may predate its settings) */
-        execl("/bin/sh", "sh", access("/usr/lib/nam-mpc/bin/browser-run.sh", R_OK) ? BROWSER_DIR "/run.sh" :
-              "/usr/lib/nam-mpc/bin/browser-run.sh", (char *)NULL);
+        execl("/bin/sh", "sh", access(bin_path("browser-run.sh"), R_OK) ? BROWSER_DIR "/run.sh" :
+              bin_path("browser-run.sh"), (char *)NULL);
         _exit(127);
     }
     if (p > 0) { browser_pid = p; browser_note[0] = 0; LOG("browser: started (pid %d)", (int)p); }
@@ -1176,7 +1186,8 @@ static void browser_install(void) {
         setpriority(PRIO_PROCESS, 0, 15);
         const int fd = open("/tmp/mpc-browser-install.log", O_WRONLY | O_CREAT | O_TRUNC, 0644);
         if (fd >= 0) { dup2(fd, 1); dup2(fd, 2); }
-        execl("/bin/sh", "sh", "/usr/lib/nam-mpc/bin/browser-install.sh", (char *)NULL);
+        setenv("MPCB_BIN", bin_dir, 1);
+        execl("/bin/sh", "sh", bin_path("browser-install.sh"), (char *)NULL);
         _exit(127);
     }
     if (p > 0) { install_pid = p; snprintf(browser_note, sizeof browser_note, "installing"); LOG("browser: installing"); }
@@ -2466,6 +2477,12 @@ int main(int argc, char **argv) {
     const int port = argc > 1 ? atoi(argv[1]) : 8080;
     signal(SIGPIPE, SIG_IGN);
     setvbuf(stdout, NULL, _IOLBF, 0);
+    {   /* our folder: where this program is */
+        char exe[256];
+        const ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+        if (n > 0) { exe[n] = 0; char *sl = strrchr(exe, '/'); if (sl && sl > exe) { *sl = 0; snprintf(bin_dir, sizeof bin_dir, "%s", exe); } }
+        setenv("MPCB_BIN", bin_dir, 1);   /* (for the browser's scripts) */
+    }
     setpriority(PRIO_PROCESS, 0, 10);
 #ifdef SCHED_BATCH
     struct sched_param sp = {0};
