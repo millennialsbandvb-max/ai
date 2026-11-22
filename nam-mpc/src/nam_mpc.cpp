@@ -14,6 +14,7 @@
  * lock-free slots. The audio thread hands the old one back, and the worker frees it.
  *
  * Parameter indices are what the skin and saved projects bind to: append only, never reorder (see params.json). */
+#include <sys/stat.h>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -248,6 +249,7 @@ struct Plugin {
     std::string model_words, ir_words;     // a host's preset: load the first model / IR whose name has one of these (nam_find)
     struct FolderReq { int step = 0, pick = -1; std::string by_name; bool restore = false; } mfolder, ifolder;
     bool rescan = true, reload = false, resize = false;
+    long t3k_seen = 0;                    // the TONE3000 plugin's last download (T3K_STAMP's time) we rescanned for
     std::atomic<bool> poisoned{false};    // the model produced a non-number: the worker reloads it fresh
 
     // worker state; the UI thread reads names/status under lib_mutex
@@ -639,12 +641,14 @@ static float getParameter(AEffect *e, int32_t i) {
     return s->norm[i].load();
 }
 
+static void t3k_check(Plugin *s);
 static void setParameter(AEffect *e, int32_t i, float v) {
     Plugin *s = P(e);
     if (i < 0 || i >= kNumParams) return;
     v = clamp01(v);
     switch (i) {
     case kModel: case kIr: case kFolder: case kIrFolder: {
+        t3k_check(s);
         // A value on an entry (a touch, automation) selects it; one in between is a Q-Link nudge: step one entry.
         const int n = library_count(s, i);
         if (n < 1) { s->post([&] { s->rescan = true; }); return; }
@@ -831,8 +835,17 @@ static fs::path plugin_dir() {
 /* the full-page lists (tools/picklist.h): 0 the model folders, 1 the models in the chosen folder, 2 the IR
  * folders, 3 the IRs in theirs, numbered as the Folder / Model / IR Folder / IR parameters count them.
  * (Quad Rig calls this for its amp too.) */
+/* the TONE3000 plugin touches this after each download: a new capture shows up in the lists without a reload */
+#define T3K_STAMP "/tmp/t3k-downloaded"
+static void t3k_check(Plugin *s) {
+    struct stat st;
+    if (stat(T3K_STAMP, &st) || (long)st.st_mtime == s->t3k_seen) return;
+    s->t3k_seen = (long)st.st_mtime;
+    s->post([&] { s->rescan = true; });
+}
 extern "C" int nam_pick(AEffect *e, int list, int op, int i, char *out, int max) {
     Plugin *s = P(e);
+    if (op == PL_COUNT) t3k_check(s);
     if (op == PL_CHOOSE) {   /* (the worker loads it) */
         s->post([&] {
             if (list == 0) s->mfolder.pick = i;
