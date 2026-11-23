@@ -21,7 +21,7 @@ static int param(const char *want) {
     for (int i = 0; i < e->numParams; i++) { char t[64] = {0}; e->dispatcher(e, effGetParamName, i, 0, t, 0); if (!strcmp(t, want)) return i; }
     printf("  (no parameter %s)\n", want); failures++; return 0;
 }
-static void disp(const char *name, char *t) { memset(t, 0, 64); e->dispatcher(e, effGetParamDisplay, param(name), 0, t, 0); }
+static void disp(const char *name, char *t) { char b[256] = {0}; e->dispatcher(e, effGetParamDisplay, param(name), 0, b, 0); snprintf(t, 64, "%s", b); }
 static void press(const char *name) { const int i = param(name); e->setParameter(e, i, 1); e->setParameter(e, i, 0); }
 static void run(int blocks) { static float a[N], b[N]; float *io[2] = {a, b}; for (int k = 0; k < blocks; k++) e->processReplacing(e, io, io, N); }
 /* wait (running blocks) until Status shows one of the words, up to secs */
@@ -59,40 +59,56 @@ int main(int argc, char **argv) {
     run(2);
     disp("Status", t);
     printf("  status at start: %s\n", t);
-    if (getenv("T3K_FAKE_TONES")) {   /* the HeadRush-style screen offline: T3K_FAKE_TONES=30 (made-up tones) */
-        const int view = param("View"), ck1 = param("Card 1 Kind"), selk = param("Tone Kind");
-        CHECK(wait_for("tones found", "models:", 5, t), "the library didn't fill by itself (%s)", t);
+    if (getenv("T3K_FAKE_TONES")) {   /* the HeadRush-editor-style browser offline: T3K_FAKE_TONES=30 (made-up tones) */
+        const int view = param("View"), ck1 = param("Card 1 Kind"), ck10 = param("Card 10 Kind"), selk = param("Tone Kind");
+        CHECK(wait_for("tones found", NULL, 5, t), "the cards didn't fill by itself (%s)", t);
         run(4);
-        char r1[64], r6[64], r7[64], pg[64], dl[64];
-        disp("Row 1", r1); disp("Row 6", r6); disp("Row 7", r7); disp("Page", pg);
-        printf("  cards: %s .. %s, page %s\n", r1, r6, pg);
-        CHECK(!strcmp(r1, "Fake Tone 1") && !strcmp(r6, "Fake Tone 6") && !strcmp(r7, " ") && !strcmp(pg, "1 / 5"), "the cards don't show page 1");
-        CHECK(e->getParameter(e, view) < 0.01f && e->getParameter(e, ck1) > 0.1f && e->getParameter(e, selk) < 0.01f,
-              "library view: card pictures on, tone picture off");
-        e->setParameter(e, param("Row 5"), 1.0f);   /* tap card 5: its tone page */
-        run(2);
-        disp("Selected", t); disp("View", pg); printf("  tapped card 5: %s (%s)\n", t, pg);
-        CHECK(!strcmp(t, "Fake Tone 5") && !strcmp(pg, "Tone"), "card 5 didn't open its tone");
-        CHECK(e->getParameter(e, ck1) < 0.01f && e->getParameter(e, selk) > 0.1f, "tone view: card pictures off, tone picture on");
-        for (int k = 0; k < 50; k++) { run(1); disp("Download Tile", dl); if (strstr(dl, "ALL")) break; usleep(100000); }
-        printf("  %s\n", dl);
-        CHECK(!strcmp(dl, "DOWNLOAD ALL 3"), "the download tile says %s", dl);
-        press("Model >"); run(2); disp("Download Tile", dl);
-        CHECK(!strcmp(dl, "DOWNLOAD THIS MODEL"), "one model picked: the tile says %s", dl);
-        e->setParameter(e, param("Back Tile"), 1.0f); run(2); disp("View", pg);
-        CHECK(!strcmp(pg, "Library") && e->getParameter(e, ck1) > 0.1f, "Back didn't return to the library");
-        e->setParameter(e, param("Down Tile"), 1.0f); run(2); disp("Row 1", r1); disp("Page", pg);
-        printf("  down: %s, %s\n", r1, pg);
-        CHECK(!strcmp(r1, "Fake Tone 7") && !strcmp(pg, "2 / 5"), "Down didn't turn the page");
-        e->setParameter(e, param("Up Tile"), 1.0f); run(2); disp("Row 1", r1);   /* (a tile rests at 0: each tap = 1) */
-        e->setParameter(e, param("Up Tile"), 1.0f); run(2); disp("Row 1", t);
-        CHECK(!strcmp(t, "Fake Tone 25"), "Up didn't wrap to the last page (%s, %s)", r1, t);
-        e->setParameter(e, param("Search Tile"), 1.0f); run(2); disp("View", pg);
-        CHECK(!strcmp(pg, "Search") && e->getParameter(e, ck1) < 0.01f, "the search icon didn't open Search");
-        e->setParameter(e, param("Source"), 4.0f / 6);   /* IRs: back to the library, searching by itself */
-        for (int k = 0; k < 50; k++) { run(1); disp("Row 1", r1); if (strstr(r1, "IRs")) break; usleep(100000); }
-        disp("View", pg); printf("  Source IRs: %s (%s)\n", r1, pg);
-        CHECK(!strcmp(r1, "Fake IRs 1") && !strcmp(pg, "Library"), "a new Source didn't search (%s)", r1);
+        char a[64], b[64], c[64];
+        disp("Row 1", a); disp("Row 10", b); disp("Row 11", c);
+        printf("  cards: %s .. %s\n", a, b);
+        CHECK(!strcmp(a, "Fake Tone 1") && !strcmp(b, "Fake Tone 10") && !strcmp(c, " "), "the cards don't show the first 10");
+        disp("Uploader 2", a); disp("Downloads 2", b); disp("Favorites 2", c); printf("  card 2: %s, %s dl, %s fav\n", a, b, c);
+        CHECK(!strcmp(a, "maker1") && !strcmp(b, "2.0k") && !strcmp(c, "10"), "card 2's uploader / counts");
+        disp("Results", a); printf("  %s\n", a);
+        CHECK(!strcmp(a, "30 results"), "the result count (%s)", a);
+        CHECK(e->getParameter(e, ck1) > 0.1f && e->getParameter(e, ck10) > 0.1f && e->getParameter(e, selk) < 0.01f, "card pictures");
+        CHECK(e->getParameter(e, param("Tab Browse")) > 0.5f && e->getParameter(e, param("Tab Favorites")) < 0.5f, "Browse tab lit");
+        e->setParameter(e, param("Row 5"), 1.0f);   /* tap card 5: the tone pop-up */
+        for (int k = 0; k < 50; k++) { run(1); disp("Models Header", a); if (strstr(a, "(")) break; usleep(100000); }
+        disp("Selected", b); disp("View", c); printf("  tapped card 5: %s (%s), %s\n", b, c, a);
+        CHECK(!strcmp(b, "Fake Tone 5") && !strcmp(c, "Tone") && !strcmp(a, "NAM A2 (8)"), "card 5 didn't open its pop-up");
+        CHECK(e->getParameter(e, ck1) < 0.01f && e->getParameter(e, selk) > 0.1f, "pop-up: card pictures off, its picture on");
+        disp("Gear Type", a); disp("Date", b); disp("Description 1", c); printf("  %s, %s\n  %s\n", a, b, c);
+        CHECK(!strcmp(a, "Amp Head") && !strcmp(b, "11 November 2026") && strlen(c) > 20 && strlen(c) <= 58, "the pop-up's header / description");
+        disp("Description 2", a); disp("Tags 1", b); printf("  %s\n  tags: %s\n", a, b);
+        disp("Model Row 1", a); disp("Model Row 6", b); disp("Models Page", c); printf("  models: %s .. %s (%s)\n", a, b, c);
+        CHECK(strstr(a, "model 1") && strstr(b, "model 6") && !strcmp(c, "1 / 2"), "model rows");
+        e->setParameter(e, param("Models Down"), 1.0f); run(2); disp("Model Row 1", a); disp("Model Row 3", b);
+        CHECK(strstr(a, "model 7") && !strcmp(b, " "), "model rows page 2 (%s, %s)", a, b);
+        e->setParameter(e, param("Close Tile"), 1.0f); run(2); disp("View", a);
+        CHECK(!strcmp(a, "Library") && e->getParameter(e, ck1) > 0.1f, "X didn't close the pop-up");
+        e->setParameter(e, param("Down Tile"), 1.0f); run(2); disp("Row 1", a); printf("  down: %s\n", a);
+        CHECK(!strcmp(a, "Fake Tone 11"), "scrolling down");
+        e->setParameter(e, param("Down Tile"), 1.0f); run(2); e->setParameter(e, param("Down Tile"), 1.0f); run(2);
+        disp("Row 1", a); CHECK(!strcmp(a, "Fake Tone 1"), "scrolling past the end comes back to the top (%s)", a);
+        e->setParameter(e, param("Filter Icon"), 1.0f); run(2); disp("View", a);
+        CHECK(!strcmp(a, "Search"), "the filter icon didn't open the drawer (%s)", a);
+        e->setParameter(e, param("Gear Pedal"), 1.0f); run(2);
+        CHECK(e->getParameter(e, param("Gear Pedal")) > 0.5f, "the Pedal box didn't tick");
+        e->setParameter(e, param("Gear IR"), 1.0f); run(2);
+        CHECK(e->getParameter(e, param("Gear IR")) > 0.5f && e->getParameter(e, param("Gear Pedal")) < 0.5f, "IR clears the other boxes");
+        e->setParameter(e, param("Filter Reset"), 1.0f); run(2);
+        CHECK(e->getParameter(e, param("Gear IR")) < 0.5f, "Reset");
+        e->setParameter(e, param("Filter Done"), 1.0f); run(2); disp("View", a);
+        CHECK(!strcmp(a, "Library"), "Done");
+        e->setParameter(e, param("Search List"), 1.0f); e->setParameter(e, param("Search"), 1.0f / 38); run(4);
+        disp("Search", a); printf("  search: %s\n", a);
+        CHECK(!strcmp(a, "plexi") && e->getParameter(e, param("Search List")) < 0.5f, "a pick in the search list");
+        e->setParameter(e, param("Tab My Tones"), 1.0f); run(2);
+        CHECK(e->getParameter(e, param("Tab My Tones")) > 0.5f && e->getParameter(e, param("Tab Browse")) < 0.5f, "My Tones tab");
+        e->setParameter(e, param("Account Side Tile"), 1.0f); run(2); disp("View", a);
+        CHECK(!strcmp(a, "Account"), "the account icon");
+        CHECK(view >= 0, "");
     } else if (!getenv("T3K_TOKEN_FILE") || access(getenv("T3K_TOKEN_FILE"), R_OK)) {
         press("Sign In");
         const int ok = wait_for("activate", "internet", 20, t);

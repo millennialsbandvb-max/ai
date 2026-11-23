@@ -50,7 +50,7 @@ static void play(AEffect *e, long t0, int blocks, int inplace, float *rec) {
         if (rec) for (int i = 0; i < N; i++) { rec[2 * ((long)k * N + i)] = o0[i]; rec[2 * ((long)k * N + i) + 1] = o1[i]; }
     }
 }
-typedef struct { float v; char t[64]; } Snap;
+typedef struct { float v; char t[256]; } Snap;   /* (the MPC host reads up to 256) */
 static void snap(AEffect *e, Snap *s) {
     for (int i = 0; i < e->numParams; i++) {
         s[i].v = e->getParameter(e, i);

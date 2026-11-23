@@ -20,7 +20,7 @@ static int failures;
 static intptr_t host(AEffect *e, int32_t op, int32_t i, intptr_t v, void *p, float o) { (void)e; (void)i; (void)v; (void)p; (void)o; return op == 1 ? 2400 : 0; }
 static AEffect *fx;
 static void name(int i, char *t) { memset(t, 0, 64); fx->dispatcher(fx, effGetParamName, i, 0, t, 0); }
-static void disp(int i, char *t) { memset(t, 0, 64); fx->dispatcher(fx, effGetParamDisplay, i, 0, t, 0); }
+static void disp(int i, char *t) { char b[256] = {0}; fx->dispatcher(fx, effGetParamDisplay, i, 0, b, 0); snprintf(t, 64, "%s", b); }
 static int param(const char *want) {
     for (int i = 0; i < fx->numParams; i++) { char t[64]; name(i, t); if (!strcmp(t, want)) return i; }
     return -1;

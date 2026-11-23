@@ -24,7 +24,7 @@
 #define T3K_CLIENT_ID "t3k_pub_qJ7M_267j8PLELjFhYezlKM-AXmaj71e"   /* the publishable key (made for devices) */
 #define T3K_API "https://www.tone3000.com/api/v1"
 #define T3K_STAMP "/tmp/t3k-downloaded"
-#define MAXT 50     /* tones in a result */
+#define MAXT 250    /* tones kept (pages of 25 load as the cards scroll) */
 #define MAXM 120    /* models of a tone */
 
 static const char *const SOURCES[] = {"All", "Amps", "Full Rigs", "Pedals", "IRs", "Favorites", "Downloaded"};
@@ -44,12 +44,31 @@ enum { kSource, kSort, kBrand, kStyle, kSignIn, kSignOut, kFind, kTone, kTonePre
        /* the HeadRush-style screen (Nov 2026, the user's ask, after its TONE3000 library): one page, four views
         * (Library = 6 cards with gear pictures, Tone, Search, Account), a picture kind per card, nav tiles */
        kView = kRow0 + 12, kHdr, kCardKind0, kSelKind = kCardKind0 + 6, kBack, kNav1, kNav2, kScrUp, kScrDn,
+       /* the HeadRush editor's TONE3000 browser, copied from the user's screenshots (Nov 2026): tabs, search, sort,
+        * filter drawer, 10 cards (title, uploader, downloads / favorites / models), the tone pop-up with its model rows */
+       kTab0, kQuery = kTab0 + 3, kQueryOpen, kSortBy, kSortByOpen, kGear0, kFilt = kGear0 + 5, kFReset, kFDone, kQClear,
+       kCount, kUp0, kSd0 = kUp0 + 10, kSf0 = kSd0 + 10, kSm0 = kSf0 + 10, kCk7 = kSm0 + 10, kMClose = kCk7 + 4, kGearTxt,
+       kDate, kDesc0, kMakes = kDesc0 + 3, kTags0, kModHdr = kTags0 + 2, kMRow0, kMDl0 = kMRow0 + 6, kMAll = kMDl0 + 6,
+       kMScrUp, kMScrDn, kMPage, kSide0, kBot0 = kSide0 + 2, kBlank = kBot0 + 4,
        kNumParams };
-#define ROWS 6   /* cards a page: row_1..row_6 (row_7..row_12 are left from the list page, blank) */
+#define ROWS 10   /* cards a page: row_1..row_10 (row_11, row_12 are left from the list page, blank) */
+#define MROWS 6   /* model rows a page in the tone pop-up */
 static const char *const VIEWS[] = {"Library", "Tone", "Search", "Account"};
 enum { V_LIB, V_TONE, V_SEARCH, V_ACCOUNT };
 /* a card's picture (option 0: none, so a hidden view draws nothing) */
 static const char *const KINDS[] = {"None", "Amp", "Full Rig", "Pedal", "IR", "Outboard", "Empty"};
+static const char *const TABS[] = {"Favorites", "Browse", "My Tones"};
+static const char *const QUERIES[] = {"Search", "plexi", "marshall", "fender", "vox", "mesa", "5150", "peavey", "orange",
+                                      "friedman", "bogner", "soldano", "diezel", "dumble", "matchless", "two rock", "hiwatt",
+                                      "supro", "ampeg", "darkglass", "tube screamer", "klon", "big muff", "boss", "rat",
+                                      "clean", "edge of breakup", "crunch", "high gain", "metal", "blues", "bass", "fuzz",
+                                      "boost", "jcm800", "ac30", "twin reverb", "deluxe", "jazz"};
+static const char *const SORTBYS[] = {"Trending", "Newest", "Oldest", "Most Downloads"};
+static const char *const SORTBY_KEY[] = {"trending", "newest", "oldest", "downloads-all-time"};
+static const char *const OPENS[] = {"Closed", "Open"};
+static const char *const GEAR_NAMES[] = {"Amp Head", "Full Rig / Combo", "Pedal", "Outboard", "IR"};
+static const char *const GEAR_KEYS[] = {"amp", "amp-cab", "pedal", "outboard", ""};
+#define NQUERIES ((int)(sizeof QUERIES / sizeof *QUERIES))
 static const ParamDef P[kNumParams] = {
     OPT("source", "Source", SOURCES, 0), OPT("sort", "Sort", SORTS, 0), OPT("brand", "Brand", BRANDS, 0),
     OPT("style", "Style", STYLES, 0), BUTTON("signin", "Sign In"), BUTTON("signout", "Sign Out"), BUTTON("find", "Find"), PRESET("tone", "Tone"), BUTTON("tone_prev", "Tone <"), BUTTON("tone_next", "Tone >"),
@@ -68,13 +87,40 @@ static const ParamDef P[kNumParams] = {
     OPT("ck_4", "Card 4 Kind", KINDS, 0), OPT("ck_5", "Card 5 Kind", KINDS, 0), OPT("ck_6", "Card 6 Kind", KINDS, 0),
     OPT("selk", "Tone Kind", KINDS, 0), PRESET("back_1", "Back Tile"), PRESET("nav_1", "Search Tile"),
     PRESET("nav_2", "Account Tile"), PRESET("scr_1", "Up Tile"), PRESET("scr_2", "Down Tile"),
+    PRESET("tb_1", "Tab Favorites"), PRESET("tb_2", "Tab Browse"), PRESET("tb_3", "Tab My Tones"),
+    OPT("query", "Search", QUERIES, 0), OPT("query__open", "Search List", OPENS, 0),
+    OPT("sortby", "Sort By", SORTBYS, 0), OPT("sortby__open", "Sort List", OPENS, 0),
+    PRESET("gear_1", "Gear Amp Head"), PRESET("gear_2", "Gear Full Rig"), PRESET("gear_3", "Gear Pedal"),
+    PRESET("gear_4", "Gear Outboard"), PRESET("gear_5", "Gear IR"), PRESET("filt_1", "Filter Icon"),
+    PRESET("fbtn_1", "Filter Reset"), PRESET("fbtn_2", "Filter Done"), PRESET("qx_1", "Search Clear"),
+    PRESET("count", "Results"),
+#define CARD10(k, n) PRESET(k "_1", n " 1"), PRESET(k "_2", n " 2"), PRESET(k "_3", n " 3"), PRESET(k "_4", n " 4"), \
+    PRESET(k "_5", n " 5"), PRESET(k "_6", n " 6"), PRESET(k "_7", n " 7"), PRESET(k "_8", n " 8"), PRESET(k "_9", n " 9"), \
+    PRESET(k "_10", n " 10")
+    CARD10("up", "Uploader"), CARD10("sd", "Downloads"), CARD10("sf", "Favorites"), CARD10("sm", "Models"),
+    OPT("ck_7", "Card 7 Kind", KINDS, 0), OPT("ck_8", "Card 8 Kind", KINDS, 0), OPT("ck_9", "Card 9 Kind", KINDS, 0),
+    OPT("ck_10", "Card 10 Kind", KINDS, 0),
+    PRESET("mx_1", "Close Tile"), PRESET("gtxt", "Gear Type"), PRESET("date", "Date"),
+    PRESET("desc1", "Description 1"), PRESET("desc2", "Description 2"), PRESET("desc3", "Description 3"),
+    PRESET("makes", "Makes"), PRESET("tags1", "Tags 1"), PRESET("tags2", "Tags 2"), PRESET("mhdr", "Models Header"),
+    PRESET("mr_1", "Model Row 1"), PRESET("mr_2", "Model Row 2"), PRESET("mr_3", "Model Row 3"),
+    PRESET("mr_4", "Model Row 4"), PRESET("mr_5", "Model Row 5"), PRESET("mr_6", "Model Row 6"),
+    PRESET("md_1", "Model Download 1"), PRESET("md_2", "Model Download 2"), PRESET("md_3", "Model Download 3"),
+    PRESET("md_4", "Model Download 4"), PRESET("md_5", "Model Download 5"), PRESET("md_6", "Model Download 6"),
+    PRESET("mall_1", "Download All Tile"), PRESET("mscr_1", "Models Up"), PRESET("mscr_2", "Models Down"),
+    PRESET("mpg", "Models Page"), PRESET("side_1", "Cloud Tile"), PRESET("side_2", "Account Side Tile"),
+    PRESET("bot_1", "Featured Tile"), PRESET("bot_2", "Browse Tile"), PRESET("bot_3", "My Content Tile"),
+    PRESET("bot_4", "TONE3000 Tile"), PRESET("blank", "Blank"),
 };
 #define NBRANDS ((int)(sizeof BRANDS / sizeof *BRANDS))
 #define NSTYLES ((int)(sizeof STYLES / sizeof *STYLES))
 
-typedef struct { long id; char title[96], creator[48], gear[24], sizes[48], license[16], format[8]; long downloads, a2, irs; } Tone;
+typedef struct {
+    long id; char title[96], creator[48], gear[24], sizes[48], license[16], format[8], date[24], desc[400], makes[96], tags[200];
+    long downloads, a2, irs, favs, models;
+} Tone;
 typedef struct { long id; char name[96], url[300], arch[8]; } Model;
-enum { J_NONE, J_SIGNIN, J_FIND, J_MODELS, J_DOWNLOAD };
+enum { J_NONE, J_SIGNIN, J_FIND, J_MODELS, J_DOWNLOAD, J_MORE };
 
 typedef struct {
     AEffect fx;
@@ -84,6 +130,9 @@ typedef struct {
     volatile int repaint[kNumParams];   /* tiles whose text changed: reported as a tiny change, then their value */
     int page;                           /* the tone rows' page (ROWS a page) */
     int view;                           /* V_LIB.. */
+    int tab, query, sortby, gmask;      /* the search: Favorites / Browse / My Tones, a search word, sort, gear boxes */
+    int apage, apages, want_page, mpage;
+    long total;
     pthread_t th;
     pthread_mutex_t mu;
     pthread_cond_t cv;
@@ -204,8 +253,11 @@ static void say(Plugin *s, const char *a, const char *b) {
 /* the tap tiles (tone rows, Download, Sign In / Out): a selected row rests at 1, everything else at 0; new text is
  * reported as a tiny change and then the value, so MPC repaints it */
 static int is_tile(int i) {
-    return (i >= kRow0 && i < kRow0 + 12) || i == kDl || i == kSignTile || i == kSignOutTile || (i >= kBack && i <= kScrDn);
+    return (i >= kRow0 && i < kRow0 + 12) || i == kDl || i == kSignTile || i == kSignOutTile || (i >= kBack && i <= kScrDn) ||
+           (i >= kTab0 && i < kTab0 + 3) || (i >= kGear0 && i <= kQClear) || i == kMClose || (i >= kMDl0 && i <= kMScrDn) ||
+           (i >= kSide0 && i < kBot0 + 4);
 }
+static int ck_param(int c) { return c < 6 ? kCardKind0 + c : kCk7 + (c - 6); }
 static int kind_of(const Tone *t) {   /* the picture for a tone (TONE3000's gear) */
     if (!strcmp(t->format, "ir") || !strcmp(t->gear, "ir")) return 4;
     if (!strcmp(t->gear, "full-rig")) return 2;
@@ -226,10 +278,17 @@ static void tiles_changed(Plugin *s) {
     for (int r = 0; r < 12; r++) s->norm[kRow0 + r] = r == sel && r < ROWS ? 1.0f : 0.0f;
     /* the pictures: only in their own view (option 0 draws nothing) */
     pthread_mutex_lock(&s->mu);
-    for (int c = 0; c < 6; c++) {
+    for (int c = 0; c < ROWS; c++) {
         const int k = s->page * ROWS + c;
-        set_opt(s, kCardKind0 + c, s->view != V_LIB ? 0 : k < s->ntones ? kind_of(&s->tones[k]) : 6, 7);
+        set_opt(s, ck_param(c), s->view != V_LIB ? 0 : k < s->ntones ? kind_of(&s->tones[k]) : 0, 7);
     }
+    for (int t = 0; t < 3; t++) s->norm[kTab0 + t] = t == s->tab ? 1.0f : 0.0f;
+    for (int g = 0; g < 5; g++) s->norm[kGear0 + g] = (s->gmask >> g) & 1 ? 1.0f : 0.0f;
+    s->norm[kSide0] = 1.0f;   /* (Cloud: lit) */
+    s->norm[kBot0 + 3] = 1.0f;   /* (TONE3000: lit) */
+    for (int i = kUp0; i < kCk7; i++) s->automate[i] = 1;
+    for (int i = kGearTxt; i <= kMRow0 + MROWS - 1; i++) s->automate[i] = 1;
+    s->automate[kMPage] = s->automate[kCount] = 1;
     set_opt(s, kSelKind, s->view == V_TONE ? (s->tone >= 0 && s->tone < s->ntones ? kind_of(&s->tones[s->tone]) : 6) : 0, 7);
     pthread_mutex_unlock(&s->mu);
     set_opt(s, kView, s->view, 4);
@@ -390,6 +449,26 @@ static void tone_from(const JDoc *d, int o, Tone *t) {
         if (strlen(t->sizes) + strlen(x) + 2 < sizeof t->sizes) { if (t->sizes[0]) strcat(t->sizes, ", "); strcat(t->sizes, x); }
     }
     t->downloads = jp_num(d, jp_get(d, o, "downloads_count"));
+    t->favs = jp_num(d, jp_get(d, o, "favorites_count"));
+    t->models = jp_num(d, jp_get(d, o, "models_count"));
+    jp_str(d, jp_get(d, o, "description"), t->desc, sizeof t->desc);
+    char c[40];
+    jp_str(d, jp_get(d, o, "created_at"), c, sizeof c);   /* 2026-11-11T... -> 11 November 2026 */
+    static const char *const MON[] = {"January", "February", "March", "April", "May", "June", "July", "August",
+                                      "September", "October", "November", "December"};
+    const int yy = atoi(c), mm = strlen(c) >= 7 ? atoi(c + 5) : 0, dd = strlen(c) >= 10 ? atoi(c + 8) : 0;
+    if (yy > 1900 && mm >= 1 && mm <= 12) snprintf(t->date, sizeof t->date, "%d %s %d", dd, MON[mm - 1], yy);
+    for (int pass = 0; pass < 2; pass++) {   /* makes / tags: [{id, name}] (or plain strings) joined */
+        const int a = jp_get(d, o, pass ? "tags" : "makes");
+        char *out = pass ? t->tags : t->makes;
+        const size_t max = pass ? sizeof t->tags : sizeof t->makes;
+        for (int k = 0, n = jp_len(d, a); k < n; k++) {
+            char x[64];
+            const int e = jp_at(d, a, k);
+            jp_str(d, d->n[e].type == JT_OBJ ? jp_get(d, e, "name") : e, x, sizeof x);
+            if (x[0] && strlen(out) + strlen(x) + 3 < max) { if (out[0]) strcat(out, ", "); strcat(out, x); }
+        }
+    }
     t->a2 = jp_num(d, jp_get(d, o, "a2_models_count"));
     t->irs = jp_num(d, jp_get(d, o, "irs_count"));
 }
@@ -406,92 +485,94 @@ static void fake_find(Plugin *s) {
         else snprintf(t->title, sizeof t->title, "Fake Tone %d", i + 1);
         snprintf(t->creator, sizeof t->creator, "maker%d", i % 4);
         snprintf(t->format, sizeof t->format, "nam");
-        t->a2 = 3;
+        snprintf(t->gear, sizeof t->gear, "%s", (const char *[]){"amp", "amp-cab", "pedal", "outboard"}[i % 4]);
+        snprintf(t->date, sizeof t->date, "11 November 2026");
+        snprintf(t->desc, sizeof t->desc, "This pack contains direct profiles captured from a freshly serviced amp using a controlled, studio-grade reamping workflow, number %d.", i + 1);
+        snprintf(t->makes, sizeof t->makes, "Marshall 6100LM, Radial X-Amp");
+        snprintf(t->tags, sizeof t->tags, "clean, crunch, edge of breakup, heavy metal, high-gain, jazz, lead, marshall, rock");
+        t->a2 = 8; t->models = 8; t->downloads = 1000 * (i + 1); t->favs = 10 * i;
     }
-    s->ntones = n; s->tone = n ? 0 : -1; s->nmodels = 0; s->model = 0; s->page = 0;
+    s->ntones = n; s->tone = n ? 0 : -1; s->nmodels = 0; s->model = 0; s->page = 0; s->total = n; s->apage = s->apages = 1;
     pthread_mutex_unlock(&s->mu);
     tiles_changed(s);
     char a[64];
     snprintf(a, sizeof a, "%d tones found", n);
     say(s, a, "Tap a tone, then DOWNLOAD");
-    if (n) { pthread_mutex_lock(&s->mu); s->job = s->job ? s->job : J_MODELS; pthread_mutex_unlock(&s->mu); }
 }
 static void fake_models(Plugin *s, const Tone *t) {
     pthread_mutex_lock(&s->mu);
     if (s->tone >= 0 && s->tone < s->ntones && s->tones[s->tone].id == t->id) {
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 8; i++) {
             memset(&s->models[i], 0, sizeof s->models[i]);
             snprintf(s->models[i].name, sizeof s->models[i].name, "%s model %d", t->title, i + 1);
         }
-        s->nmodels = 3; s->model = 0;
+        s->nmodels = 8; s->model = 0; s->mpage = 0;
     }
     pthread_mutex_unlock(&s->mu);
     tiles_changed(s);
-    say(s, "3 A2 models: tap DOWNLOAD", "");
+    say(s, "8 A2 models: tap DOWNLOAD", "");
 }
-static void do_find(Plugin *s) {
+/* a search (append: the next page of the same one, as the cards scroll) */
+static void do_search(Plugin *s, int append) {
     if (!s->access[0]) { say(s, "Not signed in", "Tap the person icon, then SIGN IN"); tiles_changed(s); return; }
-    if (getenv("T3K_FAKE_TONES")) { fake_find(s); return; }
-    const int src = option_of(s->norm[kSource], 7), sort = option_of(s->norm[kSort], 4);
-    const int brand = option_of(s->norm[kBrand], (int)(sizeof BRANDS / sizeof *BRANDS));
-    const int style = option_of(s->norm[kStyle], (int)(sizeof STYLES / sizeof *STYLES));
-    char q[96] = "", qe[200];
-    if (brand) snprintf(q, sizeof q, "%s", BRANDS[brand]);
-    if (style) snprintf(q + strlen(q), sizeof q - strlen(q), "%s%s", q[0] ? " " : "", STYLES[style]);
-    url_escape(q, qe, sizeof qe);
-    static const char *const SORT_KEY[] = {"trending", "downloads-all-time", "newest", "best-match"};
-    say(s, "Looking on TONE3000...", "");
-    Tone *found = calloc(MAXT, sizeof *found);
+    if (getenv("T3K_FAKE_TONES")) { if (!append) fake_find(s); return; }
+    pthread_mutex_lock(&s->mu);
+    const int tab = s->tab, query = s->query, sortby = s->sortby, gm = s->gmask, page = append ? s->apage + 1 : 1;
+    pthread_mutex_unlock(&s->mu);
+    char qe[200] = "", gears[80] = "";
+    if (query > 0) url_escape(QUERIES[query], qe, sizeof qe);
+    for (int g = 0; g < 4; g++)
+        if (gm & (1 << g)) snprintf(gears + strlen(gears), sizeof gears - strlen(gears), "%s%s", gears[0] ? "_" : "", GEAR_KEYS[g]);
+    const int ir = (gm & 16) != 0;
+    if (!append) say(s, "Searching...", "");
+    char path[600];
+    if (tab != 1)   /* the user's favorites / downloads */
+        snprintf(path, sizeof path, "/tones/%s?page=%d&page_size=25%s%s%s%s", tab == 0 ? "favorited" : "downloaded", page,
+                 qe[0] ? "&query=" : "", qe, gears[0] && !strchr(gears, '_') ? "&gear=" : "", gears[0] && !strchr(gears, '_') ? gears : "");
+    else
+        snprintf(path, sizeof path, "/tones/search?page=%d&page_size=25&sort=%s&format=%s%s%s%s%s%s", page, SORTBY_KEY[sortby],
+                 ir ? "ir" : "nam", ir ? "" : "&architecture=2", gears[0] && !ir ? "&gears=" : "", ir ? "" : gears,
+                 qe[0] ? "&query=" : "", qe);
+    Buf b = {0};
+    const long code = api_get(s, path, &b);
+    Tone *found = calloc(25, sizeof *found);
     int n = 0;
-    long code = 0;
-    for (int page = 1; page <= 2 && n < MAXT && found; page++) {
-        char path[600];
-        if (src == 5 || src == 6)   /* the user's favorites / downloads */
-            snprintf(path, sizeof path, "/tones/%s?page=%d&page_size=25%s%s", src == 5 ? "favorited" : "downloaded", page,
-                     q[0] ? "&query=" : "", qe);
-        else {
-            static const char *const GEARS[] = {"", "amp", "amp-cab", "pedal", ""};
-            snprintf(path, sizeof path, "/tones/search?page=%d&page_size=25&sort=%s&format=%s%s%s%s%s%s", page,
-                     SORT_KEY[sort == 3 && !q[0] ? 0 : sort], src == 4 ? "ir" : "nam", src == 4 ? "" : "&architecture=2",
-                     GEARS[src][0] ? "&gears=" : "", GEARS[src], q[0] ? "&query=" : "", qe);
-        }
-        Buf b = {0};
-        code = api_get(s, path, &b);
-        if (code != 200) { free(b.b); break; }
+    long total = 0, pages = 0;
+    if (code == 200 && found) {
         JDoc d;
         const int r = jp_parse(&d, b.b, (int)b.n), data = jp_get(&d, r, "data");
-        const int k = jp_len(&d, data);
-        for (int i = 0; i < k && n < MAXT; i++) {
+        for (int i = 0, k = jp_len(&d, data); i < k && n < 25; i++) {
             tone_from(&d, jp_at(&d, data, i), &found[n]);
-            if (found[n].id && (src == 4 || src >= 5 || found[n].a2 > 0 || found[n].irs > 0)) n++;
+            if (found[n].id) n++;
         }
-        const long pages = jp_num(&d, jp_get(&d, r, "total_pages"));
-        jp_free(&d);
-        free(b.b);
-        if (k < 25 || page >= pages) break;
+        total = jp_num(&d, jp_get(&d, r, "total"));
+        pages = jp_num(&d, jp_get(&d, r, "total_pages"));
+        if (r >= 0) jp_free(&d);
     }
+    free(b.b);
     if (!found) return;
     pthread_mutex_lock(&s->mu);
-    memcpy(s->tones, found, sizeof *found * (size_t)n);
-    s->ntones = n;
-    s->tone = n ? 0 : -1;
-    s->nmodels = 0;
-    s->model = 0;
-    s->page = 0;
+    if (!append) { s->ntones = 0; s->tone = -1; s->nmodels = 0; s->model = 0; s->page = 0; }
+    if (code == 200) {
+        const int room = MAXT - s->ntones, k = n < room ? n : room;
+        memcpy(s->tones + s->ntones, found, sizeof *found * (size_t)k);
+        s->ntones += k;
+        s->apage = page;
+        s->apages = (int)pages;
+        s->total = total > s->ntones ? total : s->ntones;
+        if (append && s->want_page * ROWS < s->ntones) s->page = s->want_page;
+    }
+    const int nt = s->ntones;
     pthread_mutex_unlock(&s->mu);
     free(found);
     tiles_changed(s);
-    s->automate[kTone] = s->automate[kModel] = s->automate[kInfo1] = s->automate[kInfo2] = s->automate[kInfo3] = 1;
-    if (code == 401) say(s, "Signed out: press Sign In", "");
-    else if (code == 429) say(s, "TONE3000 is busy (too many asks)", "Wait a minute, then Find again");
-    else if (code != 200 && !n) say(s, code ? "TONE3000 didn't answer the search" : "No internet connection", "");
-    else {
-        char a[64];
-        snprintf(a, sizeof a, "%d tones found", n);
-        say(s, a, n ? "Tap a tone, then DOWNLOAD" : "Try another Brand or Style (search icon)");
-    }
-    if (n) { pthread_mutex_lock(&s->mu); s->job = s->job ? s->job : J_MODELS; pthread_mutex_unlock(&s->mu); }
+    if (code == 401) say(s, "Signed out: tap the person icon", "");
+    else if (code == 429) say(s, "TONE3000 is busy", "Wait a minute, then try again");
+    else if (code != 200) say(s, code ? "TONE3000 didn't answer" : "No internet connection", "");
+    else if (!nt) say(s, "No results found", "Try different keywords or remove your search filters.");
+    else { char a[64]; snprintf(a, sizeof a, "%d tones found", nt); say(s, a, ""); }
 }
+static void do_find(Plugin *s) { do_search(s, 0); }
 static void do_models(Plugin *s) {
     pthread_mutex_lock(&s->mu);
     const Tone t = s->tone >= 0 && s->tone < s->ntones ? s->tones[s->tone] : (Tone){0};
@@ -525,6 +606,7 @@ static void do_models(Plugin *s) {
         memcpy(s->models, m, sizeof *m * (size_t)n);
         s->nmodels = n;
         s->model = 0;
+        s->mpage = 0;
     }
     pthread_mutex_unlock(&s->mu);
     free(m);
@@ -650,6 +732,7 @@ static void *worker(void *arg) {
         else if (j == J_FIND) do_find(s);
         else if (j == J_MODELS) do_models(s);
         else if (j == J_DOWNLOAD) do_download(s);
+        else if (j == J_MORE) do_search(s, 1);
         s->busy = 0;
         tiles_changed(s);
     }
@@ -702,11 +785,17 @@ static void pick_model(Plugin *s, int m) {
     s->norm[kModel] = n > 1 ? (float)m / (float)(n - 1) : 0;
     tiles_changed(s);
 }
-static void set_page(Plugin *s, int dir) {
+static void set_page(Plugin *s, int dir) {   /* scroll a page of cards: down past what's loaded fetches the next 25 */
     pthread_mutex_lock(&s->mu);
-    const int np = (s->ntones + ROWS - 1) / ROWS;
-    if (np > 1) s->page = (s->page + dir + np) % np;
+    const int np = (s->ntones + ROWS - 1) / ROWS, more = s->apage < s->apages && s->ntones < MAXT;
+    int fetch = 0;
+    if (dir < 0) { if (s->page > 0) s->page--; else if (!more && np > 1) s->page = np - 1; }
+    else if (s->page + 1 < np) s->page++;
+    else if (more) { s->want_page = s->page + 1; fetch = 1; }
+    else if (np > 1) s->page = 0;
+    if (!fetch && more && (s->page + 2) * ROWS > s->ntones) { s->want_page = -1; fetch = 1; }   /* (have the next ready) */
     pthread_mutex_unlock(&s->mu);
+    if (fetch && !s->busy) post(s, J_MORE);
     tiles_changed(s);
 }
 static void sign_out(Plugin *s) {
@@ -771,7 +860,21 @@ static void setParameter(AEffect *e, int32_t i, float v) {
     case kStatus: case kStatus2: case kInfo1: case kInfo2: case kInfo3: case kPowered: case kSel: case kHelp1:
     case kHelp2: case kHdr: return;   /* (read-only) */
     case kView: case kSelKind: case kCardKind0: case kCardKind0 + 1: case kCardKind0 + 2: case kCardKind0 + 3:
-    case kCardKind0 + 4: case kCardKind0 + 5: s->automate[i] = 1; return;   /* (ours: a restore changes nothing) */
+    case kCardKind0 + 4: case kCardKind0 + 5: case kCk7: case kCk7 + 1: case kCk7 + 2: case kCk7 + 3:
+        s->automate[i] = 1; return;   /* (ours: a restore changes nothing) */
+    case kQueryOpen: case kSortByOpen: s->norm[i] = v > 0.5f ? 1.0f : 0.0f; return;   /* (the pop-up lists' open flags) */
+    case kQuery: case kSortBy: {   /* a pick in a pop-up list: search again, close the list */
+        const int n = i == kQuery ? NQUERIES : 4, o = option_of(v, n);
+        s->norm[i] = (float)o / (float)(n - 1);
+        if (i == kQuery) s->query = o; else s->sortby = o;
+        s->norm[i + 1] = 0; s->automate[i + 1] = 1;
+        if (s->view != V_LIB) go_view(s, V_LIB);
+        if (s->access[0]) post(s, J_FIND);
+        return;
+    }
+    case kCount: case kGearTxt: case kDate: case kDesc0: case kDesc0 + 1: case kDesc0 + 2: case kMakes: case kTags0:
+    case kTags0 + 1: case kModHdr: case kMPage: case kBlank: return;
+    case kMRow0: case kMRow0 + 1: case kMRow0 + 2: case kMRow0 + 3: case kMRow0 + 4: case kMRow0 + 5: return;
     default:
         if (is_tile(i)) {   /* a tap toggles the tile from what it showed: any change is a press */
             const int tap = (v > 0.5f) != (s->norm[i] > 0.5f);
@@ -788,6 +891,38 @@ static void setParameter(AEffect *e, int32_t i, float v) {
             else if (i == kNav1) go_view(s, s->view == V_SEARCH ? V_LIB : V_SEARCH);
             else if (i == kNav2) go_view(s, s->view == V_ACCOUNT ? V_LIB : V_ACCOUNT);
             else if (i == kScrUp || i == kScrDn) set_page(s, i == kScrUp ? -1 : 1);
+            else if (i >= kTab0 && i < kTab0 + 3) { s->tab = i - kTab0; if (s->access[0]) post(s, J_FIND); }
+            else if (i >= kGear0 && i < kGear0 + 5) {   /* a gear box (IR on its own: another format) */
+                const int g = i - kGear0;
+                s->gmask ^= 1 << g;
+                if (s->gmask & (1 << g)) s->gmask = g == 4 ? 16 : s->gmask & 15;
+                if (s->access[0]) post(s, J_FIND);
+            }
+            else if (i == kFilt) go_view(s, s->view == V_SEARCH ? V_LIB : V_SEARCH);
+            else if (i == kFReset) { s->gmask = 0; if (s->access[0]) post(s, J_FIND); }
+            else if (i == kFDone || i == kMClose || i == kSide0) go_view(s, V_LIB);
+            else if (i == kSide0 + 1) go_view(s, V_ACCOUNT);
+            else if (i == kQClear) { if (s->query) { s->query = 0; set_opt(s, kQuery, 0, NQUERIES); if (s->access[0]) post(s, J_FIND); } }
+            else if (i >= kMDl0 && i < kMDl0 + MROWS) {   /* a model row's download */
+                pthread_mutex_lock(&s->mu);
+                const int m = s->mpage * MROWS + (i - kMDl0), ok = m < s->nmodels && !s->busy;
+                if (ok) s->model = m + 1;
+                pthread_mutex_unlock(&s->mu);
+                if (ok) post(s, J_DOWNLOAD);
+            }
+            else if (i == kMAll) { if (!s->busy && s->nmodels) { s->model = 0; post(s, J_DOWNLOAD); } }
+            else if (i == kMScrUp || i == kMScrDn) {
+                const int np = (s->nmodels + MROWS - 1) / MROWS;
+                if (np > 1) s->mpage = (s->mpage + (i == kMScrUp ? -1 : 1) + np) % np;
+            }
+            else if (i >= kBot0 && i < kBot0 + 4) {   /* the bottom tabs: Featured (trending, no filters), Browse, My Content */
+                const int b = i - kBot0;
+                if (b == 0) { s->tab = 1; s->sortby = 0; s->gmask = 0; s->query = 0; set_opt(s, kSortBy, 0, 4); set_opt(s, kQuery, 0, NQUERIES); }
+                else if (b == 1) s->tab = 1;
+                else if (b == 2) s->tab = 2;
+                s->view = V_LIB;
+                if (b < 3 && s->access[0]) post(s, J_FIND);
+            }
             else if (i == kSignTile) post(s, J_SIGNIN);
             else sign_out(s);
             tiles_changed(s);
@@ -808,6 +943,23 @@ static void fmt_count(long n, char *t, size_t max) {
     if (n >= 1000000) snprintf(t, max, "%.1fM", (double)n / 1e6);
     else if (n >= 1000) snprintf(t, max, "%.1fk", (double)n / 1e3);
     else snprintf(t, max, "%ld", n);
+}
+/* line `line` of text word-wrapped at `w` characters (the last shown line ends "..." when there's more) */
+static void wrap_line(const char *txt, int w, int lines, int line, char *t, int max) {
+    const char *p = txt;
+    for (int l = 0;; l++) {
+        while (*p == ' ') p++;
+        int n = (int)strlen(p), cut = n;
+        if (n > w) { cut = w; while (cut > 0 && p[cut] != ' ') cut--; if (!cut) cut = w; }
+        if (l == line) {
+            const int more = l == lines - 1 && n > cut;
+            snprintf(t, (size_t)max, "%.*s%s", more ? (cut > w - 3 ? w - 3 : cut) : cut, p, more ? "..." : "");
+            if (!t[0]) snprintf(t, (size_t)max, " ");
+            return;
+        }
+        p += cut;
+        if (!*p) { snprintf(t, (size_t)max, " "); return; }
+    }
 }
 static void display(Plugin *s, int i, char *t, int max) {
     t[0] = 0;
@@ -843,6 +995,45 @@ static void display(Plugin *s, int i, char *t, int max) {
         else snprintf(t, (size_t)max, "%s", s->view == V_TONE ? "Tone" : s->view == V_SEARCH ? "Search" : "Account");
         break;
     case kBack: snprintf(t, (size_t)max, " "); break;
+    case kTab0: case kTab0 + 1: case kTab0 + 2: snprintf(t, (size_t)max, "%s", TABS[i - kTab0]); break;
+    case kQuery: snprintf(t, (size_t)max, "%s", QUERIES[s->query]); break;
+    case kSortBy: snprintf(t, (size_t)max, "%s", SORTBYS[s->sortby]); break;
+    case kGear0: case kGear0 + 1: case kGear0 + 2: case kGear0 + 3: case kGear0 + 4: snprintf(t, (size_t)max, "%s", GEAR_NAMES[i - kGear0]); break;
+    case kFReset: snprintf(t, (size_t)max, "Reset"); break;
+    case kFDone: snprintf(t, (size_t)max, "Done"); break;
+    case kFilt: case kQClear: case kMClose: case kMAll: case kMScrUp: case kMScrDn: case kSide0: case kSide0 + 1: case kBlank:
+        snprintf(t, (size_t)max, " "); break;
+    case kBot0: case kBot0 + 1: case kBot0 + 2: case kBot0 + 3:
+        snprintf(t, (size_t)max, "%s", (const char *[]){"Featured", "Browse", "My Content", "TONE3000"}[i - kBot0]); break;
+    case kCount:
+        if (!s->access[0]) snprintf(t, (size_t)max, "Not signed in");
+        else if (s->busy == J_FIND) snprintf(t, (size_t)max, "Searching...");
+        else snprintf(t, (size_t)max, "%ld results", s->total);
+        break;
+    case kGearTxt: {
+        const char *g = tn ? tn->gear : "";
+        snprintf(t, (size_t)max, "%s", !tn ? " " : !strcmp(tn->format, "ir") ? "IR" : !strcmp(g, "amp") ? "Amp Head" :
+                 !strcmp(g, "amp-cab") || !strcmp(g, "full-rig") ? "Full Rig / Combo" : !strcmp(g, "pedal") ? "Pedal" :
+                 !strcmp(g, "outboard") ? "Outboard" : !strcmp(g, "cab") ? "Cab" : g);
+        break;
+    }
+    case kDate: snprintf(t, (size_t)max, "%s", tn && tn->date[0] ? tn->date : " "); break;
+    case kDesc0: case kDesc0 + 1: case kDesc0 + 2: case kTags0: case kTags0 + 1: {   /* wrapped lines */
+        const int desc = i < kMakes, line = desc ? i - kDesc0 : i - kTags0, nl = desc ? 3 : 2, w = desc ? 58 : 46;
+        wrap_line(tn ? (desc ? tn->desc : tn->tags) : "", w, nl, line, t, max);
+        break;
+    }
+    case kMakes: snprintf(t, (size_t)max, "%s", tn && tn->makes[0] ? tn->makes : "-"); break;
+    case kModHdr:
+        if (!tn) snprintf(t, (size_t)max, " ");
+        else if (!s->nmodels) snprintf(t, (size_t)max, s->busy == J_MODELS ? "Loading models..." : "No A2 models");
+        else snprintf(t, (size_t)max, "%s (%d)", !strcmp(tn->format, "ir") ? "IR" : "NAM A2", s->nmodels);
+        break;
+    case kMPage: {
+        const int np = (s->nmodels + MROWS - 1) / MROWS;
+        if (np > 1) snprintf(t, (size_t)max, "%d / %d", s->mpage + 1, np); else snprintf(t, (size_t)max, " ");
+        break;
+    }
     case kNav1: case kNav2: case kScrUp: case kScrDn: snprintf(t, (size_t)max, " "); break;
     case kSel: snprintf(t, (size_t)max, "%s", tn ? tn->title : "No tone picked"); break;
     case kDl:
@@ -862,7 +1053,16 @@ static void display(Plugin *s, int i, char *t, int max) {
     case kFind: snprintf(t, (size_t)max, "Find"); break;
     case kDownload: snprintf(t, (size_t)max, "Download"); break;
     default:
-        if (i >= kRow0 && i < kRow0 + 12) {
+        if (i >= kUp0 && i < kCk7) {   /* a card's uploader / downloads / favorites / models */
+            const int f = (i - kUp0) / 10, k = s->page * ROWS + (i - kUp0) % 10;
+            if (k >= s->ntones) snprintf(t, (size_t)max, " ");
+            else if (f == 0) snprintf(t, (size_t)max, "%s", s->tones[k].creator);
+            else fmt_count(f == 1 ? s->tones[k].downloads : f == 2 ? s->tones[k].favs : s->tones[k].models ? s->tones[k].models
+                           : s->tones[k].a2 + s->tones[k].irs, t, (size_t)max);
+        } else if (i >= kMRow0 && i < kMRow0 + MROWS) {
+            const int m = s->mpage * MROWS + (i - kMRow0);
+            snprintf(t, (size_t)max, "%s", m < s->nmodels ? s->models[m].name : " ");
+        } else if (i >= kRow0 && i < kRow0 + 12) {
             const int k = s->page * ROWS + (i - kRow0);
             if (i >= kRow0 + ROWS) snprintf(t, (size_t)max, " ");
             else if (k < s->ntones) snprintf(t, (size_t)max, "%s", s->tones[k].title);
@@ -888,7 +1088,9 @@ static intptr_t dispatcher(AEffect *e, int32_t op, int32_t idx, intptr_t v, void
         return 1;
     case effGetParamName: if (idx >= 0 && idx < kNumParams) copy_str(p, P[idx].name, 32); return 1;
     case effGetParamLabel: copy_str(p, "", 8); return 1;
-    case effGetParamDisplay: if (idx >= 0 && idx < kNumParams) { char t[64]; display(s, idx, t, 40); copy_str(p, t, 40); } return 1;
+    case effGetParamDisplay:   /* (JUCE reads up to 256: the pop-up's lines are longer than 40) */
+        if (idx >= 0 && idx < kNumParams) { char t[96]; display(s, idx, t, 72); copy_str(p, t, 72); }
+        return 1;
     case effCanBeAutomated: return idx >= 0 && idx < kNumParams && idx != kStatus && idx != kStatus2 && idx < kInfo1;
     case effGetPlugCategory: return kPlugCategEffect;
     case effGetEffectName: case effGetProductString: copy_str(p, "TONE3000", 32); return 1;
@@ -936,6 +1138,7 @@ static AEffect *make(audioMasterCallback master) {
     if (!s) return NULL;
     s->master = master;
     s->tone = -1;
+    s->tab = 1;
     for (int i = 0; i < kNumParams; i++) s->norm[i] = pn(&P[i], P[i].def);
     pthread_mutex_init(&s->mu, NULL);
     pthread_cond_init(&s->cv, NULL);

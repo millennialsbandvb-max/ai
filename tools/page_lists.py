@@ -256,6 +256,19 @@ patch('''            for side, (ax, ay, aw, ah) in zip(("prev", "next"), stepper
             for side, (ax, ay, aw, ah) in zip(("prev", "next"), stepper_arrows(w)):
                 img = "sh_arrow_%d_%s_%s" % (t, w["key"], side)''')
 
+# popup marker=0: no drawn "opens a list" triangle (the TONE3000 search pill)
+patch('''        pops = [w for w in ws if w["kind"] == "popup"]''', '''        pops = [w for w in ws if w["kind"] == "popup" and w.get("marker", "1") != "0"]''')
+
+# readout options (TONE3000's page): font=<px>, ink=RRGGBB, just=left|right|centre
+patch('''                key = "shReadout_%s%dx%d" % ("dot_" if dot else "", rw, rh)
+                defs.setdefault(key, _local(key, [], [_value_label(8, 0, rw - 16, rh, 26.0, DISPLAY_INK if dot else ACCENT)]))''',
+      '''                rf, ri, rj = float(w.get("font") or 26.0), w.get("ink") or (DISPLAY_INK if dot else ACCENT), w.get("just", "")
+                key = "shReadout_%s%dx%d_%d_%s_%s" % ("dot_" if dot else "", rw, rh, rf, ri, rj)
+                rjust = {"left": "left verticallyCentred", "right": "right verticallyCentred"}.get(rj, "horizontallyCentred verticallyCentred")
+                custom = w.get("font") or w.get("ink") or rj
+                defs.setdefault(key, _local(key, [], [_value_label(0 if rj else 8, 0, rw - (0 if rj else 16), rh, rf, ri, rjust) if custom else
+                                                      _value_label(8, 0, rw - 16, rh, 26.0, DISPLAY_INK if dot else ACCENT)]))''')
+
 # list options (TONE3000's page): font=<px> for the rows' text; button=1 draws each tile as a filled button
 # (theme_btn_bg, lighter while its value is 1) with its live text centred in theme_btn_text: big tap targets whose
 # words the plugin sets (the kit's own buttons are 39 px tall with baked words); fill=RRGGBB its own colour; imgs="a.png,b.png"
@@ -271,6 +284,47 @@ patch('''            elif kind == "list":
                 lbtn, lfont = bool(w.get("button")), float(w.get("font") or 24.0)
                 icons = [f.strip() for f in w.get("imgs", "").split(",")] if w.get("imgs") else []
                 card = int(w.get("card") or 0)
+                style = w.get("style", "")
+                if style in ("cardx", "tabs", "check"):
+                    # cardx: a clear tap area over a card drawn by art / pictures / readouts under it, its text (Data) at
+                    #   tx,ty (left, font=, ink=); blank=<param> fills the whole card with a clear label so a tap anywhere counts
+                    # tabs: text tabs, the lit one (value 1) underlined in theme_accent_hi, no fill (HeadRush-like)
+                    # check: a row with its text left and a check box right, ticked while its value is 1
+                    for slot, ((x, y, tw, th), sk) in enumerate(zip(list_tiles(w), list_keys(w))):
+                        ink = w.get("ink") or INK
+                        acts = [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch")]
+                        if style == "cardx":
+                            tx, ty = int(w.get("tx") or 12), int(w.get("ty") or 0)
+                            bl = index.get(w.get("blank", ""))
+                            parts = [_focus(tw, th)]
+                            if bl is not None:
+                                parts.append(clear_label(_value_label(0, 0, tw, th, 10.0, ink, handle="Text")))
+                            parts.append(_value_label(tx, ty, tw - tx - 8, int(lfont * 1.6), lfont, ink, "left verticallyCentred"))
+                            key = "shCardX_%s_%dx%d" % (w["key"], tw, th)
+                            defs.setdefault(key, _local(key, acts, parts))
+                            kids.append(_placed(key, "%s %d" % (name, slot + 1), index[sk], x, y, tw, th,
+                                                focus="Yes" if slot == 0 else "No", extra={"Text": bl} if bl is not None else None))
+                            continue
+                        img = "sh_%s_%s_%d" % (style, w["key"], slot)
+                        for state in ("on", "off"):
+                            script += ["clear|" + (w.get("bg") or under()), "tile|%d|%d|%d|%d|%s|%s|0" % (x, y, tw, th, w.get("bg") or under(), w.get("bg") or under())]
+                            if style == "tabs" and state == "on":
+                                script.append("tile|%d|%d|%d|%d|%s|%s|0" % (x + 4, y + th - 3, tw - 8, 3, ACCENT_HI, ACCENT_HI))
+                            if style == "check":
+                                bx, by, bs = x + tw - 30, y + (th - 18) // 2, 18
+                                on = state == "on"
+                                script.append("tile|%d|%d|%d|%d|%s|%s|%d" % (bx, by, bs, bs, ACCENT_HI if on else (w.get("bg") or under()),
+                                                                            ACCENT_HI if on else INK_DIM, 0 if on else 2))
+                                if on:
+                                    script.append("tile|%d|%d|%d|%d|%s|%s|0" % (bx + 5, by + 5, bs - 10, bs - 10, w.get("bg") or under(), w.get("bg") or under()))
+                            script.append("crop|%s|%d|%d|%d|%d" % (art("%s_%s" % (img, state)), x, y, tw, th))
+                        key = "shTab_%s_%d" % (w["key"], slot)
+                        just = "horizontallyCentred verticallyCentred" if style == "tabs" else "left verticallyCentred"
+                        defs.setdefault(key, _local(key, acts, [_focus(tw, th), _button(img + "_on.png", img + "_off.png", 1, 1, tw, th),
+                                                               _value_label(8 if style == "check" else 0, 0, tw - (44 if style == "check" else 0), th,
+                                                                            lfont, ink, just)]))
+                        kids.append(_placed(key, "%s %d" % (name, slot + 1), index[sk], x, y, tw, th, focus="Yes" if slot == 0 else "No"))
+                    continue
                 for slot, ((x, y, tw, th), sk) in enumerate(zip(list_tiles(w), list_keys(w))):
                     if card:   # a card: a picture above (a `picture` line), the name bar below; the whole card takes the tap
                         img = "sh_card_%s_%d" % (w["key"], slot)
@@ -287,11 +341,14 @@ patch('''            elif kind == "list":
                         kids.append(_placed(key, "%s %d" % (name, slot + 1), index[sk], x, y, tw, th, focus="Yes" if slot == 0 else "No"))
                         continue
                     img = "sh_%stile_%dx%d" % ("b" if lbtn else "", tw, th)
-                    if icons:
-                        img = "sh_itile_%s_%d" % (w["key"], slot)
+                    fills = [f.strip() for f in w.get("fills", "").split(",")] if w.get("fills") else []
+                    inks = [f.strip() for f in w.get("inks", "").split(",")] if w.get("inks") else []
+                    if icons or fills or w.get("fill"):   # (own pictures: same-size tiles elsewhere may differ)
+                        img = "sh_itile_%s_%d_%dx%d" % (w["key"], slot, x, y)
                     for state, border in (("on", 3), ("off", 0)):
                         if lbtn:
-                            fill = shade(w.get("fill") or BTN_BG or ACCENT, 1.25 if border else 1.0)
+                            fill = shade((fills[slot] if slot < len(fills) and fills[slot] else None) or w.get("fill") or BTN_BG or ACCENT,
+                                         1.25 if border else 1.0)
                             script += ["clear|" + under(), "tile|%d|%d|%d|%d|%s|%s|2" % (x, y, tw, th, fill, shade(fill, 0.7))]
                             if slot < len(icons) and icons[slot]:   # an icon drawn on the button (no font glyphs needed)
                                 script.append("image|%s|%d|%d|%d|%d|contain" % (os.path.abspath(os.path.join(base_dir, icons[slot])),
@@ -301,10 +358,11 @@ patch('''            elif kind == "list":
                         script += ["clear|" + under(), "tile|%d|%d|%d|%d|%s|%s|%d" % (x, y, tw, th, LCD, SEG_ON if border else LINE, border),
                                    "crop|%s|%d|%d|%d|%d" % (art("%s_%s" % (img, state)), x, y, tw, th)]
                     if lbtn:
-                        key = "shBtnTile_%s_%d" % (img, lfont)
+                        tink = (inks[slot] if slot < len(inks) and inks[slot] else None) or w.get("ink") or BTN_TEXT or INK
+                        key = "shBtnTile_%s_%d_%s" % (img, lfont, tink)
                         defs.setdefault(key, _local(key, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch")],
                                                     [_focus(tw, th), _button(img + "_on.png", img + "_off.png", 1, 1, tw, th),
-                                                     _value_label(12, 0, tw - 24, th, lfont, BTN_TEXT or INK,
+                                                     _value_label(12, 0, tw - 24, th, lfont, tink,
                                                                   "horizontallyCentred verticallyCentred")]))
                         kids.append(_placed(key, "%s %d" % (name, slot + 1), index[sk], x, y, tw, th, focus="Yes" if slot == 0 else "No"))
                         continue

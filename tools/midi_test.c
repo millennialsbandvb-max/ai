@@ -41,7 +41,7 @@ static int param(AEffect *e, const char *want) {
     for (int i = 0; i < e->numParams; i++) { char t[64] = {0}; e->dispatcher(e, effGetParamName, i, 0, t, 0); if (!strcmp(t, want)) return i; }
     return -1;
 }
-static void disp(AEffect *e, int i, char *t) { memset(t, 0, 64); e->dispatcher(e, effGetParamDisplay, i, 0, t, 0); }
+static void disp(AEffect *e, int i, char *t) { char b[256] = {0}; e->dispatcher(e, effGetParamDisplay, i, 0, b, 0); snprintf(t, 64, "%s", b); }
 
 int main(int argc, char **argv) {
     if (argc < 2) { fprintf(stderr, "usage: midi_test <plugin.so> <step>...\n"); return 2; }

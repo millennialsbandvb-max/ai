@@ -5,7 +5,8 @@
 .frame-rule { stroke: rgba(120, 170, 220, 0.14); }
 .frame-title { letter-spacing: 0.06em; filter: none; }
 .text, .box-label { filter: none; letter-spacing: 0.08em; }
-.box { fill: rgba(255, 255, 255, 0.035); stroke: none; filter: none; }
+.box { fill: none; stroke: none; filter: none; }
 .arrow-bg { fill: rgba(10, 22, 34, 0.9); }
 .seg-bg { filter: none; }
 .button-bg { filter: none; }
+.tile-rule { display: none; }
