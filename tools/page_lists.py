@@ -242,5 +242,39 @@ patch('''                script.append("crop|%s|%d|%d|%d|%d" % (art(img), ax, ay
                 script.append("crop|%s|%d|%d|%d|%d" % (art("sh_field_%d_%s" % (t, w["key"])), w["cx"] - w["w"] // 2 + fh + 3,
                                                        w["cy"] - w["h"] // 2, w["w"] - 2 * fh - 6, fh))''')
 
+# list options (TONE3000's page): font=<px> for the rows' text; button=1 draws each tile as a filled button
+# (theme_btn_bg, lighter while its value is 1) with its live text centred in theme_btn_text: big tap targets whose
+# words the plugin sets (the kit's own buttons are 39 px tall with baked words)
+patch('''            elif kind == "list":
+                for slot, ((x, y, tw, th), sk) in enumerate(zip(list_tiles(w), list_keys(w))):
+                    img = "sh_tile_%dx%d" % (tw, th)
+                    for state, border in (("on", 3), ("off", 0)):
+                        script += ["clear|" + under(), "tile|%d|%d|%d|%d|%s|%s|%d" % (x, y, tw, th, LCD, SEG_ON if border else LINE, border),
+                                   "crop|%s|%d|%d|%d|%d" % (art("%s_%s" % (img, state)), x, y, tw, th)]
+                    key = "shRow_%dx%d" % (tw, th)''', '''            elif kind == "list":
+                lbtn, lfont = bool(w.get("button")), float(w.get("font") or 24.0)
+                for slot, ((x, y, tw, th), sk) in enumerate(zip(list_tiles(w), list_keys(w))):
+                    img = "sh_%stile_%dx%d" % ("b" if lbtn else "", tw, th)
+                    for state, border in (("on", 3), ("off", 0)):
+                        if lbtn:
+                            fill = shade(BTN_BG or ACCENT, 1.25 if border else 1.0)
+                            script += ["clear|" + under(), "tile|%d|%d|%d|%d|%s|%s|2" % (x, y, tw, th, fill, shade(fill, 0.7)),
+                                       "crop|%s|%d|%d|%d|%d" % (art("%s_%s" % (img, state)), x, y, tw, th)]
+                            continue
+                        script += ["clear|" + under(), "tile|%d|%d|%d|%d|%s|%s|%d" % (x, y, tw, th, LCD, SEG_ON if border else LINE, border),
+                                   "crop|%s|%d|%d|%d|%d" % (art("%s_%s" % (img, state)), x, y, tw, th)]
+                    if lbtn:
+                        key = "shBtnTile_%dx%d_%d" % (tw, th, lfont)
+                        defs.setdefault(key, _local(key, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch")],
+                                                    [_focus(tw, th), _button(img + "_on.png", img + "_off.png", 1, 1, tw, th),
+                                                     _value_label(12, 0, tw - 24, th, lfont, BTN_TEXT or INK,
+                                                                  "horizontallyCentred verticallyCentred")]))
+                        kids.append(_placed(key, "%s %d" % (name, slot + 1), index[sk], x, y, tw, th, focus="Yes" if slot == 0 else "No"))
+                        continue
+                    key = "shRow_%dx%d" % (tw, th)''')
+patch('''                                                 _value_label(12, 0, tw - 24, th, 24.0, ACCENT, "left verticallyCentred")]))''',
+      '''                                                 _value_label(12, 0, tw - 24, th, lfont, ACCENT, "left verticallyCentred")]))''')
+patch('''                    key = "shRow_%dx%d" % (tw, th)''', '''                    key = "shRow_%dx%d_%d" % (tw, th, lfont)''')
+
 
 open(path, "w").write(s)

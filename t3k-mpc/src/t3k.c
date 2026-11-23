@@ -38,7 +38,11 @@ static const char *const STYLES[] = {"Any Style", "Clean", "Edge of Breakup", "C
  * look like a press, and picklist.h holds such a nudge back) */
 enum { kSource, kSort, kBrand, kStyle, kSignIn, kSignOut, kFind, kTone, kTonePrev, kToneNext, kModel, kModelPrev,
        kModelNext, kDownload, kStatus, kStatus2, kInfo1, kInfo2, kInfo3, kPowered, kBrandPrev, kBrandNext, kStylePrev,
-       kStyleNext, kNumParams };
+       kStyleNext,
+       /* the list-first page (Nov 2026, the user's ask): tone rows to tap, pages, big tap tiles (a "list" of one) */
+       kPagePrev, kPageNext, kPage, kSel, kDl, kSignTile, kSignOutTile, kHelp1, kHelp2, kRow0,
+       kNumParams = kRow0 + 12 };
+#define ROWS (kNumParams - kRow0)
 static const ParamDef P[kNumParams] = {
     OPT("source", "Source", SOURCES, 0), OPT("sort", "Sort", SORTS, 0), OPT("brand", "Brand", BRANDS, 0),
     OPT("style", "Style", STYLES, 0), BUTTON("signin", "Sign In"), BUTTON("signout", "Sign Out"), BUTTON("find", "Find"), PRESET("tone", "Tone"), BUTTON("tone_prev", "Tone <"), BUTTON("tone_next", "Tone >"),
@@ -46,6 +50,12 @@ static const ParamDef P[kNumParams] = {
     BUTTON("download", "Download"), PRESET("status", "Status"), PRESET("status2", "Status 2"),
     PRESET("info1", "Creator"), PRESET("info2", "Gear"), PRESET("info3", "License"), PRESET("powered", "Powered"),
     BUTTON("brand_prev", "Brand <"), BUTTON("brand_next", "Brand >"), BUTTON("style_prev", "Style <"), BUTTON("style_next", "Style >"),
+    BUTTON("page_prev", "Page <"), BUTTON("page_next", "Page >"), PRESET("page", "Page"), PRESET("sel", "Selected"),
+    PRESET("dl_1", "Download Tile"), PRESET("acct_1", "Sign In Tile"), PRESET("acct_2", "Sign Out Tile"),
+    PRESET("help1", "Help 1"), PRESET("help2", "Help 2"),
+    PRESET("row_1", "Row 1"), PRESET("row_2", "Row 2"), PRESET("row_3", "Row 3"), PRESET("row_4", "Row 4"),
+    PRESET("row_5", "Row 5"), PRESET("row_6", "Row 6"), PRESET("row_7", "Row 7"), PRESET("row_8", "Row 8"),
+    PRESET("row_9", "Row 9"), PRESET("row_10", "Row 10"), PRESET("row_11", "Row 11"), PRESET("row_12", "Row 12"),
 };
 #define NBRANDS ((int)(sizeof BRANDS / sizeof *BRANDS))
 #define NSTYLES ((int)(sizeof STYLES / sizeof *STYLES))
@@ -59,6 +69,8 @@ typedef struct {
     audioMasterCallback master;
     float norm[kNumParams];
     volatile int automate[kNumParams], update_display;
+    volatile int repaint[kNumParams];   /* tiles whose text changed: reported as a tiny change, then their value */
+    int page;                           /* the tone rows' page (ROWS a page) */
     pthread_t th;
     pthread_mutex_t mu;
     pthread_cond_t cv;
@@ -174,6 +186,19 @@ static void say(Plugin *s, const char *a, const char *b) {
     snprintf(s->status2, sizeof s->status2, "%s", b ? b : "");
     pthread_mutex_unlock(&s->mu);
     s->automate[kStatus] = s->automate[kStatus2] = 1;
+    s->update_display = 1;
+}
+/* the tap tiles (tone rows, Download, Sign In / Out): a selected row rests at 1, everything else at 0; new text is
+ * reported as a tiny change and then the value, so MPC repaints it */
+static int is_tile(int i) { return i >= kRow0 || i == kDl || i == kSignTile || i == kSignOutTile; }
+static void tiles_changed(Plugin *s) {
+    pthread_mutex_lock(&s->mu);
+    const int sel = s->tone - s->page * ROWS;
+    pthread_mutex_unlock(&s->mu);
+    for (int r = 0; r < ROWS; r++) s->norm[kRow0 + r] = r == sel ? 1.0f : 0.0f;
+    for (int i = 0; i < kNumParams; i++) if (is_tile(i)) s->repaint[i] = 2;
+    s->automate[kPage] = s->automate[kSel] = s->automate[kInfo1] = s->automate[kInfo2] = s->automate[kInfo3] = 1;
+    s->automate[kTone] = s->automate[kModel] = 1;
     s->update_display = 1;
 }
 
@@ -293,7 +318,11 @@ static void do_signin(Plugin *s) {
             fetch_user(s);
             char who[80];
             snprintf(who, sizeof who, "Signed in%s%s", s->user[0] ? " as " : "", s->user);
-            say(s, who, "Pick a Source and press Find");
+            say(s, who, "Loading tones...");
+            pthread_mutex_lock(&s->mu);
+            if (!s->job) s->job = J_FIND;
+            pthread_mutex_unlock(&s->mu);
+            tiles_changed(s);
             return;
         }
         if (t.b && strstr(t.b, "slow_down")) interval += 5;
@@ -325,8 +354,45 @@ static void tone_from(const JDoc *d, int o, Tone *t) {
     t->a2 = jp_num(d, jp_get(d, o, "a2_models_count"));
     t->irs = jp_num(d, jp_get(d, o, "irs_count"));
 }
+/* T3K_FAKE_TONES=<n> (tests): n made-up tones of 3 models each, no network; downloads still need the network */
+static void fake_find(Plugin *s) {
+    const int n = atoi(getenv("T3K_FAKE_TONES")) > MAXT ? MAXT : atoi(getenv("T3K_FAKE_TONES"));
+    pthread_mutex_lock(&s->mu);
+    for (int i = 0; i < n; i++) {
+        Tone *t = &s->tones[i];
+        memset(t, 0, sizeof *t);
+        t->id = 1000 + i;
+        const int src = option_of(s->norm[kSource], 7);
+        if (src) snprintf(t->title, sizeof t->title, "Fake %s %d", SOURCES[src], i + 1);
+        else snprintf(t->title, sizeof t->title, "Fake Tone %d", i + 1);
+        snprintf(t->creator, sizeof t->creator, "maker%d", i % 4);
+        snprintf(t->format, sizeof t->format, "nam");
+        t->a2 = 3;
+    }
+    s->ntones = n; s->tone = n ? 0 : -1; s->nmodels = 0; s->model = 0; s->page = 0;
+    pthread_mutex_unlock(&s->mu);
+    tiles_changed(s);
+    char a[64];
+    snprintf(a, sizeof a, "%d tones found", n);
+    say(s, a, "Tap a tone, then DOWNLOAD");
+    if (n) { pthread_mutex_lock(&s->mu); s->job = s->job ? s->job : J_MODELS; pthread_mutex_unlock(&s->mu); }
+}
+static void fake_models(Plugin *s, const Tone *t) {
+    pthread_mutex_lock(&s->mu);
+    if (s->tone >= 0 && s->tone < s->ntones && s->tones[s->tone].id == t->id) {
+        for (int i = 0; i < 3; i++) {
+            memset(&s->models[i], 0, sizeof s->models[i]);
+            snprintf(s->models[i].name, sizeof s->models[i].name, "%s model %d", t->title, i + 1);
+        }
+        s->nmodels = 3; s->model = 0;
+    }
+    pthread_mutex_unlock(&s->mu);
+    tiles_changed(s);
+    say(s, "3 A2 models: tap DOWNLOAD", "");
+}
 static void do_find(Plugin *s) {
-    if (!s->access[0]) { say(s, "Sign in first", "Press Sign In"); return; }
+    if (!s->access[0]) { say(s, "Not signed in", "ACCOUNT tab: press SIGN IN"); tiles_changed(s); return; }
+    if (getenv("T3K_FAKE_TONES")) { fake_find(s); return; }
     const int src = option_of(s->norm[kSource], 7), sort = option_of(s->norm[kSort], 4);
     const int brand = option_of(s->norm[kBrand], (int)(sizeof BRANDS / sizeof *BRANDS));
     const int style = option_of(s->norm[kStyle], (int)(sizeof STYLES / sizeof *STYLES));
@@ -372,8 +438,10 @@ static void do_find(Plugin *s) {
     s->tone = n ? 0 : -1;
     s->nmodels = 0;
     s->model = 0;
+    s->page = 0;
     pthread_mutex_unlock(&s->mu);
     free(found);
+    tiles_changed(s);
     s->automate[kTone] = s->automate[kModel] = s->automate[kInfo1] = s->automate[kInfo2] = s->automate[kInfo3] = 1;
     if (code == 401) say(s, "Signed out: press Sign In", "");
     else if (code == 429) say(s, "TONE3000 is busy (too many asks)", "Wait a minute, then Find again");
@@ -381,7 +449,7 @@ static void do_find(Plugin *s) {
     else {
         char a[64];
         snprintf(a, sizeof a, "%d tones found", n);
-        say(s, a, n ? "Pick one: Tone < > or tap its name" : "Try another Brand or Style");
+        say(s, a, n ? "Tap a tone, then DOWNLOAD" : "Try another Brand or Style (FILTER tab)");
     }
     if (n) { pthread_mutex_lock(&s->mu); s->job = s->job ? s->job : J_MODELS; pthread_mutex_unlock(&s->mu); }
 }
@@ -391,6 +459,7 @@ static void do_models(Plugin *s) {
     pthread_mutex_unlock(&s->mu);
     if (!t.id) return;
     const int ir = !strcmp(t.format, "ir");
+    if (getenv("T3K_FAKE_TONES")) { fake_models(s, &t); return; }
     char path[160];
     snprintf(path, sizeof path, "/models?tone_id=%ld&page_size=%d%s", t.id, MAXM, ir ? "" : "&architecture=2");
     Buf b = {0};
@@ -420,11 +489,11 @@ static void do_models(Plugin *s) {
     }
     pthread_mutex_unlock(&s->mu);
     free(m);
-    s->automate[kModel] = 1;
+    tiles_changed(s);
     char a[64];
     if (code != 200) snprintf(a, sizeof a, "Couldn't list this tone's models");
     else if (!n) snprintf(a, sizeof a, "No A2 models in this tone");
-    else snprintf(a, sizeof a, "%d %s: pick one or All, then Download", n, ir ? "IRs" : "A2 models");
+    else snprintf(a, sizeof a, "%d %s: tap DOWNLOAD", n, ir ? "IRs" : "A2 models");
     say(s, a, "");
 }
 
@@ -519,11 +588,16 @@ static void do_download(Plugin *s) {
 static void *worker(void *arg) {
     Plugin *s = arg;
     token_load(s);
+    if (getenv("T3K_FAKE_TONES") && !s->access[0]) snprintf(s->access, sizeof s->access, "fake");   /* (tests) */
     if (s->access[0]) {
         char who[80];
         snprintf(who, sizeof who, "Signed in%s%s", s->user[0] ? " as " : "", s->user);
-        say(s, who, "Pick a Source and press Find");
-    } else say(s, "Press Sign In to connect TONE3000", "");
+        say(s, who, "Loading tones...");
+        pthread_mutex_lock(&s->mu);
+        if (!s->job) s->job = J_FIND;   /* (the list fills by itself) */
+        pthread_mutex_unlock(&s->mu);
+    } else say(s, "Not signed in", "ACCOUNT tab: press SIGN IN");
+    tiles_changed(s);
     for (;;) {
         pthread_mutex_lock(&s->mu);
         while (!s->job && !s->quit) pthread_cond_wait(&s->cv, &s->mu);
@@ -532,11 +606,13 @@ static void *worker(void *arg) {
         s->busy = j;
         pthread_mutex_unlock(&s->mu);
         if (s->quit) break;
+        if (j == J_DOWNLOAD || j == J_FIND) tiles_changed(s);
         if (j == J_SIGNIN) do_signin(s);
         else if (j == J_FIND) do_find(s);
         else if (j == J_MODELS) do_models(s);
         else if (j == J_DOWNLOAD) do_download(s);
         s->busy = 0;
+        tiles_changed(s);
     }
     return NULL;
 }
@@ -552,7 +628,14 @@ static void process(AEffect *e, float **in, float **out, int32_t n) {
     Plugin *s = (Plugin *)e->object;
     if (s->master) {
         for (int i = 0; i < kNumParams; i++)
-            if (s->automate[i]) { s->automate[i] = 0; s->master(e, audioMasterAutomate, i, 0, NULL, s->norm[i]); s->update_display = 1; }
+            if (s->repaint[i] == 2) {   /* (a tiny change first, so MPC repaints the text) */
+                s->repaint[i] = 1;
+                s->master(e, audioMasterAutomate, i, 0, NULL, s->norm[i] > 0.5f ? 0.999f : 0.001f);
+            } else if (s->repaint[i] == 1 || s->automate[i]) {
+                s->repaint[i] = s->automate[i] = 0;
+                s->master(e, audioMasterAutomate, i, 0, NULL, s->norm[i]);
+                s->update_display = 1;
+            }
         if (s->update_display) { s->update_display = 0; s->master(e, audioMasterUpdateDisplay, 0, 0, NULL, 0); }
     }
     for (int c = 0; c < 2; c++) {   /* the audio passes straight through (in place, or not) */
@@ -562,14 +645,15 @@ static void process(AEffect *e, float **in, float **out, int32_t n) {
 }
 static void pick_tone(Plugin *s, int t) {
     pthread_mutex_lock(&s->mu);
-    const int ok = t >= 0 && t < s->ntones;
-    if (ok) { s->tone = t; s->nmodels = 0; s->model = 0; }
+    const int ok = t >= 0 && t < s->ntones, same = ok && t == s->tone && s->nmodels;
+    if (ok && !same) { s->tone = t; s->nmodels = 0; s->model = 0; }
+    if (ok) s->page = t / ROWS;
     const int n = s->ntones;
     pthread_mutex_unlock(&s->mu);
     if (!ok) return;
     s->norm[kTone] = n > 1 ? (float)t / (float)(n - 1) : 0;
-    s->automate[kTone] = s->automate[kModel] = s->automate[kInfo1] = s->automate[kInfo2] = s->automate[kInfo3] = 1;
-    post(s, J_MODELS);
+    tiles_changed(s);
+    if (!same) post(s, J_MODELS);
 }
 static void pick_model(Plugin *s, int m) {
     pthread_mutex_lock(&s->mu);
@@ -577,7 +661,26 @@ static void pick_model(Plugin *s, int m) {
     if (m >= 0 && m < n) s->model = m;
     pthread_mutex_unlock(&s->mu);
     s->norm[kModel] = n > 1 ? (float)m / (float)(n - 1) : 0;
-    s->automate[kModel] = 1;
+    tiles_changed(s);
+}
+static void set_page(Plugin *s, int dir) {
+    pthread_mutex_lock(&s->mu);
+    const int np = (s->ntones + ROWS - 1) / ROWS;
+    if (np > 1) s->page = (s->page + dir + np) % np;
+    pthread_mutex_unlock(&s->mu);
+    tiles_changed(s);
+}
+static void sign_out(Plugin *s) {
+    pthread_mutex_lock(&s->mu);
+    s->access[0] = s->refresh[0] = s->user[0] = 0;
+    s->expires = 0;
+    s->ntones = s->nmodels = 0;
+    s->tone = -1;
+    s->page = 0;
+    pthread_mutex_unlock(&s->mu);
+    unlink(token_path());
+    say(s, "Signed out", "Press SIGN IN to connect TONE3000");
+    tiles_changed(s);
 }
 static void setParameter(AEffect *e, int32_t i, float v) {
     Plugin *s = (Plugin *)e->object;
@@ -586,17 +689,7 @@ static void setParameter(AEffect *e, int32_t i, float v) {
     const int press = v > 0.5f;
     switch (i) {
     case kSignIn: if (press) post(s, J_SIGNIN); s->norm[i] = 0; return;
-    case kSignOut:
-        if (press) {
-            pthread_mutex_lock(&s->mu);
-            s->access[0] = s->refresh[0] = s->user[0] = 0;
-            s->expires = 0;
-            pthread_mutex_unlock(&s->mu);
-            unlink(token_path());
-            say(s, "Signed out", "Press Sign In to connect TONE3000");
-        }
-        s->norm[i] = 0;
-        return;
+    case kSignOut: if (press) sign_out(s); s->norm[i] = 0; return;
     case kFind: if (press) post(s, J_FIND); s->norm[i] = 0; return;
     case kDownload: if (press) post(s, J_DOWNLOAD); s->norm[i] = 0; return;
     case kTonePrev: case kToneNext:
@@ -625,12 +718,38 @@ static void setParameter(AEffect *e, int32_t i, float v) {
             const int cur = option_of(s->norm[k], n), to = (cur + ((i == kBrandPrev || i == kStylePrev) ? -1 : 1) + n) % n;
             s->norm[k] = (float)to / (float)(n - 1);
             s->automate[k] = 1;
+            if (s->access[0]) post(s, J_FIND);
         }
         s->norm[i] = 0;
         return;
     }
-    case kStatus: case kStatus2: case kInfo1: case kInfo2: case kInfo3: case kPowered: return;   /* (read-only) */
-    default: s->norm[i] = snap(&P[i], v, s->norm[i]); s->update_display = 1;
+    case kPagePrev: case kPageNext: if (press) set_page(s, i == kPagePrev ? -1 : 1); s->norm[i] = 0; return;
+    case kPage: {   /* a Q-Link nudge turns the page; an exact value changes nothing */
+        if (fabsf(v - s->norm[i]) > 0.0001f && fabsf(v - roundf(v)) > 0.001f) set_page(s, v > s->norm[i] ? 1 : -1);
+        s->automate[i] = 1;
+        return;
+    }
+    case kStatus: case kStatus2: case kInfo1: case kInfo2: case kInfo3: case kPowered: case kSel: case kHelp1:
+    case kHelp2: return;   /* (read-only) */
+    default:
+        if (is_tile(i)) {   /* a tap toggles the tile from what it showed: any change is a press */
+            const int tap = (v > 0.5f) != (s->norm[i] > 0.5f);
+            s->automate[i] = 1;
+            if (!tap) return;
+            if (i >= kRow0) { pthread_mutex_lock(&s->mu); const int t = s->page * ROWS + (i - kRow0); pthread_mutex_unlock(&s->mu); pick_tone(s, t); }
+            else if (i == kDl) { if (!s->busy) post(s, J_DOWNLOAD); }
+            else if (i == kSignTile) post(s, J_SIGNIN);
+            else sign_out(s);
+            tiles_changed(s);
+            return;
+        }
+        {
+            const float was = s->norm[i];
+            s->norm[i] = snap(&P[i], v, s->norm[i]);
+            s->update_display = 1;
+            if ((i == kSource || i == kSort || i == kBrand || i == kStyle) && s->norm[i] != was && s->access[0])
+                post(s, J_FIND);   /* (no Find press: the list follows the choices) */
+        }
     }
 }
 static float getParameter(AEffect *e, int32_t i) { Plugin *s = (Plugin *)e->object; return i >= 0 && i < kNumParams ? s->norm[i] : 0; }
@@ -662,13 +781,37 @@ static void display(Plugin *s, int i, char *t, int max) {
     }
     case kInfo3: snprintf(t, (size_t)max, "%s%s", tn ? "License: " : " ", tn ? tn->license : ""); break;
     case kPowered: snprintf(t, (size_t)max, "Powered by TONE3000"); break;
+    case kPage: {
+        const int np = (s->ntones + ROWS - 1) / ROWS;
+        if (np) snprintf(t, (size_t)max, "Page %d of %d  (%d tones)", s->page + 1, np, s->ntones);
+        else snprintf(t, (size_t)max, "No tones yet");
+        break;
+    }
+    case kSel: snprintf(t, (size_t)max, "%s", tn ? tn->title : "No tone picked"); break;
+    case kDl:
+        if (s->busy == J_DOWNLOAD) snprintf(t, (size_t)max, "DOWNLOADING...");
+        else if (!tn || !s->nmodels) snprintf(t, (size_t)max, tn ? "WAIT: LISTING MODELS" : "DOWNLOAD");
+        else if (s->model == 0) snprintf(t, (size_t)max, "DOWNLOAD ALL %d", s->nmodels);
+        else snprintf(t, (size_t)max, "DOWNLOAD THIS MODEL");
+        break;
+    case kSignTile: snprintf(t, (size_t)max, s->access[0] ? "SIGN IN AGAIN" : "SIGN IN"); break;
+    case kSignOutTile: snprintf(t, (size_t)max, "SIGN OUT"); break;
+    case kHelp1: snprintf(t, (size_t)max, "Sign in once: the MPC remembers it"); break;
+    case kHelp2: snprintf(t, (size_t)max, "Files go to NAM/Models or NAM/IRs"); break;
     case kTonePrev: case kModelPrev: case kBrandPrev: case kStylePrev: snprintf(t, (size_t)max, "<"); break;
     case kToneNext: case kModelNext: case kBrandNext: case kStyleNext: snprintf(t, (size_t)max, ">"); break;
     case kSignIn: snprintf(t, (size_t)max, "Sign In"); break;
     case kSignOut: snprintf(t, (size_t)max, "Sign Out"); break;
     case kFind: snprintf(t, (size_t)max, "Find"); break;
     case kDownload: snprintf(t, (size_t)max, "Download"); break;
-    default: pdisplay(&P[i], s->norm[i], t);
+    default:
+        if (i >= kRow0) {
+            const int k = s->page * ROWS + (i - kRow0);
+            if (k < s->ntones) snprintf(t, (size_t)max, "%s%s", s->tones[k].title, !strcmp(s->tones[k].format, "ir") ? " (IR)" : "");
+            else if (k == 0 && !s->access[0]) snprintf(t, (size_t)max, "Not signed in: ACCOUNT tab");
+            else if (k == 0 && s->busy == J_FIND) snprintf(t, (size_t)max, "Looking on TONE3000...");
+            else snprintf(t, (size_t)max, " ");
+        } else pdisplay(&P[i], s->norm[i], t);
     }
     pthread_mutex_unlock(&s->mu);
 }
@@ -707,7 +850,7 @@ static int t3k_pick(AEffect *e, int list, int op, int i, char *out, int max) {
         if (op == PL_CURRENT) return option_of(s->norm[k], n);
         if (op == PL_HEADING || i < 0 || i >= n) return 0;
         if (op == PL_NAME) snprintf(out, (size_t)max, "%s", list == 2 ? BRANDS[i] : STYLES[i]);
-        else if (op == PL_CHOOSE) { s->norm[k] = (float)i / (float)(n - 1); s->automate[k] = 1; }
+        else if (op == PL_CHOOSE) { s->norm[k] = (float)i / (float)(n - 1); s->automate[k] = 1; if (s->access[0]) post(s, J_FIND); }
         return 0;
     }
     if (op == PL_CHOOSE) { if (list == 0) pick_tone(s, i); else pick_model(s, i); return 0; }
