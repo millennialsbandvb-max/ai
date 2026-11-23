@@ -240,11 +240,27 @@ patch('''                script.append("crop|%s|%d|%d|%d|%d" % (art(img), ax, ay
             if w["key"] + "__sel" in index:
                 fh = w["h"]
                 script.append("crop|%s|%d|%d|%d|%d" % (art("sh_field_%d_%s" % (t, w["key"])), w["cx"] - w["w"] // 2 + fh + 3,
-                                                       w["cy"] - w["h"] // 2, w["w"] - 2 * fh - 6, fh))''')
+                                                       w["cy"] - w["h"] // 2, w["w"] - 2 * fh - 6, fh))
+            if cond(w):   # (back to the base screen for the next stepper)
+                script.append("clear|" + PLATE)
+                for b_ in base:
+                    script += baked_cmds(b_, TITLE_FONT, base_dir)''')
+
+# a stepper shown only in one mode (when=): its arrows / field are cut from the base screen redrawn with the stepper
+# on it (the base screen alone has no arrows there, so the tap images hid the mode's arrows)
+patch('''            for side, (ax, ay, aw, ah) in zip(("prev", "next"), stepper_arrows(w)):
+                img = "sh_arrow_%d_%s_%s" % (t, w["key"], side)''', '''            if cond(w):
+                script.append("clear|" + PLATE)
+                for b_ in base + [w]:
+                    script += baked_cmds(b_, TITLE_FONT, base_dir)
+            for side, (ax, ay, aw, ah) in zip(("prev", "next"), stepper_arrows(w)):
+                img = "sh_arrow_%d_%s_%s" % (t, w["key"], side)''')
 
 # list options (TONE3000's page): font=<px> for the rows' text; button=1 draws each tile as a filled button
 # (theme_btn_bg, lighter while its value is 1) with its live text centred in theme_btn_text: big tap targets whose
-# words the plugin sets (the kit's own buttons are 39 px tall with baked words)
+# words the plugin sets (the kit's own buttons are 39 px tall with baked words); fill=RRGGBB its own colour; imgs="a.png,b.png"
+# a picture per tile drawn on the button (icons: no font glyphs needed); card=<px>: each tile a card, a `picture`
+# line shows above and a name bar of that height below (lit while its value is 1), the whole card takes the tap
 patch('''            elif kind == "list":
                 for slot, ((x, y, tw, th), sk) in enumerate(zip(list_tiles(w), list_keys(w))):
                     img = "sh_tile_%dx%d" % (tw, th)
@@ -253,18 +269,39 @@ patch('''            elif kind == "list":
                                    "crop|%s|%d|%d|%d|%d" % (art("%s_%s" % (img, state)), x, y, tw, th)]
                     key = "shRow_%dx%d" % (tw, th)''', '''            elif kind == "list":
                 lbtn, lfont = bool(w.get("button")), float(w.get("font") or 24.0)
+                icons = [f.strip() for f in w.get("imgs", "").split(",")] if w.get("imgs") else []
+                card = int(w.get("card") or 0)
                 for slot, ((x, y, tw, th), sk) in enumerate(zip(list_tiles(w), list_keys(w))):
+                    if card:   # a card: a picture above (a `picture` line), the name bar below; the whole card takes the tap
+                        img = "sh_card_%s_%d" % (w["key"], slot)
+                        for state, border in (("on", 3), ("off", 0)):
+                            script += ["clear|" + under(), "tile|%d|%d|%d|%d|%s|%s|%d" % (x, y + th - card, tw, card, LCD, SEG_ON if border else LINE,
+                                                                                           border or 1),
+                                       "crop|%s|%d|%d|%d|%d" % (art("%s_%s" % (img, state)), x, y + th - card, tw, card)]
+                        key = "shCard_%s_%d" % (w["key"], slot)
+                        defs.setdefault(key, _local(key, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch")],
+                                                    [_focus(tw, th), _button(img + "_on.png", img + "_off.png", 1, 1, tw, card, 0, th - card),
+                                                     _value_label(12, 0, tw - 24, th - (card - lfont * 1.2) // 2, lfont, INK,
+                                                                  "horizontallyCentred bottom")]))
+                        # (the label covers the card, so a tap on the picture counts too; its text sits in the name bar)
+                        kids.append(_placed(key, "%s %d" % (name, slot + 1), index[sk], x, y, tw, th, focus="Yes" if slot == 0 else "No"))
+                        continue
                     img = "sh_%stile_%dx%d" % ("b" if lbtn else "", tw, th)
+                    if icons:
+                        img = "sh_itile_%s_%d" % (w["key"], slot)
                     for state, border in (("on", 3), ("off", 0)):
                         if lbtn:
-                            fill = shade(BTN_BG or ACCENT, 1.25 if border else 1.0)
-                            script += ["clear|" + under(), "tile|%d|%d|%d|%d|%s|%s|2" % (x, y, tw, th, fill, shade(fill, 0.7)),
-                                       "crop|%s|%d|%d|%d|%d" % (art("%s_%s" % (img, state)), x, y, tw, th)]
+                            fill = shade(w.get("fill") or BTN_BG or ACCENT, 1.25 if border else 1.0)
+                            script += ["clear|" + under(), "tile|%d|%d|%d|%d|%s|%s|2" % (x, y, tw, th, fill, shade(fill, 0.7))]
+                            if slot < len(icons) and icons[slot]:   # an icon drawn on the button (no font glyphs needed)
+                                script.append("image|%s|%d|%d|%d|%d|contain" % (os.path.abspath(os.path.join(base_dir, icons[slot])),
+                                                                                 x + 4, y + 4, tw - 8, th - 8))
+                            script.append("crop|%s|%d|%d|%d|%d" % (art("%s_%s" % (img, state)), x, y, tw, th))
                             continue
                         script += ["clear|" + under(), "tile|%d|%d|%d|%d|%s|%s|%d" % (x, y, tw, th, LCD, SEG_ON if border else LINE, border),
                                    "crop|%s|%d|%d|%d|%d" % (art("%s_%s" % (img, state)), x, y, tw, th)]
                     if lbtn:
-                        key = "shBtnTile_%dx%d_%d" % (tw, th, lfont)
+                        key = "shBtnTile_%s_%d" % (img, lfont)
                         defs.setdefault(key, _local(key, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch")],
                                                     [_focus(tw, th), _button(img + "_on.png", img + "_off.png", 1, 1, tw, th),
                                                      _value_label(12, 0, tw - 24, th, lfont, BTN_TEXT or INK,

@@ -59,43 +59,40 @@ int main(int argc, char **argv) {
     run(2);
     disp("Status", t);
     printf("  status at start: %s\n", t);
-    if (getenv("T3K_FAKE_TONES")) {   /* the list page offline: T3K_FAKE_TONES=30 (made-up tones, no network) */
-        CHECK(wait_for("tones found", "models:", 5, t), "the list didn't fill by itself (%s)", t);
+    if (getenv("T3K_FAKE_TONES")) {   /* the HeadRush-style screen offline: T3K_FAKE_TONES=30 (made-up tones) */
+        const int view = param("View"), ck1 = param("Card 1 Kind"), selk = param("Tone Kind");
+        CHECK(wait_for("tones found", "models:", 5, t), "the library didn't fill by itself (%s)", t);
         run(4);
-        char r1[64], r12[64], pg[64], dl[64];
-        disp("Row 1", r1); disp("Row 12", r12); disp("Page", pg);
-        printf("  rows: %s .. %s, %s\n", r1, r12, pg);
-        CHECK(!strcmp(r1, "Fake Tone 1") && !strcmp(r12, "Fake Tone 12") && strstr(pg, "of 3"), "the rows don't show the first page");
-        CHECK(e->getParameter(e, param("Row 1")) > 0.5f && e->getParameter(e, param("Row 2")) < 0.5f, "the picked row isn't lit");
-        CHECK(wait_for("models:", NULL, 5, t), "no models (%s)", t);
+        char r1[64], r6[64], r7[64], pg[64], dl[64];
+        disp("Row 1", r1); disp("Row 6", r6); disp("Row 7", r7); disp("Page", pg);
+        printf("  cards: %s .. %s, page %s\n", r1, r6, pg);
+        CHECK(!strcmp(r1, "Fake Tone 1") && !strcmp(r6, "Fake Tone 6") && !strcmp(r7, " ") && !strcmp(pg, "1 / 5"), "the cards don't show page 1");
+        CHECK(e->getParameter(e, view) < 0.01f && e->getParameter(e, ck1) > 0.1f && e->getParameter(e, selk) < 0.01f,
+              "library view: card pictures on, tone picture off");
+        e->setParameter(e, param("Row 5"), 1.0f);   /* tap card 5: its tone page */
         run(2);
-        disp("Download Tile", dl); printf("  %s\n", dl);
-        CHECK(!strcmp(dl, "DOWNLOAD ALL 3"), "the download tile says %s", dl);
-        e->setParameter(e, param("Row 5"), 1.0f);   /* a tap on row 5 */
-        run(2);
-        disp("Selected", t); printf("  tapped row 5: %s\n", t);
-        CHECK(!strcmp(t, "Fake Tone 5") && e->getParameter(e, param("Row 5")) > 0.5f && e->getParameter(e, param("Row 1")) < 0.5f,
-              "tapping row 5 didn't pick it");
-        e->setParameter(e, param("Row 5"), 0.0f);   /* a second tap on the lit row: still picked */
-        run(2);
-        disp("Selected", t);
-        CHECK(!strcmp(t, "Fake Tone 5") && e->getParameter(e, param("Row 5")) > 0.5f, "a second tap unpicked it");
-        press("Page >"); run(2);
-        disp("Row 1", r1); disp("Page", pg); printf("  page >: %s, %s\n", r1, pg);
-        CHECK(!strcmp(r1, "Fake Tone 13") && !strncmp(pg, "Page 2", 6) && e->getParameter(e, param("Row 5")) < 0.5f, "Page > didn't turn");
-        press("Page >"); run(2); disp("Row 6", t); disp("Row 7", r12);
-        CHECK(!strcmp(t, "Fake Tone 30") && !strcmp(r12, " "), "the last page shows %s / %s", t, r12);
-        press("Page >"); run(2); disp("Row 1", r1);
-        CHECK(!strcmp(r1, "Fake Tone 1"), "pages don't wrap (%s)", r1);
-        e->setParameter(e, param("Row 3"), 1.0f);
+        disp("Selected", t); disp("View", pg); printf("  tapped card 5: %s (%s)\n", t, pg);
+        CHECK(!strcmp(t, "Fake Tone 5") && !strcmp(pg, "Tone"), "card 5 didn't open its tone");
+        CHECK(e->getParameter(e, ck1) < 0.01f && e->getParameter(e, selk) > 0.1f, "tone view: card pictures off, tone picture on");
         for (int k = 0; k < 50; k++) { run(1); disp("Download Tile", dl); if (strstr(dl, "ALL")) break; usleep(100000); }
-        press("Model >"); run(2);
-        disp("Download Tile", dl); disp("Model", t); printf("  %s: %s\n", t, dl);
+        printf("  %s\n", dl);
+        CHECK(!strcmp(dl, "DOWNLOAD ALL 3"), "the download tile says %s", dl);
+        press("Model >"); run(2); disp("Download Tile", dl);
         CHECK(!strcmp(dl, "DOWNLOAD THIS MODEL"), "one model picked: the tile says %s", dl);
-        e->setParameter(e, param("Source"), 4.0f / 6);   /* IRs: the search runs by itself */
+        e->setParameter(e, param("Back Tile"), 1.0f); run(2); disp("View", pg);
+        CHECK(!strcmp(pg, "Library") && e->getParameter(e, ck1) > 0.1f, "Back didn't return to the library");
+        e->setParameter(e, param("Down Tile"), 1.0f); run(2); disp("Row 1", r1); disp("Page", pg);
+        printf("  down: %s, %s\n", r1, pg);
+        CHECK(!strcmp(r1, "Fake Tone 7") && !strcmp(pg, "2 / 5"), "Down didn't turn the page");
+        e->setParameter(e, param("Up Tile"), 1.0f); run(2); disp("Row 1", r1);   /* (a tile rests at 0: each tap = 1) */
+        e->setParameter(e, param("Up Tile"), 1.0f); run(2); disp("Row 1", t);
+        CHECK(!strcmp(t, "Fake Tone 25"), "Up didn't wrap to the last page (%s, %s)", r1, t);
+        e->setParameter(e, param("Search Tile"), 1.0f); run(2); disp("View", pg);
+        CHECK(!strcmp(pg, "Search") && e->getParameter(e, ck1) < 0.01f, "the search icon didn't open Search");
+        e->setParameter(e, param("Source"), 4.0f / 6);   /* IRs: back to the library, searching by itself */
         for (int k = 0; k < 50; k++) { run(1); disp("Row 1", r1); if (strstr(r1, "IRs")) break; usleep(100000); }
-        printf("  Source IRs: %s\n", r1);
-        CHECK(!strcmp(r1, "Fake IRs 1"), "a new Source didn't search (%s)", r1);
+        disp("View", pg); printf("  Source IRs: %s (%s)\n", r1, pg);
+        CHECK(!strcmp(r1, "Fake IRs 1") && !strcmp(pg, "Library"), "a new Source didn't search (%s)", r1);
     } else if (!getenv("T3K_TOKEN_FILE") || access(getenv("T3K_TOKEN_FILE"), R_OK)) {
         press("Sign In");
         const int ok = wait_for("activate", "internet", 20, t);

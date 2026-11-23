@@ -33,6 +33,7 @@ test)
 skin)   # the parameter list comes from the plugin's own table
   gcc -O2 -DVC_PARAMS -Wno-unused-function "${INC[@]}" "$HERE/src/t3k.c" -lm -lpthread -ldl -o "$B/gen-params"
   "$B/gen-params" > "$HERE/page/params.json"
+  python3 "$HERE/page/make_art.py" "$HERE/page"   # (the pictures and icons: drawn, not kept in git)
   "$REPO/tools/build_pages.sh" "$B" "$B/skin" "$HERE/page/" ;;
 bundle)
   [ -f "$B/TONE3000.so" ] && [ -d "$B/skin" ] || { echo "run ./build.sh arm and ./build.sh skin first" >&2; exit 1; }

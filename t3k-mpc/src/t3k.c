@@ -41,8 +41,15 @@ enum { kSource, kSort, kBrand, kStyle, kSignIn, kSignOut, kFind, kTone, kTonePre
        kStyleNext,
        /* the list-first page (Nov 2026, the user's ask): tone rows to tap, pages, big tap tiles (a "list" of one) */
        kPagePrev, kPageNext, kPage, kSel, kDl, kSignTile, kSignOutTile, kHelp1, kHelp2, kRow0,
-       kNumParams = kRow0 + 12 };
-#define ROWS (kNumParams - kRow0)
+       /* the HeadRush-style screen (Nov 2026, the user's ask, after its TONE3000 library): one page, four views
+        * (Library = 6 cards with gear pictures, Tone, Search, Account), a picture kind per card, nav tiles */
+       kView = kRow0 + 12, kHdr, kCardKind0, kSelKind = kCardKind0 + 6, kBack, kNav1, kNav2, kScrUp, kScrDn,
+       kNumParams };
+#define ROWS 6   /* cards a page: row_1..row_6 (row_7..row_12 are left from the list page, blank) */
+static const char *const VIEWS[] = {"Library", "Tone", "Search", "Account"};
+enum { V_LIB, V_TONE, V_SEARCH, V_ACCOUNT };
+/* a card's picture (option 0: none, so a hidden view draws nothing) */
+static const char *const KINDS[] = {"None", "Amp", "Full Rig", "Pedal", "IR", "Outboard", "Empty"};
 static const ParamDef P[kNumParams] = {
     OPT("source", "Source", SOURCES, 0), OPT("sort", "Sort", SORTS, 0), OPT("brand", "Brand", BRANDS, 0),
     OPT("style", "Style", STYLES, 0), BUTTON("signin", "Sign In"), BUTTON("signout", "Sign Out"), BUTTON("find", "Find"), PRESET("tone", "Tone"), BUTTON("tone_prev", "Tone <"), BUTTON("tone_next", "Tone >"),
@@ -56,6 +63,11 @@ static const ParamDef P[kNumParams] = {
     PRESET("row_1", "Row 1"), PRESET("row_2", "Row 2"), PRESET("row_3", "Row 3"), PRESET("row_4", "Row 4"),
     PRESET("row_5", "Row 5"), PRESET("row_6", "Row 6"), PRESET("row_7", "Row 7"), PRESET("row_8", "Row 8"),
     PRESET("row_9", "Row 9"), PRESET("row_10", "Row 10"), PRESET("row_11", "Row 11"), PRESET("row_12", "Row 12"),
+    OPT("view", "View", VIEWS, 0), PRESET("hdr", "Header"),
+    OPT("ck_1", "Card 1 Kind", KINDS, 0), OPT("ck_2", "Card 2 Kind", KINDS, 0), OPT("ck_3", "Card 3 Kind", KINDS, 0),
+    OPT("ck_4", "Card 4 Kind", KINDS, 0), OPT("ck_5", "Card 5 Kind", KINDS, 0), OPT("ck_6", "Card 6 Kind", KINDS, 0),
+    OPT("selk", "Tone Kind", KINDS, 0), PRESET("back_1", "Back Tile"), PRESET("nav_1", "Search Tile"),
+    PRESET("nav_2", "Account Tile"), PRESET("scr_1", "Up Tile"), PRESET("scr_2", "Down Tile"),
 };
 #define NBRANDS ((int)(sizeof BRANDS / sizeof *BRANDS))
 #define NSTYLES ((int)(sizeof STYLES / sizeof *STYLES))
@@ -71,6 +83,7 @@ typedef struct {
     volatile int automate[kNumParams], update_display;
     volatile int repaint[kNumParams];   /* tiles whose text changed: reported as a tiny change, then their value */
     int page;                           /* the tone rows' page (ROWS a page) */
+    int view;                           /* V_LIB.. */
     pthread_t th;
     pthread_mutex_t mu;
     pthread_cond_t cv;
@@ -190,12 +203,37 @@ static void say(Plugin *s, const char *a, const char *b) {
 }
 /* the tap tiles (tone rows, Download, Sign In / Out): a selected row rests at 1, everything else at 0; new text is
  * reported as a tiny change and then the value, so MPC repaints it */
-static int is_tile(int i) { return i >= kRow0 || i == kDl || i == kSignTile || i == kSignOutTile; }
+static int is_tile(int i) {
+    return (i >= kRow0 && i < kRow0 + 12) || i == kDl || i == kSignTile || i == kSignOutTile || (i >= kBack && i <= kScrDn);
+}
+static int kind_of(const Tone *t) {   /* the picture for a tone (TONE3000's gear) */
+    if (!strcmp(t->format, "ir") || !strcmp(t->gear, "ir")) return 4;
+    if (!strcmp(t->gear, "full-rig")) return 2;
+    if (!strcmp(t->gear, "pedal")) return 3;
+    if (!strcmp(t->gear, "outboard")) return 5;
+    return 1;
+}
+static void set_opt(Plugin *s, int i, int o, int n) {
+    const float v = n > 1 ? (float)o / (float)(n - 1) : 0;
+    if (v != s->norm[i]) { s->norm[i] = v; s->automate[i] = 1; }
+}
+static void tiles_changed(Plugin *s);
+static void go_view(Plugin *s, int v) { s->view = v; tiles_changed(s); }
 static void tiles_changed(Plugin *s) {
     pthread_mutex_lock(&s->mu);
     const int sel = s->tone - s->page * ROWS;
     pthread_mutex_unlock(&s->mu);
-    for (int r = 0; r < ROWS; r++) s->norm[kRow0 + r] = r == sel ? 1.0f : 0.0f;
+    for (int r = 0; r < 12; r++) s->norm[kRow0 + r] = r == sel && r < ROWS ? 1.0f : 0.0f;
+    /* the pictures: only in their own view (option 0 draws nothing) */
+    pthread_mutex_lock(&s->mu);
+    for (int c = 0; c < 6; c++) {
+        const int k = s->page * ROWS + c;
+        set_opt(s, kCardKind0 + c, s->view != V_LIB ? 0 : k < s->ntones ? kind_of(&s->tones[k]) : 6, 7);
+    }
+    set_opt(s, kSelKind, s->view == V_TONE ? (s->tone >= 0 && s->tone < s->ntones ? kind_of(&s->tones[s->tone]) : 6) : 0, 7);
+    pthread_mutex_unlock(&s->mu);
+    set_opt(s, kView, s->view, 4);
+    s->automate[kHdr] = 1;
     for (int i = 0; i < kNumParams; i++) if (is_tile(i)) s->repaint[i] = 2;
     s->automate[kPage] = s->automate[kSel] = s->automate[kInfo1] = s->automate[kInfo2] = s->automate[kInfo3] = 1;
     s->automate[kTone] = s->automate[kModel] = 1;
@@ -322,6 +360,7 @@ static void do_signin(Plugin *s) {
             pthread_mutex_lock(&s->mu);
             if (!s->job) s->job = J_FIND;
             pthread_mutex_unlock(&s->mu);
+            s->view = V_LIB;   /* (back to the library, which fills) */
             tiles_changed(s);
             return;
         }
@@ -391,7 +430,7 @@ static void fake_models(Plugin *s, const Tone *t) {
     say(s, "3 A2 models: tap DOWNLOAD", "");
 }
 static void do_find(Plugin *s) {
-    if (!s->access[0]) { say(s, "Not signed in", "ACCOUNT tab: press SIGN IN"); tiles_changed(s); return; }
+    if (!s->access[0]) { say(s, "Not signed in", "Tap the person icon, then SIGN IN"); tiles_changed(s); return; }
     if (getenv("T3K_FAKE_TONES")) { fake_find(s); return; }
     const int src = option_of(s->norm[kSource], 7), sort = option_of(s->norm[kSort], 4);
     const int brand = option_of(s->norm[kBrand], (int)(sizeof BRANDS / sizeof *BRANDS));
@@ -449,7 +488,7 @@ static void do_find(Plugin *s) {
     else {
         char a[64];
         snprintf(a, sizeof a, "%d tones found", n);
-        say(s, a, n ? "Tap a tone, then DOWNLOAD" : "Try another Brand or Style (FILTER tab)");
+        say(s, a, n ? "Tap a tone, then DOWNLOAD" : "Try another Brand or Style (search icon)");
     }
     if (n) { pthread_mutex_lock(&s->mu); s->job = s->job ? s->job : J_MODELS; pthread_mutex_unlock(&s->mu); }
 }
@@ -596,7 +635,7 @@ static void *worker(void *arg) {
         pthread_mutex_lock(&s->mu);
         if (!s->job) s->job = J_FIND;   /* (the list fills by itself) */
         pthread_mutex_unlock(&s->mu);
-    } else say(s, "Not signed in", "ACCOUNT tab: press SIGN IN");
+    } else say(s, "Not signed in", "Tap the person icon, then SIGN IN");
     tiles_changed(s);
     for (;;) {
         pthread_mutex_lock(&s->mu);
@@ -730,14 +769,25 @@ static void setParameter(AEffect *e, int32_t i, float v) {
         return;
     }
     case kStatus: case kStatus2: case kInfo1: case kInfo2: case kInfo3: case kPowered: case kSel: case kHelp1:
-    case kHelp2: return;   /* (read-only) */
+    case kHelp2: case kHdr: return;   /* (read-only) */
+    case kView: case kSelKind: case kCardKind0: case kCardKind0 + 1: case kCardKind0 + 2: case kCardKind0 + 3:
+    case kCardKind0 + 4: case kCardKind0 + 5: s->automate[i] = 1; return;   /* (ours: a restore changes nothing) */
     default:
         if (is_tile(i)) {   /* a tap toggles the tile from what it showed: any change is a press */
             const int tap = (v > 0.5f) != (s->norm[i] > 0.5f);
             s->automate[i] = 1;
             if (!tap) return;
-            if (i >= kRow0) { pthread_mutex_lock(&s->mu); const int t = s->page * ROWS + (i - kRow0); pthread_mutex_unlock(&s->mu); pick_tone(s, t); }
+            if (i >= kRow0 && i < kRow0 + ROWS) {   /* a card: the tone's page */
+                pthread_mutex_lock(&s->mu);
+                const int t = s->page * ROWS + (i - kRow0), ok = t < s->ntones;
+                pthread_mutex_unlock(&s->mu);
+                if (ok) { pick_tone(s, t); s->view = V_TONE; }
+            } else if (i >= kRow0 && i < kRow0 + 12) { /* (row_7..12: not on the page) */ }
             else if (i == kDl) { if (!s->busy) post(s, J_DOWNLOAD); }
+            else if (i == kBack) go_view(s, V_LIB);
+            else if (i == kNav1) go_view(s, s->view == V_SEARCH ? V_LIB : V_SEARCH);
+            else if (i == kNav2) go_view(s, s->view == V_ACCOUNT ? V_LIB : V_ACCOUNT);
+            else if (i == kScrUp || i == kScrDn) set_page(s, i == kScrUp ? -1 : 1);
             else if (i == kSignTile) post(s, J_SIGNIN);
             else sign_out(s);
             tiles_changed(s);
@@ -749,6 +799,7 @@ static void setParameter(AEffect *e, int32_t i, float v) {
             s->update_display = 1;
             if ((i == kSource || i == kSort || i == kBrand || i == kStyle) && s->norm[i] != was && s->access[0])
                 post(s, J_FIND);   /* (no Find press: the list follows the choices) */
+            if (i == kSource && s->view != V_LIB) go_view(s, V_LIB);
         }
     }
 }
@@ -783,10 +834,16 @@ static void display(Plugin *s, int i, char *t, int max) {
     case kPowered: snprintf(t, (size_t)max, "Powered by TONE3000"); break;
     case kPage: {
         const int np = (s->ntones + ROWS - 1) / ROWS;
-        if (np) snprintf(t, (size_t)max, "Page %d of %d  (%d tones)", s->page + 1, np, s->ntones);
-        else snprintf(t, (size_t)max, "No tones yet");
+        if (np) snprintf(t, (size_t)max, "%d / %d", s->page + 1, np);
+        else snprintf(t, (size_t)max, " ");
         break;
     }
+    case kHdr:
+        if (s->view == V_LIB) snprintf(t, (size_t)max, "%s", SOURCES[option_of(s->norm[kSource], 7)]);
+        else snprintf(t, (size_t)max, "%s", s->view == V_TONE ? "Tone" : s->view == V_SEARCH ? "Search" : "Account");
+        break;
+    case kBack: snprintf(t, (size_t)max, " "); break;
+    case kNav1: case kNav2: case kScrUp: case kScrDn: snprintf(t, (size_t)max, " "); break;
     case kSel: snprintf(t, (size_t)max, "%s", tn ? tn->title : "No tone picked"); break;
     case kDl:
         if (s->busy == J_DOWNLOAD) snprintf(t, (size_t)max, "DOWNLOADING...");
@@ -805,10 +862,11 @@ static void display(Plugin *s, int i, char *t, int max) {
     case kFind: snprintf(t, (size_t)max, "Find"); break;
     case kDownload: snprintf(t, (size_t)max, "Download"); break;
     default:
-        if (i >= kRow0) {
+        if (i >= kRow0 && i < kRow0 + 12) {
             const int k = s->page * ROWS + (i - kRow0);
-            if (k < s->ntones) snprintf(t, (size_t)max, "%s%s", s->tones[k].title, !strcmp(s->tones[k].format, "ir") ? " (IR)" : "");
-            else if (k == 0 && !s->access[0]) snprintf(t, (size_t)max, "Not signed in: ACCOUNT tab");
+            if (i >= kRow0 + ROWS) snprintf(t, (size_t)max, " ");
+            else if (k < s->ntones) snprintf(t, (size_t)max, "%s", s->tones[k].title);
+            else if (k == 0 && !s->access[0]) snprintf(t, (size_t)max, "Not signed in: tap the person icon");
             else if (k == 0 && s->busy == J_FIND) snprintf(t, (size_t)max, "Looking on TONE3000...");
             else snprintf(t, (size_t)max, " ");
         } else pdisplay(&P[i], s->norm[i], t);

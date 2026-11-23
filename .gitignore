@@ -15,3 +15,4 @@ ergo-mpc/build/
 enzo-mpc/build/
 chroma-mpc/build/
 t3k-mpc/build/
+t3k-mpc/page/*.png

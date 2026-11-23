@@ -1,0 +1,11 @@
+/* TONE3000 page: flat, HeadRush-like (after tools/pedal_look.css, so these win): no hammertone, thin cool lines,
+ * dark text windows, no drop shadows. */
+.plate { fill: var(--bg); filter: none; }
+.frame-border { fill: rgba(0, 0, 0, 0.2); stroke: rgba(120, 170, 220, 0.16); stroke-width: 1; filter: none; }
+.frame-rule { stroke: rgba(120, 170, 220, 0.14); }
+.frame-title { letter-spacing: 0.06em; filter: none; }
+.text, .box-label { filter: none; letter-spacing: 0.08em; }
+.box { fill: rgba(255, 255, 255, 0.035); stroke: none; filter: none; }
+.arrow-bg { fill: rgba(10, 22, 34, 0.9); }
+.seg-bg { filter: none; }
+.button-bg { filter: none; }
