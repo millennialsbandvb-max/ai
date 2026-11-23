@@ -417,6 +417,11 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   VST2 Plugins/, Other-Things-drive.zip. Checked: all 16 plugins and mpc-remote load under qemu with 3.10.1's
   libraries; the deploy scripts with stub systemctl. Device-untested: all of the runtime path, and mpc-buttons.so
   next to HAKAI's hakai_driver.so / mpc_cursor_devmode.so (both hook MIDI / DRM).
+  The user wants to boot straight into HAKAI (no stock Akai): autorun.sh now leaves HAKAI's launcher choice (Option 2:
+  /run/Hakai/launcher-mode "2" + launcher-mode.appchoice), so HAKAI's selector goes straight to its deploy (a file
+  `hakai-ask` at the drive's top brings the screen back); one "YES" to MPC's script prompt remains. 3.10.1's MPC has
+  an Enhancements option "Load Untrusted OS" (secure boot off) and a Developer Mode (SSH, unsigned autorun); a
+  persistent image for it was looked into but inspecting the image's signing was blocked here: ask the user first.
 - MPC drives: `/sdcard` is an internal SD card; the user's cards mount as `/media/<label>`.
 - Debugging only on the device needs a firmware round trip: write reports to every drive (see `mpc-remote/probe/`).
 - Blocked in this environment: publishing the image via Git LFS, running third-party tools cloned from the
