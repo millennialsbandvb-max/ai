@@ -422,6 +422,17 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   `hakai-ask` at the drive's top brings the screen back); one "YES" to MPC's script prompt remains. 3.10.1's MPC has
   an Enhancements option "Load Untrusted OS" (secure boot off) and a Developer Mode (SSH, unsigned autorun); a
   persistent image for it was looked into but inspecting the image's signing was blocked here: ask the user first.
+  **Our 3.10.1 image** (Nov 2026, the user's ask, approved; they left auto mode for the inspection):
+  `tools/build_3101_image.sh <Akai MPC-3.10.1-Gen1-update.img> <out> [sysroot]` (~1 min) = Akai's image + one boot
+  service (`/usr/lib/other-things/boot.sh`, `other-things-boot.service`, enabled in /etc multi-user.target.wants):
+  after acvs is up it finds a drive with `OtherThings/start.sh` ("MPC SSD" first; 3 min) and runs it (HAKAI's full
+  mode + our add-on, no prompt); `OtherThings/no-boot` on the drive skips it. Runtime layout: start.sh is the real
+  starter (in OtherThings/), the drive's root autorun.sh only calls it (for stock Akai; delete it with our image, or
+  the ScriptRunner asks too). Container: `nam-mpc/firmware/az01img.py` (info / extract / build / selftest, byte-exact
+  round trip): strings are u32 length + text + NUL padded to 4, partition length u64 at 0x110, SHA-1 at 0x140, data
+  at 0x154 (xz, CRC32, 24 MiB blocks), 20-byte EOF tail; no signature; Akai's az01-image --verify (qemu) passes.
+  rootfs ext4, ~21 MB free, /bin/sh is busybox (boot.sh tested under it). Device-untested; fallback: the Hakai
+  3.10.0 image.
 - MPC drives: `/sdcard` is an internal SD card; the user's cards mount as `/media/<label>`.
 - Debugging only on the device needs a firmware round trip: write reports to every drive (see `mpc-remote/probe/`).
 - Blocked in this environment: publishing the image via Git LFS, running third-party tools cloned from the

@@ -75,6 +75,7 @@ for f in sorted(os.listdir(os.path.join(extra, "bin"))):
     shutil.copy2(os.path.join(extra, "bin", f), os.path.join(OT, "bin", f))
 shutil.copy2(os.path.join(RT, "mpc-launch"), os.path.join(OT, "bin", "mpc-launch"))
 shutil.copy2(os.path.join(RT, "other-things-deploy.sh"), os.path.join(OT, "other-things-deploy.sh"))
+shutil.copy2(os.path.join(RT, "start.sh"), os.path.join(OT, "start.sh"))
 shutil.copy2(os.path.join(RT, "autorun.sh"), os.path.join(out, "autorun.sh"))
 need = ["mpc-remote", "mpc-buttons.so", "mpc-launch", "webin-feed", "debfetch", "wvfix", "browser-install.sh",
         "browser-run.sh", "browser-packages.txt", "browser-asoundrc"]

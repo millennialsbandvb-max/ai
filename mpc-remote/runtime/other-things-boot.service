@@ -1,0 +1,13 @@
+[Unit]
+Description=Other Things: HAKAI's full mode and our add-on at boot, from the drive (OtherThings/start.sh)
+After=acvs.service local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sh /usr/lib/other-things/boot.sh
+# (whatever HAKAI's start leaves running stays when boot.sh ends)
+RemainAfterExit=yes
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target
