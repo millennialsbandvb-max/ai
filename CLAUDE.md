@@ -436,7 +436,8 @@ Each plugin folder's `build.sh` has modes `host` (PC test build), `arm`, `skin` 
   Then (Nov 2026) the user wanted one image that does everything with just Update: back to the Hakai 3.10.0 full
   image (build_firmware.sh as before; fw357). The new HAKAI is 1.28 GB (Chrome, videos, Python) and can't go in an
   image, and 3.10.1's rootfs has ~21 MB free vs our ~39 MB. 3.10.1's az01-image reads the old v1 (FIT) format and
-  verifies our 3.10.0 image (qemu), so installing it from 3.10.1 should work.
+  verifies our 3.10.0 image (qemu). The user then installed the full 3.10.0 image and reported it working (Nov 2026;
+  fw358, with the HeadRush-copy TONE3000 page, came after and isn't device-tested yet).
 - MPC drives: `/sdcard` is an internal SD card; the user's cards mount as `/media/<label>`.
 - Debugging only on the device needs a firmware round trip: write reports to every drive (see `mpc-remote/probe/`).
 - Blocked in this environment: publishing the image via Git LFS, running third-party tools cloned from the
